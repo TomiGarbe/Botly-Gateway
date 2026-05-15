@@ -22,6 +22,13 @@ class SendMediaRequest(BaseModel):
     caption: str = ""
 
 
+class SendUploadedMediaRequest(BaseModel):
+    number: str
+    file_id: str
+    mediatype: Literal["image", "video", "audio", "document"]
+    caption: str = ""
+
+
 class ButtonItem(BaseModel):
     display_text: str
     id: str

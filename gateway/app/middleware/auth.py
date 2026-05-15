@@ -9,6 +9,7 @@ logger = get_logger(__name__)
 
 # Endpoints que no requieren auth (health check, webhooks de Evolution)
 _PUBLIC_PATHS = {"/health", "/webhooks/evolution"}
+_PUBLIC_PREFIXES = ("/media/upload/",)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -18,6 +19,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+        if any(request.url.path.startswith(prefix) for prefix in _PUBLIC_PREFIXES):
             return await call_next(request)
 
         api_key = request.headers.get("X-API-Key")

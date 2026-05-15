@@ -1,8 +1,8 @@
-"""
-Cliente HTTP para Evolution API v2.
-Todas las llamadas a Evolution pasan por acá — nunca desde los routers directamente.
-"""
+from __future__ import annotations
 
+import asyncio
+import random
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -13,23 +13,149 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _client() -> httpx.AsyncClient:
-    settings = get_settings()
-    return httpx.AsyncClient(
-        base_url=settings.evolution_url,
-        headers={"apikey": settings.evolution_api_key, "Content-Type": "application/json"},
-        timeout=30.0,
-    )
+@dataclass
+class EvolutionError(Exception):
+    message: str
+    status_code: int = 502
+    detail: Any | None = None
+    retryable: bool = False
+
+    def __str__(self) -> str:
+        return self.message
 
 
-async def _request(method: str, path: str, **kwargs) -> Any:
-    async with _client() as client:
-        response = await client.request(method, path, **kwargs)
-        response.raise_for_status()
-        return response.json()
+_client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
-# ── Instancias ────────────────────────────────────────────────────────────────
+def _build_timeout() -> httpx.Timeout:
+    return httpx.Timeout(connect=5.0, read=25.0, write=15.0, pool=5.0)
+
+
+async def get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is not None:
+        return _client
+
+    async with _client_lock:
+        if _client is None:
+            settings = get_settings()
+            _client = httpx.AsyncClient(
+                base_url=settings.evolution_url,
+                headers={"apikey": settings.evolution_api_key, "Content-Type": "application/json"},
+                timeout=_build_timeout(),
+            )
+    return _client
+
+
+async def close_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
+
+def _extract_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+
+    if isinstance(payload, dict):
+        for key in ("message", "detail", "error"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return response.text[:300] or f"HTTP {response.status_code}"
+
+
+async def _request(method: str, path: str, *, retries: int = 1, **kwargs) -> Any:
+    client = await get_client()
+
+    for attempt in range(retries + 1):
+        try:
+            response = await client.request(method, path, **kwargs)
+
+            if response.status_code >= 500 and attempt < retries:
+                backoff = 0.25 * (2**attempt) + random.uniform(0, 0.2)
+                logger.warning(
+                    "evolution_request_retry_server_error",
+                    method=method,
+                    path=path,
+                    status=response.status_code,
+                    attempt=attempt + 1,
+                    backoff=round(backoff, 3),
+                )
+                await asyncio.sleep(backoff)
+                continue
+
+            response.raise_for_status()
+            if response.content:
+                try:
+                    return response.json()
+                except Exception:
+                    return {"ok": True, "raw": response.text}
+            return {"ok": True}
+
+        except httpx.TimeoutException as exc:
+            retryable = attempt < retries
+            logger.warning(
+                "evolution_request_timeout",
+                method=method,
+                path=path,
+                attempt=attempt + 1,
+                retryable=retryable,
+            )
+            if retryable:
+                await asyncio.sleep(0.25 * (2**attempt))
+                continue
+            raise EvolutionError(
+                message=f"Evolution timeout on {method} {path}",
+                status_code=504,
+                retryable=True,
+            ) from exc
+
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            message = _extract_error_message(response)
+            retryable = response.status_code >= 500
+            logger.warning(
+                "evolution_request_http_error",
+                method=method,
+                path=path,
+                status=response.status_code,
+                message=message,
+                attempt=attempt + 1,
+            )
+            raise EvolutionError(
+                message=f"Evolution HTTP {response.status_code}: {message}",
+                status_code=response.status_code,
+                detail={"method": method, "path": path, "response": message},
+                retryable=retryable,
+            ) from exc
+
+        except httpx.HTTPError as exc:
+            retryable = attempt < retries
+            logger.warning(
+                "evolution_request_transport_error",
+                method=method,
+                path=path,
+                attempt=attempt + 1,
+                retryable=retryable,
+                error=str(exc),
+            )
+            if retryable:
+                await asyncio.sleep(0.25 * (2**attempt))
+                continue
+            raise EvolutionError(
+                message=f"Evolution transport error on {method} {path}: {exc}",
+                status_code=502,
+                retryable=True,
+            ) from exc
+
+
+# Instancias
+
 
 async def create_instance(instance_name: str, qrcode: bool = True, token: str | None = None) -> dict:
     payload: dict[str, Any] = {
@@ -39,40 +165,54 @@ async def create_instance(instance_name: str, qrcode: bool = True, token: str | 
     }
     if token:
         payload["token"] = token
-    logger.info("evolution.create_instance", instance=instance_name)
-    return await _request("POST", "/instance/create", json=payload)
+    logger.info("instance_create_requested", instance=instance_name)
+    return await _request("POST", "/instance/create", json=payload, retries=1)
 
 
 async def get_qr(instance_name: str) -> dict:
-    return await _request("GET", f"/instance/connect/{instance_name}")
+    return await _request("GET", f"/instance/connect/{instance_name}", retries=1)
 
 
 async def get_connection_state(instance_name: str) -> dict:
-    return await _request("GET", f"/instance/connectionState/{instance_name}")
+    return await _request("GET", f"/instance/connectionState/{instance_name}", retries=1)
 
 
 async def fetch_instances() -> list:
-    return await _request("GET", "/instance/fetchInstances")
+    return await _request("GET", "/instance/fetchInstances", retries=1)
+
+
+async def restart_instance(instance_name: str) -> dict:
+    logger.info("instance_restart_requested", instance=instance_name)
+    try:
+        return await _request("POST", f"/instance/restart/{instance_name}", retries=1)
+    except EvolutionError as exc:
+        # Algunas versiones usan PUT o no exponen este endpoint.
+        if exc.status_code in (404, 405):
+            logger.warning("instance_restart_fallback_put", instance=instance_name)
+            return await _request("PUT", f"/instance/restart/{instance_name}", retries=1)
+        raise
 
 
 async def logout_instance(instance_name: str) -> dict:
-    logger.info("evolution.logout_instance", instance=instance_name)
-    return await _request("DELETE", f"/instance/logout/{instance_name}")
+    logger.info("instance_logout_requested", instance=instance_name)
+    return await _request("DELETE", f"/instance/logout/{instance_name}", retries=1)
 
 
 async def delete_instance(instance_name: str) -> dict:
-    logger.warning("evolution.delete_instance", instance=instance_name)
-    return await _request("DELETE", f"/instance/delete/{instance_name}")
+    logger.warning("instance_delete_requested", instance=instance_name)
+    return await _request("DELETE", f"/instance/delete/{instance_name}", retries=1)
 
 
-# ── Mensajes ──────────────────────────────────────────────────────────────────
+# Mensajes
+
 
 async def send_text(instance_name: str, number: str, text: str) -> dict:
-    logger.info("evolution.send_text", instance=instance_name, to=number)
+    logger.info("text_send_requested", instance=instance_name, recipient=number)
     return await _request(
         "POST",
         f"/message/sendText/{instance_name}",
         json={"number": number, "text": text},
+        retries=0,
     )
 
 
@@ -87,18 +227,20 @@ async def send_media(
         "POST",
         f"/message/sendMedia/{instance_name}",
         json={"number": number, "mediatype": mediatype, "media": media_url, "caption": caption},
+        retries=0,
     )
 
 
 async def send_buttons(instance_name: str, payload: dict) -> dict:
-    return await _request("POST", f"/message/sendButtons/{instance_name}", json=payload)
+    return await _request("POST", f"/message/sendButtons/{instance_name}", json=payload, retries=0)
 
 
 async def send_list(instance_name: str, payload: dict) -> dict:
-    return await _request("POST", f"/message/sendList/{instance_name}", json=payload)
+    return await _request("POST", f"/message/sendList/{instance_name}", json=payload, retries=0)
 
 
-# ── Webhooks ──────────────────────────────────────────────────────────────────
+# Webhooks
+
 
 async def set_webhook(instance_name: str, url: str, events: list[str]) -> dict:
     payload = {
@@ -110,18 +252,20 @@ async def set_webhook(instance_name: str, url: str, events: list[str]) -> dict:
             "events": events,
         }
     }
-    return await _request("POST", f"/webhook/set/{instance_name}", json=payload)
+    return await _request("POST", f"/webhook/set/{instance_name}", json=payload, retries=1)
 
 
 async def get_webhook(instance_name: str) -> dict:
-    return await _request("GET", f"/webhook/find/{instance_name}")
+    return await _request("GET", f"/webhook/find/{instance_name}", retries=1)
 
 
-# ── Utilidades ────────────────────────────────────────────────────────────────
+# Utilidades
+
 
 async def check_whatsapp_numbers(instance_name: str, numbers: list[str]) -> list:
     return await _request(
         "POST",
         f"/chat/whatsappNumbers/{instance_name}",
         json={"numbers": numbers},
+        retries=0,
     )

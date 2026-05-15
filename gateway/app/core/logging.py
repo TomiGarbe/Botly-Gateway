@@ -14,6 +14,10 @@ def setup_logging(level: str = "info") -> None:
         stream=sys.stdout,
         level=log_level,
     )
+    # Reduce ruido de transporte HTTP y access logs en modo normal.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     structlog.configure(
         processors=[
@@ -34,4 +38,4 @@ def setup_logging(level: str = "info") -> None:
 
 
 def get_logger(name: str = __name__) -> Any:
-    return structlog.get_logger(name)
+    return structlog.get_logger(name).bind(logger=name)

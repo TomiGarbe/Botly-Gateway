@@ -3,38 +3,29 @@ import type { Instance, ConnectionStatus } from '../types'
 
 interface Props {
   instance: Instance
-  onQR:     (name: string) => void
+  onQR: (name: string) => void
   onLogout: (name: string) => void
   onDelete: (name: string) => void
 }
 
-function resolveInstance(inst: Instance) {
-  return {
-    name:   inst.instanceName ?? inst.instance?.instanceName ?? '—',
-    id:     inst.instanceId   ?? inst.instance?.instanceId   ?? '',
-    status: (inst.connectionStatus ?? inst.instance?.state  ?? inst.status ?? 'close') as ConnectionStatus,
-  }
-}
-
 const statusConfig: Record<ConnectionStatus, { label: string; dot: string; text: string }> = {
-  open:       { label: 'Conectado',    dot: 'bg-emerald-500',          text: 'text-emerald-400' },
-  connecting: { label: 'Conectando',   dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400' },
-  close:      { label: 'Desconectado', dot: 'bg-zinc-600',              text: 'text-zinc-500' },
+  open: { label: 'Conectado', dot: 'bg-emerald-500', text: 'text-emerald-400' },
+  connecting: { label: 'Conectando', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400' },
+  close: { label: 'Desconectado', dot: 'bg-zinc-600', text: 'text-zinc-500' },
 }
 
 export default function InstanceCard({ instance, onQR, onLogout, onDelete }: Props) {
-  const { name, id, status } = resolveInstance(instance)
+  const { name, id, status } = instance
   const cfg = statusConfig[status] ?? statusConfig.close
 
   return (
     <div className="group relative bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4 hover:border-zinc-700 transition-colors animate-fade-in">
-      {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{name}</p>
           {id && (
             <p className="text-xs text-zinc-600 font-mono mt-0.5 truncate">
-              {id.substring(0, 8)}…
+              {id.substring(0, 8)}...
             </p>
           )}
         </div>
@@ -45,15 +36,13 @@ export default function InstanceCard({ instance, onQR, onLogout, onDelete }: Pro
         </span>
       </div>
 
-      {/* Info row */}
       <div className="flex items-center gap-2 text-xs text-zinc-600">
-        {status === 'open'       && <Wifi size={12} className="text-emerald-600" />}
+        {status === 'open' && <Wifi size={12} className="text-emerald-600" />}
         {status === 'connecting' && <Loader2 size={12} className="animate-spin text-amber-500" />}
-        {status === 'close'      && <WifiOff size={12} />}
+        {status === 'close' && <WifiOff size={12} />}
         <span>WHATSAPP-BAILEYS</span>
       </div>
 
-      {/* Actions */}
       <div className="flex items-center gap-2 pt-1 border-t border-zinc-800">
         {status !== 'open' && (
           <button

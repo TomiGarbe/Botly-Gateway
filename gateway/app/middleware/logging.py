@@ -14,6 +14,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Loguea cada request con tenant/instancia, duración y status code."""
 
     async def dispatch(self, request: Request, call_next):
+        if request.url.path in {"/health", "/ready"}:
+            return await call_next(request)
+
         request_id = str(uuid.uuid4())[:8]
         start = time.perf_counter()
 
@@ -31,13 +34,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             path=request.url.path,
         )
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            logger.error("request_failed", duration_ms=duration_ms, error=str(exc))
+            raise
+        response.headers["X-Request-Id"] = request_id
 
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.info(
-            "request",
-            status=response.status_code,
-            duration_ms=duration_ms,
-        )
+        if response.status_code >= 500:
+            logger.error("request", status=response.status_code, duration_ms=duration_ms)
+        elif response.status_code >= 400:
+            logger.warning("request", status=response.status_code, duration_ms=duration_ms)
+        elif duration_ms >= 1200:
+            logger.info("request_slow", status=response.status_code, duration_ms=duration_ms)
+        else:
+            logger.debug("request", status=response.status_code, duration_ms=duration_ms)
 
         return response

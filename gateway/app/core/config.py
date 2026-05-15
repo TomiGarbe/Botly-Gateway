@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     gateway_api_key: str
     gateway_port: int = 9000
     log_level: str = "info"
+    debug: bool = False
 
     # Evolution API
     evolution_url: str = "http://evolution:8080"
@@ -15,10 +16,27 @@ class Settings(BaseSettings):
     # Bot (destino de los webhooks procesados)
     bot_webhook_url: str = ""
     bot_webhook_timeout: int = 5  # segundos
+    bot_webhook_retries: int = 3
+    bot_webhook_backoff_base_ms: int = 400
+    bot_webhook_max_parallel: int = 20
+    bot_webhook_max_queue: int = 200
+
+    dedupe_ttl_seconds: int = 180
+    dedupe_max_items: int = 20000
+    outbound_echo_ttl_seconds: int = 45
+    flood_window_seconds: int = 3
+    flood_max_messages: int = 12
+    webhook_event_retention: int = 2000
 
     # Rate limiting (slowapi usa strings "X/minute")
     rate_limit_default: str = "1000/minute"
     rate_limit_send_message: str = "20/second"
+    media_max_upload_mb: int = 25
+    media_allowed_mime_prefixes: str = "image/,video/,audio/,application/pdf,application/msword,application/vnd.openxmlformats-officedocument"
+    media_cache_dir: str = "/tmp/botly_media_cache"
+    media_cache_ttl_seconds: int = 3600
+    media_cache_max_files: int = 500
+    media_download_timeout: int = 30
 
     model_config = SettingsConfigDict(
         # En Docker las variables llegan por environment: en el compose.
