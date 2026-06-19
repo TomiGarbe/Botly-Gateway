@@ -132,7 +132,7 @@ def get_instance_key_info(instance_name: str, reveal: bool = False) -> dict[str,
         "maskedApiKey": None,
     }
     prefix = str(record.get("apiKeyPrefix") or "").strip()
-    if prefix:
+    if prefix and payload["hasApiKey"]:
         payload["maskedApiKey"] = f"{prefix}...****"
     if reveal:
         payload["apiKey"] = None

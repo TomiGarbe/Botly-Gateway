@@ -8,9 +8,114 @@ function cleanNumber(value: string): string {
   return value.replace(/[^0-9]/g, '')
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isLongLike(value: unknown): value is { low: unknown; high: unknown; unsigned: unknown } {
+  return isRecord(value) && 'low' in value && 'high' in value && 'unsigned' in value
+}
+
+function longLikeToBigInt(value: { low: unknown; high: unknown; unsigned: unknown }): bigint | null {
+  const low = Number(value.low)
+  const high = Number(value.high)
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null
+
+  let result = (BigInt(high >>> 0) << 32n) + BigInt(low >>> 0)
+  if (!value.unsigned && result >= 2n ** 63n) {
+    result -= 2n ** 64n
+  }
+  return result
+}
+
+function valueToText(value: unknown, fallback = '-'): string {
+  if (value === null || value === undefined || value === '') return fallback
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback
+  if (typeof value === 'boolean') return String(value)
+  if (typeof value === 'bigint') return value.toString()
+  if (isLongLike(value)) return longLikeToBigInt(value)?.toString() ?? fallback
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function valueToNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  if (isLongLike(value)) {
+    const parsed = longLikeToBigInt(value)
+    if (parsed !== null && parsed <= BigInt(Number.MAX_SAFE_INTEGER) && parsed >= BigInt(Number.MIN_SAFE_INTEGER)) {
+      return Number(parsed)
+    }
+  }
+  return fallback
+}
+
+function normalizeTimestamp(value: unknown): number {
+  const parsed = valueToNumber(value, Date.now())
+  if (!Number.isFinite(parsed) || parsed <= 0) return Date.now()
+  return parsed < 1_000_000_000_000 ? parsed * 1000 : parsed
+}
+
+function formatTimestamp(value: number): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString()
+}
+
+function sanitizeForJson(value: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'string') {
+    return value.length > 1200 ? `${value.slice(0, 1200)}... [truncated ${value.length - 1200} chars]` : value
+  }
+  if (typeof value !== 'object') return value
+  if (isLongLike(value)) {
+    return {
+      low: value.low,
+      high: value.high,
+      unsigned: value.unsigned,
+      value: longLikeToBigInt(value)?.toString() ?? null,
+    }
+  }
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= 10) return '[Max depth reached]'
+
+  seen.add(value)
+  if (Array.isArray(value)) return value.map(item => sanitizeForJson(item, seen, depth + 1))
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeForJson(item, seen, depth + 1)])
+  )
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(sanitizeForJson(value), null, 2)
+  } catch {
+    return valueToText(value, '{}')
+  }
+}
+
 type ConsoleDirection = 'incoming' | 'outgoing' | 'system'
 type EventKind = 'text' | 'media' | 'system' | 'error'
 type MessageMode = 'text' | 'audio' | 'image' | 'video' | 'file'
+
+type ConsoleMedia = {
+  id?: string
+  kind?: string
+  mimeType?: string
+  fileName?: string
+  fileSize?: string
+  duration?: string
+  caption?: string
+  isVoiceNote?: boolean
+  url?: string
+  directPath?: string
+  downloadSource?: string
+}
 
 type ConsoleItem = {
   id: string
@@ -22,7 +127,7 @@ type ConsoleItem = {
   messageType: string
   kind: EventKind
   text: string
-  media: PipelineEvent['media']
+  media: ConsoleMedia | null
   status: string
   fromBot: boolean
   fromMe: boolean
@@ -32,28 +137,46 @@ type ConsoleItem = {
   interaction: PipelineEvent['interaction']
   quotedPreview: string
   badges: string[]
+  raw: PipelineEvent
+}
+
+function mapMedia(media: PipelineEvent['media'], fallbackKind: string): ConsoleMedia | null {
+  if (!media) return null
+  return {
+    id: valueToText(media.id, ''),
+    kind: valueToText(media.kind ?? fallbackKind, fallbackKind),
+    mimeType: valueToText(media.mimeType, ''),
+    fileName: valueToText(media.fileName, ''),
+    fileSize: valueToText(media.fileSize, ''),
+    duration: valueToText(media.duration, ''),
+    caption: valueToText(media.caption, ''),
+    isVoiceNote: Boolean(media.isVoiceNote),
+    url: valueToText(media.url, ''),
+    directPath: valueToText(media.directPath, ''),
+    downloadSource: valueToText(media.downloadSource, ''),
+  }
 }
 
 function mapEvent(item: PipelineEvent, idx: number): ConsoleItem {
   const direction: ConsoleDirection =
     item.direction === 'outbound' ? 'outgoing' : item.direction === 'inbound' ? 'incoming' : 'system'
-  const messageType = String(item.messageType ?? item.message?.kind ?? item.event ?? 'unknown')
+  const messageType = valueToText(item.messageType ?? item.message?.kind ?? item.event, 'unknown')
   const hasMedia = Boolean(item.media)
-  const hasError = Boolean(item.error?.message) || /failed|error|dropped|throttled/i.test(String(item.status ?? item.pipeline?.status ?? ''))
+  const hasError = Boolean(item.error?.message) || /failed|error|dropped|throttled/i.test(valueToText(item.status ?? item.pipeline?.status, ''))
   const kind: EventKind = hasError ? 'error' : hasMedia ? 'media' : item.layer === 'operational' ? 'system' : 'text'
-  const status = String(item.status ?? item.pipeline?.status ?? 'ok')
-  const forwarding = String(item.forwarding?.status ?? item.pipeline?.stage ?? 'n/a')
-  const error = String(item.error?.message ?? (item.details?.error as string | undefined) ?? '')
+  const status = valueToText(item.status ?? item.pipeline?.status, 'ok')
+  const forwarding = valueToText(item.forwarding?.status ?? item.pipeline?.stage, 'n/a')
+  const error = valueToText(item.error?.message ?? item.details?.error, '')
   const contentText =
     typeof item.text === 'string'
       ? item.text
       : typeof item.content === 'string'
         ? item.content
-        : typeof item.content === 'object' && item.content && 'text' in (item.content as Record<string, unknown>)
-          ? String((item.content as Record<string, unknown>).text ?? '')
+        : isRecord(item.content) && 'text' in item.content
+          ? valueToText(item.content.text, '')
           : ''
-  const selectedTitle = String(item.interaction?.title ?? '').trim()
-  const selectedId = String(item.interaction?.id ?? '').trim()
+  const selectedTitle = valueToText(item.interaction?.title, '').trim()
+  const selectedId = valueToText(item.interaction?.id, '').trim()
   const interactionLabel = selectedTitle || selectedId
   const badges: string[] = []
   if (item.metadata?.ephemeral) badges.push('ephemeral')
@@ -65,46 +188,47 @@ function mapEvent(item: PipelineEvent, idx: number): ConsoleItem {
 
   let richPreview = ''
   if (messageType === 'reaction') {
-    const emoji = typeof item.content === 'object' && item.content ? String((item.content as Record<string, unknown>).emoji ?? '') : ''
+    const emoji = isRecord(item.content) ? valueToText(item.content.emoji, '') : ''
     const removed = Boolean(item.metadata?.removeReaction)
     richPreview = removed ? 'Reaction removed' : `Reaction: ${emoji || '(empty)'}`
   } else if (messageType === 'location') {
-    const c = (typeof item.content === 'object' && item.content ? (item.content as Record<string, unknown>) : {}) as Record<string, unknown>
-    const lat = c.latitude ?? '-'
-    const lon = c.longitude ?? '-'
+    const c = isRecord(item.content) ? item.content : {}
+    const lat = valueToText(c.latitude)
+    const lon = valueToText(c.longitude)
     richPreview = `Location: ${lat}, ${lon}${item.metadata?.liveLocation ? ' (live)' : ''}`
   } else if (messageType === 'contact') {
-    const c = (typeof item.content === 'object' && item.content ? (item.content as Record<string, unknown>) : {}) as Record<string, unknown>
+    const c = isRecord(item.content) ? item.content : {}
     const contacts = Array.isArray(c.contacts) ? c.contacts : []
     richPreview = `Contacts: ${contacts.length}`
   } else if (messageType === 'poll_create') {
-    const c = (typeof item.content === 'object' && item.content ? (item.content as Record<string, unknown>) : {}) as Record<string, unknown>
+    const c = isRecord(item.content) ? item.content : {}
     richPreview = `Poll: ${String(c.title ?? '')} · options:${Array.isArray(c.options) ? c.options.length : 0}`
   } else if (messageType === 'poll_update') {
-    const c = (typeof item.content === 'object' && item.content ? (item.content as Record<string, unknown>) : {}) as Record<string, unknown>
+    const c = isRecord(item.content) ? item.content : {}
     richPreview = `Poll vote update: ${Array.isArray(c.selectedOptions) ? c.selectedOptions.length : 0}`
   }
 
   return {
-    id: String(item.id ?? item.message?.id ?? `${item.timestamp}-${idx}`),
-    timestamp: Number(item.timestamp ?? Date.now()),
-    instance: String(item.instance ?? 'unknown'),
+    id: valueToText(item.id ?? item.message?.id ?? `${valueToText(item.timestamp, 'event')}-${idx}`, `event-${idx}`),
+    timestamp: normalizeTimestamp(item.timestamp),
+    instance: valueToText(item.instance, 'unknown'),
     direction,
-    sender: String(item.sender ?? item.message?.from ?? '-'),
-    recipient: String(item.recipient ?? '-'),
+    sender: valueToText(item.sender ?? item.message?.from),
+    recipient: valueToText(item.recipient),
     messageType,
     kind,
     text: interactionLabel || richPreview || contentText,
-    media: item.media,
+    media: mapMedia(item.media, messageType),
     status,
-    fromBot: Boolean(item.fromBot) || String(item.event).startsWith('FORWARD_'),
+    fromBot: Boolean(item.fromBot) || valueToText(item.event, '').startsWith('FORWARD_'),
     fromMe: Boolean(item.fromMe ?? item.message?.fromMe),
     forwarding,
     error,
-    requestId: String(item.meta?.requestId ?? item.pipeline?.requestId ?? ''),
+    requestId: valueToText(item.meta?.requestId ?? item.pipeline?.requestId, ''),
     interaction: item.interaction,
-    quotedPreview: String(item.context?.quoted?.preview ?? ''),
+    quotedPreview: valueToText(item.context?.quoted?.preview, ''),
     badges,
+    raw: item,
   }
 }
 
@@ -180,6 +304,7 @@ export default function MediaLab({
   const [onlyErrors, setOnlyErrors] = useState(false)
   const [limit, setLimit] = useState(400)
   const [clearedAt, setClearedAt] = useState(0)
+  const [expandedJson, setExpandedJson] = useState<Record<string, boolean>>({})
   const listRef = useRef<HTMLDivElement | null>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
 
@@ -532,6 +657,9 @@ export default function MediaLab({
 
         <div ref={listRef} className="space-y-2 max-h-[640px] overflow-auto pr-1">
           {items.map(item => {
+            const eventKey = `${item.instance}:${item.id}:${item.timestamp}`
+            const jsonIsOpen = Boolean(expandedJson[eventKey])
+            const interactionType = valueToText(item.interaction?.interactionType, '')
             const tone =
               item.kind === 'error'
                 ? 'bg-red-950/30 border-red-900/50'
@@ -542,17 +670,17 @@ export default function MediaLab({
                     : 'bg-zinc-950/70 border-zinc-800'
 
             return (
-              <div key={`${item.id}-${item.timestamp}`} className={`border rounded p-2.5 ${tone}`}>
+              <div key={eventKey} className={`border rounded p-2.5 ${tone}`}>
                 <div className="flex items-center justify-between text-[11px] text-zinc-400 gap-2">
                   <span>{item.instance}</span>
-                  <span>{new Date(item.timestamp).toLocaleString()}</span>
+                  <span>{formatTimestamp(item.timestamp)}</span>
                 </div>
                 <p className="text-[11px] text-zinc-500 mt-1">
                   {item.direction.toUpperCase()} · {item.messageType} · status:{item.status} · fwd:{item.forwarding}
                 </p>
-                {item.interaction?.interactionType ? (
+                {item.interaction && interactionType ? (
                   <p className="text-[11px] text-cyan-300 mt-1 break-all">
-                    interactive: {item.interaction.interactionType}
+                    interactive: {interactionType}
                     {item.interaction.id ? ` · id:${item.interaction.id}` : ''}
                     {item.interaction.title ? ` · title:${item.interaction.title}` : ''}
                   </p>
@@ -573,6 +701,20 @@ export default function MediaLab({
                 ) : null}
                 {item.error ? <p className="text-[11px] text-red-300 mt-1 break-all">error: {item.error}</p> : null}
                 {item.requestId ? <p className="text-[11px] text-zinc-500 mt-1 break-all">request: {item.requestId}</p> : null}
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedJson(current => ({ ...current, [eventKey]: !current[eventKey] }))}
+                    className="px-2 py-1 text-[11px] rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  >
+                    {jsonIsOpen ? 'Ocultar JSON' : 'Ver JSON'}
+                  </button>
+                </div>
+                {jsonIsOpen ? (
+                  <pre className="mt-2 max-h-80 overflow-auto rounded border border-zinc-800 bg-black/40 p-2 text-[11px] text-zinc-200 whitespace-pre-wrap break-words">
+                    {formatJson(item.raw)}
+                  </pre>
+                ) : null}
               </div>
             )
           })}

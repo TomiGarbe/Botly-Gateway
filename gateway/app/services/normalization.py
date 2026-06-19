@@ -1,8 +1,11 @@
 ﻿from __future__ import annotations
 
+import json
+import hashlib
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
@@ -60,6 +63,8 @@ _media_index: dict[str, dict[str, Any]] = {}
 _business_event_keys_order: deque[str] = deque()
 _business_event_keys: set[str] = set()
 _business_event_keys_max = max(1000, _settings.webhook_event_retention * 3)
+_media_index_dir = Path(_settings.media_cache_dir) / "media_index"
+_media_index_dir.mkdir(parents=True, exist_ok=True)
 
 STATUS_ALIASES = {
     "pending": "sent",
@@ -166,6 +171,52 @@ def _ensure_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _to_int64(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned.lstrip("-").isdigit():
+            return int(cleaned)
+        return None
+    if isinstance(value, dict) and {"low", "high", "unsigned"}.issubset(value.keys()):
+        try:
+            low = int(value.get("low") or 0)
+            high = int(value.get("high") or 0)
+            unsigned = bool(value.get("unsigned"))
+            result = (high << 32) + (low & 0xFFFFFFFF)
+            if not unsigned and result >= 2**63:
+                result -= 2**64
+            return result
+        except Exception:
+            return None
+    return None
+
+
+def _stable_media_id(*, media_key_name: str, raw: dict[str, Any], kind: str) -> str:
+    identity = {
+        "mediaKeyName": media_key_name,
+        "kind": kind,
+        "directPath": raw.get("directPath"),
+        "fileEncSha256": raw.get("fileEncSha256"),
+        "fileSha256": raw.get("fileSha256"),
+        "mediaKey": raw.get("mediaKey"),
+        "url": raw.get("url"),
+    }
+    has_identity = any(value is not None and str(value).strip() for value in identity.values())
+    if not has_identity:
+        return str(uuid.uuid4())
+    fingerprint = json.dumps(identity, ensure_ascii=True, sort_keys=True, default=str)
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+    return str(uuid.UUID(digest[:32]))
+
+
 def _as_dict_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, dict):
         return [value]
@@ -252,10 +303,10 @@ def _extract_media(message: dict[str, Any], kind: str) -> dict[str, Any] | None:
     raw = message.get(media_key_name) or {}
     direct_path = str(raw.get("directPath") or "").strip()
     url = str(raw.get("url") or "").strip()
-    media_id = str(uuid.uuid4())
+    media_id = _stable_media_id(media_key_name=media_key_name, raw=raw, kind=kind)
     dimensions = {
-        "width": raw.get("width"),
-        "height": raw.get("height"),
+        "width": _to_int64(raw.get("width")),
+        "height": _to_int64(raw.get("height")),
     }
     if dimensions["width"] is None and dimensions["height"] is None:
         dimensions = None
@@ -264,11 +315,11 @@ def _extract_media(message: dict[str, Any], kind: str) -> dict[str, Any] | None:
         "kind": kind,
         "mimeType": raw.get("mimetype"),
         "fileName": raw.get("fileName"),
-        "fileSize": raw.get("fileLength"),
+        "fileSize": _to_int64(raw.get("fileLength")),
         "mediaKey": raw.get("mediaKey"),
         "fileSha256": raw.get("fileSha256"),
         "fileEncSha256": raw.get("fileEncSha256"),
-        "duration": raw.get("seconds"),
+        "duration": _to_int64(raw.get("seconds")),
         "caption": raw.get("caption"),
         "url": url,
         "directPath": direct_path,
@@ -811,6 +862,7 @@ def save_event(normalized: dict[str, Any]) -> None:
             "messageKey": key_obj,
             "messageObject": message_obj,
         }
+        _persist_media_index_item(str(media.get("id") or ""), _media_index[str(media.get("id"))])
         logger.info(
             "media_index_store",
             instance=normalized.get("instance"),
@@ -914,6 +966,21 @@ def get_media(media_id: str, *, instance: str | None = None) -> dict[str, Any] |
         )
         return item
 
+    persisted = _load_persisted_media_index_item(key)
+    if persisted and (not instance or persisted.get("instance") == instance):
+        _media_index[key] = persisted
+        logger.info(
+            "media_index_lookup",
+            instance=instance or persisted.get("instance"),
+            lookup_key=key,
+            stored_key=key,
+            message_id=persisted.get("messageId"),
+            media_id=persisted.get("id"),
+            found=True,
+            source="disk",
+        )
+        return persisted
+
     logger.info(
         "media_index_lookup",
         instance=instance,
@@ -929,7 +996,41 @@ def get_media(media_id: str, *, instance: str | None = None) -> dict[str, Any] |
 def update_media_download_state(media_id: str, *, source: str, decrypted_size: int | None = None) -> None:
     item = _media_index.get(media_id)
     if not isinstance(item, dict):
-        return
+        item = _load_persisted_media_index_item(media_id)
+        if not isinstance(item, dict):
+            return
+        _media_index[media_id] = item
     item["downloadSource"] = source
     if decrypted_size is not None:
         item["decryptedSize"] = decrypted_size
+    _persist_media_index_item(media_id, item)
+
+
+def _media_index_path(media_id: str) -> Path:
+    return _media_index_dir / f"{media_id}.json"
+
+
+def _persist_media_index_item(media_id: str, item: dict[str, Any]) -> None:
+    if not media_id:
+        return
+    try:
+        path = _media_index_path(media_id)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(item, ensure_ascii=True), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception as exc:
+        logger.warning("media_index_persist_failed", media_id=media_id, error=str(exc))
+
+
+def _load_persisted_media_index_item(media_id: str) -> dict[str, Any] | None:
+    if not media_id:
+        return None
+    path = _media_index_path(media_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("media_index_load_failed", media_id=media_id, error=str(exc))
+        return None
+    return payload if isinstance(payload, dict) else None

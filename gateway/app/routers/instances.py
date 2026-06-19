@@ -227,13 +227,12 @@ async def delete(instance_name: str):
 async def get_instance_api_key(instance_name: str, request: Request, reveal: bool = Query(default=False)):
     instance_name = _validate_instance_name(instance_name)
     auth_instance = getattr(request.state, "auth_instance", None)
-    is_admin = bool(getattr(request.state, "is_admin", False))
     if auth_instance and auth_instance != instance_name:
         raise HTTPException(status_code=403, detail="Token no autorizado para esta instancia")
-    if reveal and not is_admin:
-        raise HTTPException(status_code=403, detail="Solo admin puede revelar API key completa")
+    if reveal:
+        raise HTTPException(status_code=403, detail="No se permite revelar API keys completas")
     ensure_instance_key(instance_name, instance_id=instance_name)
-    return get_instance_key_info(instance_name, reveal=reveal)
+    return get_instance_key_info(instance_name, reveal=False)
 
 
 @router.post("/{instance_name}/api-key/regenerate")

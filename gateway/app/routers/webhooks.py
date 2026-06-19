@@ -151,6 +151,53 @@ async def _forward_to_instance_webhooks(payload: dict[str, Any], request_id: str
                 )
 
 
+def _resolve_public_gateway_base_url() -> str:
+    configured = (settings.public_base_url or "").strip().rstrip("/")
+    if configured:
+        return configured
+    return f"http://127.0.0.1:{settings.gateway_port}".rstrip("/")
+
+
+def _with_gateway_media_url(normalized: dict[str, Any]) -> dict[str, Any] | None:
+    media = normalized.get("media")
+    if not isinstance(media, dict):
+        return media if isinstance(media, dict) else None
+    media_id = str(media.get("id") or "").strip()
+    instance = str(normalized.get("instance") or "").strip()
+    if not media_id or not instance:
+        return dict(media)
+    gateway_media_url = f"{_resolve_public_gateway_base_url()}/instances/{instance}/media/{media_id}"
+    return {
+        **media,
+        "gateway_media_url": gateway_media_url,
+        "gatewayMediaUrl": gateway_media_url,
+        "proxy_url": gateway_media_url,
+        "proxyUrl": gateway_media_url,
+    }
+
+
+def _extract_contact_name_for_bot(normalized: dict[str, Any]) -> str | None:
+    message = normalized.get("message") if isinstance(normalized.get("message"), dict) else {}
+    context = normalized.get("context") if isinstance(normalized.get("context"), dict) else {}
+    chat = context.get("chat") if isinstance(context.get("chat"), dict) else {}
+    raw_payload = normalized.get("raw") if isinstance(normalized.get("raw"), dict) else {}
+    raw_data = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else {}
+
+    candidates = [
+        message.get("pushName"),
+        chat.get("participantName"),
+        raw_data.get("pushName"),
+        normalized.get("contactName"),
+        normalized.get("pushName"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            cleaned = " ".join(candidate.split()).strip()
+            if cleaned:
+                return cleaned
+    return None
+
+
 def _to_bot_payload(normalized: dict[str, Any]) -> dict[str, Any] | None:
     if normalized.get("layer") != "business":
         return None
@@ -164,6 +211,8 @@ def _to_bot_payload(normalized: dict[str, Any]) -> dict[str, Any] | None:
     else:
         return None
 
+    contact_name = _extract_contact_name_for_bot(normalized)
+
     return {
         "id": normalized.get("id"),
         "type": normalized_type,
@@ -176,9 +225,12 @@ def _to_bot_payload(normalized: dict[str, Any]) -> dict[str, Any] | None:
         "messageId": normalized.get("messageId"),
         "sender": normalized.get("sender"),
         "recipient": normalized.get("recipient"),
+        "contactName": contact_name,
+        "pushName": contact_name,
         "text": normalized.get("text"),
         "content": normalized.get("content"),
-        "media": normalized.get("media"),
+        "message": normalized.get("message"),
+        "media": _with_gateway_media_url(normalized),
         "status": normalized.get("status"),
         "metadata": normalized.get("metadata"),
         "context": normalized.get("context"),

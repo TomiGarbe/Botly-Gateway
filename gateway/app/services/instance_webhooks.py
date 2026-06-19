@@ -148,13 +148,32 @@ def _public_webhook(record: dict[str, Any], reveal_secrets: bool = False) -> dic
 
     for key, value in auth.items():
         if key in {"token", "apiKey", "password"} and not reveal_secrets:
-            safe_auth[key] = _mask_secret(str(value))
-            safe_auth[f"{key}Masked"] = _mask_secret(str(value))
+            safe_auth[key] = ""
+            safe_auth[f"has{key[:1].upper()}{key[1:]}"] = bool(str(value or "").strip())
         else:
             safe_auth[key] = value
 
     item["authConfig"] = safe_auth
     return item
+
+
+def _merge_auth_config_update(
+    *,
+    previous_auth_type: str,
+    previous_auth_config: dict[str, Any],
+    next_auth_type: str,
+    next_auth_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    incoming = _sanitize_auth_config(next_auth_config or {})
+    if previous_auth_type != next_auth_type:
+        return incoming
+
+    previous = _sanitize_auth_config(previous_auth_config)
+    merged = dict(incoming)
+    for secret_key in ("token", "apiKey", "password"):
+        if not str(merged.get(secret_key) or "").strip() and str(previous.get(secret_key) or "").strip():
+            merged[secret_key] = previous[secret_key]
+    return merged
 
 
 def list_instance_webhooks(instance_name: str, reveal_secrets: bool = False) -> list[dict[str, Any]]:
@@ -256,7 +275,12 @@ def update_webhook(
                     "url": url,
                     "enabled": enabled,
                     "authType": auth_type,
-                    "authConfig": auth_config or {},
+                    "authConfig": _merge_auth_config_update(
+                        previous_auth_type=str(item.get("authType") or "NONE").upper(),
+                        previous_auth_config=item.get("authConfig") if isinstance(item.get("authConfig"), dict) else {},
+                        next_auth_type=str(auth_type or "NONE").upper(),
+                        next_auth_config=auth_config,
+                    ),
                     "customHeaders": custom_headers or {},
                     "eventFilters": event_filters if isinstance(event_filters, dict) else item.get("eventFilters"),
                     "updatedAt": _now_iso(),

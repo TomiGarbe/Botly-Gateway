@@ -24,6 +24,10 @@ interface FormState {
 
 const AUTH_OPTIONS: WebhookAuthType[] = ['NONE', 'BEARER', 'API_KEY', 'BASIC', 'CUSTOM_HEADERS']
 
+function authString(value: string | boolean | undefined, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
 function parseHeaders(text: string): Record<string, string> {
   const trimmed = text.trim()
   if (!trimmed) return {}
@@ -44,13 +48,19 @@ function toForm(item?: InstanceWebhook): FormState {
     url: item?.url || '',
     enabled: item?.enabled ?? true,
     authType: item?.authType || 'NONE',
-    token: auth.token || '',
-    apiKeyHeader: auth.headerName || 'x-api-key',
-    apiKey: auth.apiKey || '',
-    username: auth.username || '',
-    password: auth.password || '',
+    token: '',
+    apiKeyHeader: authString(auth.headerName, 'x-api-key'),
+    apiKey: '',
+    username: authString(auth.username),
+    password: '',
     customHeadersText: JSON.stringify(item?.customHeaders || {}, null, 2),
   }
+}
+
+function hasStoredSecret(item: InstanceWebhook | null, key: 'token' | 'apiKey' | 'password'): boolean {
+  const auth = item?.authConfig || {}
+  const marker = `has${key.charAt(0).toUpperCase()}${key.slice(1)}`
+  return Boolean(auth[marker] || auth[key])
 }
 
 export default function WebhooksManager({ config, instances, onToast }: Props) {
@@ -102,14 +112,26 @@ export default function WebhooksManager({ config, instances, onToast }: Props) {
     try {
       const customHeaders = parseHeaders(form.customHeadersText)
       const authConfig: Record<string, string> = {}
-      if (form.authType === 'BEARER') authConfig.token = form.token.trim()
+      if (form.authType === 'BEARER') {
+        const token = form.token.trim()
+        if (!editingId && !token) throw new Error('Bearer token es obligatorio.')
+        if (!token && !hasStoredSecret(editing, 'token')) throw new Error('Bearer token es obligatorio.')
+        if (token) authConfig.token = token
+      }
       if (form.authType === 'API_KEY') {
         authConfig.headerName = form.apiKeyHeader.trim() || 'x-api-key'
-        authConfig.apiKey = form.apiKey.trim()
+        const apiKey = form.apiKey.trim()
+        if (!editingId && !apiKey) throw new Error('API key es obligatoria.')
+        if (!apiKey && !hasStoredSecret(editing, 'apiKey')) throw new Error('API key es obligatoria.')
+        if (apiKey) authConfig.apiKey = apiKey
       }
       if (form.authType === 'BASIC') {
         authConfig.username = form.username
-        authConfig.password = form.password
+        const password = form.password.trim()
+        if (!form.username.trim()) throw new Error('Username es obligatorio.')
+        if (!editingId && !password) throw new Error('Password es obligatorio.')
+        if (!password && !hasStoredSecret(editing, 'password')) throw new Error('Password es obligatorio.')
+        if (password) authConfig.password = password
       }
 
       setSaving(true)
@@ -307,17 +329,17 @@ export default function WebhooksManager({ config, instances, onToast }: Props) {
           {AUTH_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
         </select>
 
-        {form.authType === 'BEARER' && <input value={form.token} onChange={e => setForm(v => ({ ...v, token: e.target.value }))} placeholder="Bearer token" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />}
+        {form.authType === 'BEARER' && <input value={form.token} onChange={e => setForm(v => ({ ...v, token: e.target.value }))} placeholder={editing ? 'Dejar vacio para conservar el token actual' : 'Bearer token'} type="password" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />}
         {form.authType === 'API_KEY' && (
           <>
             <input value={form.apiKeyHeader} onChange={e => setForm(v => ({ ...v, apiKeyHeader: e.target.value }))} placeholder="Header name" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
-            <input value={form.apiKey} onChange={e => setForm(v => ({ ...v, apiKey: e.target.value }))} placeholder="API key" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
+            <input value={form.apiKey} onChange={e => setForm(v => ({ ...v, apiKey: e.target.value }))} placeholder={editing ? 'Dejar vacio para conservar la API key actual' : 'API key'} type="password" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
           </>
         )}
         {form.authType === 'BASIC' && (
           <>
             <input value={form.username} onChange={e => setForm(v => ({ ...v, username: e.target.value }))} placeholder="Username" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
-            <input value={form.password} onChange={e => setForm(v => ({ ...v, password: e.target.value }))} placeholder="Password" type="password" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
+            <input value={form.password} onChange={e => setForm(v => ({ ...v, password: e.target.value }))} placeholder={editing ? 'Dejar vacio para conservar el password actual' : 'Password'} type="password" className="bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm" />
           </>
         )}
 

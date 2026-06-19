@@ -134,6 +134,7 @@ export interface PipelineEvent {
     messageId?: string
   }
   details?: Record<string, unknown>
+  raw?: unknown
   metadata?: {
     hasLocation?: boolean
     hasContacts?: boolean
@@ -158,7 +159,7 @@ export interface InstanceWebhook {
   url: string
   enabled: boolean
   authType: WebhookAuthType
-  authConfig: Record<string, string>
+  authConfig: Record<string, string | boolean>
   customHeaders: Record<string, string>
   eventFilters?: {
     business?: boolean

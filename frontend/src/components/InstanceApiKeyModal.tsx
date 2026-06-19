@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Copy, Eye, EyeOff, KeyRound, RefreshCcw, ShieldOff, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, KeyRound, RefreshCcw, ShieldOff, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { GatewayConfig } from '../lib/config'
 import type { InstanceApiKey } from '../types'
@@ -15,7 +15,7 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
   const [data, setData] = useState<InstanceApiKey | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [revealed, setRevealed] = useState<string | null>(null)
+  const apiKeyPreview = data?.maskedApiKey || 'No disponible'
 
   const load = async () => {
     setLoading(true)
@@ -32,32 +32,12 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
     load()
   }, [])
 
-  const copyKey = async (value: string | null | undefined) => {
-    if (!value) return
-    await navigator.clipboard.writeText(value)
-    onToast('API key copiada', 'success')
-  }
-
-  const reveal = async () => {
-    setBusy(true)
-    try {
-      const payload = await api.instances.getApiKey(config, instanceName, true)
-      setData(payload)
-      setRevealed(payload.apiKey ?? null)
-    } catch (error) {
-      onToast(error instanceof ApiError ? error.message : 'No se pudo revelar API key', 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const regenerate = async () => {
     if (!confirm(`Regenerar API key de "${instanceName}"?\n\nLas integraciones actuales dejaran de funcionar inmediatamente.`)) return
     setBusy(true)
     try {
       const payload = await api.instances.regenerateApiKey(config, instanceName)
       setData(payload)
-      setRevealed(payload.apiKey ?? null)
       onToast('API key regenerada', 'success')
     } catch (error) {
       onToast(error instanceof ApiError ? error.message : 'No se pudo regenerar API key', 'error')
@@ -72,7 +52,6 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
     try {
       const payload = await api.instances.revokeApiKey(config, instanceName)
       setData(payload)
-      setRevealed(null)
       onToast('API key revocada', 'success')
     } catch (error) {
       onToast(error instanceof ApiError ? error.message : 'No se pudo revocar API key', 'error')
@@ -86,7 +65,6 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
     try {
       const payload = await api.instances.enableApiKey(config, instanceName)
       setData(payload)
-      setRevealed(payload.apiKey ?? null)
       onToast('API key habilitada', 'success')
     } catch (error) {
       onToast(error instanceof ApiError ? error.message : 'No se pudo habilitar API key', 'error')
@@ -94,8 +72,6 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
       setBusy(false)
     }
   }
-
-  const shown = revealed || data?.maskedApiKey || 'sin clave'
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -109,12 +85,15 @@ export default function InstanceApiKeyModal({ config, instanceName, onClose, onT
           {loading ? <p className="text-sm text-zinc-400">Cargando...</p> : (
             <>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3">
-                <p className="text-xs text-zinc-500 mb-2">Authorization header</p>
-                <p className="text-sm font-mono break-all">Bearer {shown}</p>
-                <div className="mt-3 flex items-center gap-2">
-                  <button disabled={busy} onClick={reveal} className="px-2.5 py-1.5 text-xs border border-zinc-700 rounded-md hover:border-zinc-600 disabled:opacity-50 flex items-center gap-1">{revealed ? <EyeOff size={12} /> : <Eye size={12} />}{revealed ? 'Ocultar' : 'Revelar'}</button>
-                  <button disabled={busy || !revealed} onClick={() => copyKey(revealed)} className="px-2.5 py-1.5 text-xs border border-zinc-700 rounded-md hover:border-zinc-600 disabled:opacity-50 flex items-center gap-1"><Copy size={12} />Copiar</button>
-                </div>
+                <p className="text-xs text-zinc-500 mb-2">API key</p>
+                <p className="text-sm text-zinc-300">
+                  {data?.hasApiKey ? 'Generada. La clave completa no se muestra desde el panel.' : 'Sin clave generada.'}
+                </p>
+                {data?.hasApiKey && (
+                  <p className="mt-2 text-sm font-mono text-zinc-200 break-all">
+                    {apiKeyPreview}
+                  </p>
+                )}
               </div>
               <div className="text-xs text-zinc-500 space-y-1">
                 <p>Estado: <span className={data?.enabled ? 'text-emerald-400' : 'text-red-400'}>{data?.enabled ? 'habilitada' : 'revocada'}</span></p>

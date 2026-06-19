@@ -48,8 +48,7 @@ def _check_instance_scope(request: Request, instance_name: str) -> None:
 async def list_webhooks(instance_name: str, request: Request):
     name = _validate_instance_name(instance_name)
     _check_instance_scope(request, name)
-    reveal = bool(getattr(request.state, "is_admin", False))
-    return {"items": list_instance_webhooks(name, reveal_secrets=reveal)}
+    return {"items": list_instance_webhooks(name, reveal_secrets=False)}
 
 
 @router.post("")
