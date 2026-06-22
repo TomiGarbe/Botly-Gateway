@@ -1,4 +1,6 @@
 from functools import lru_cache
+import re
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,10 +12,12 @@ class Settings(BaseSettings):
     log_level: str = "info"
     debug: bool = False
     cors_allowed_origins: str = (
+        "https://panel-evolution.botly.com.ar,"
         "http://localhost:5174,"
-        "http://127.0.0.1:5174,"
-        "https://panel-evolution.botly.com.ar"
+        "http://127.0.0.1:5174"
     )
+    cors_allow_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    cors_debug: bool = False
 
     # Evolution API
     evolution_url: str = "http://evolution:8080"
@@ -63,19 +67,26 @@ class Settings(BaseSettings):
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         origins: list[str] = []
-        seen: set[str] = set()
-
-        for raw_origin in self.cors_allowed_origins.split(","):
-            origin = raw_origin.strip()
-            if not origin:
-                continue
-            if origin.endswith("/"):
-                origin = origin.rstrip("/")
-            if origin not in seen:
+        for item in self.cors_allowed_origins.split(","):
+            origin = item.strip().rstrip("/")
+            if origin and origin not in origins:
                 origins.append(origin)
-                seen.add(origin)
-
         return origins
+
+    def is_cors_origin_allowed(self, origin: str | None) -> bool:
+        value = str(origin or "").strip().rstrip("/")
+        if not value:
+            return False
+        if "*" in self.cors_allowed_origins_list:
+            return True
+        if value in self.cors_allowed_origins_list:
+            return True
+        if self.cors_allow_origin_regex:
+            try:
+                return re.fullmatch(self.cors_allow_origin_regex, value) is not None
+            except re.error:
+                return False
+        return False
 
 
 @lru_cache
