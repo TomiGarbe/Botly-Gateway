@@ -1,14 +1,105 @@
 export type ConnectionStatus = 'open' | 'connecting' | 'close'
+export type ConnectionType = 'baileys' | 'cloud'
+export type LifecycleState =
+  | 'provisioning'
+  | 'configured'
+  | 'connected'
+  | 'warning'
+  | 'disconnected'
+  | 'token_expired'
+  | 'webhook_invalid'
+  | 'needs_attention'
+  | 'failed'
+export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+export type DiagnosticSeverity = 'error' | 'warning' | 'recommendation' | 'info'
+export type CoexistenceState = 'not_available' | 'available' | 'enabled' | 'pending' | 'failed' | 'unknown'
+
+export type CreateConnectionPayload =
+  | {
+      connectionType: 'baileys'
+      instanceName: string
+    }
+  | {
+      connectionType: 'cloud_embedded'
+      instanceName: string
+      code: string
+      phoneNumberId: string
+      businessAccountId: string
+      sessionInfo: Record<string, unknown>
+      coexistenceRequested?: boolean
+    }
+  | {
+      connectionType: 'cloud'
+      instanceName: string
+      accessToken: string
+      phoneNumberId: string
+      businessId: string
+    }
+
+export interface MetaSignupConfig {
+  enabled: boolean
+  app_id?: string | null
+  config_id?: string | null
+  graph_version: string
+  supports_coexistence: boolean
+  coexistence_feature_type: string
+  missing: string[]
+}
 
 export interface Instance {
   id: string
   name: string
   status: ConnectionStatus
+  connectionType?: ConnectionType
+  integration?: string
+  lifecycleState?: LifecycleState
+  health?: HealthStatus
+  coexistence?: CoexistenceInfo
+  healthChecks?: HealthCheck[]
+  diagnostics?: ConnectionDiagnostic[]
   profileName?: string
   phone?: string
   avatarUrl?: string
   lastSeen?: string
   createdAt?: string
+}
+
+export interface CoexistenceInfo {
+  state: CoexistenceState
+  whatsappBusinessAppAvailable: boolean
+  cloudApiActive: boolean
+  featureType?: string
+  expectedWebhookEvents?: string[]
+  reason?: string
+}
+
+export interface HealthCheck {
+  code: string
+  label: string
+  status: 'passed' | 'warning' | 'failed' | 'unknown'
+  required: boolean
+  details?: string
+}
+
+export interface ConnectionDiagnostic {
+  code: string
+  severity: DiagnosticSeverity
+  message: string
+  recommendation?: string
+  action?: string
+}
+
+export interface ConnectionDiagnosticsResponse {
+  id: string
+  name: string
+  connectionType?: ConnectionType
+  integration?: string
+  status: ConnectionStatus
+  lifecycleState?: LifecycleState
+  health?: HealthStatus
+  healthChecks?: HealthCheck[]
+  diagnostics?: ConnectionDiagnostic[]
+  supportDiagnostics?: ConnectionDiagnostic[]
 }
 
 export interface InstanceApiKey {

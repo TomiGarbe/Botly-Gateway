@@ -14,13 +14,14 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import instances, messages, webhooks, media, instance_webhooks
-from app.services import evolution
+from app.routers import instances, messages, webhooks, media, instance_webhooks, meta_signup
+from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
 
 settings = get_settings()
 setup_logging(settings.log_level)
 logger = get_logger(__name__)
+_connection_manager = get_connection_manager()
 
 # Rate limiter - usa IP como clave por defecto
 limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
@@ -29,7 +30,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_lim
 async def _startup_recovery() -> None:
     logger.info("[BOOT][INIT] startup recovery begin")
     try:
-        fetched = await evolution.fetch_instances()
+        fetched = await _connection_manager.list_instances()
     except Exception as exc:
         logger.warning("startup_recovery_failed_fetch_instances", error=str(exc))
         return
@@ -65,11 +66,13 @@ async def lifespan(app: FastAPI):
         "[BOOT][VOLUMES] gateway persistence paths",
         instance_api_keys_path=settings.instance_api_keys_path,
         instance_webhooks_path=settings.instance_webhooks_path,
+        connection_metadata_path=settings.connection_metadata_path,
+        official_credentials_path=settings.official_credentials_path,
         media_cache_dir=settings.media_cache_dir,
     )
     logger.info("[BOOT][MIGRATIONS] gateway has no DB migrations at startup")
     logger.info("[BOOT][WEBHOOKS] instance webhook registry bootstrap", storage_path=settings.instance_webhooks_path)
-    await evolution.get_client()
+    await _connection_manager.open_default()
     try:
         await _startup_recovery()
     except Exception as exc:
@@ -77,7 +80,7 @@ async def lifespan(app: FastAPI):
         raise
     yield
     await webhooks.shutdown_forward_workers()
-    await evolution.close_client()
+    await _connection_manager.close_default()
     logger.info("gateway_stopped")
 
 
@@ -101,6 +104,7 @@ api.include_router(messages.router)
 api.include_router(webhooks.router)
 api.include_router(media.router)
 api.include_router(instance_webhooks.router)
+api.include_router(meta_signup.router)
 
 
 @api.get("/health", tags=["system"])
@@ -111,7 +115,7 @@ async def health():
 @api.get("/ready", tags=["system"])
 async def ready():
     try:
-        data = await evolution.fetch_instances()
+        data = await _connection_manager.list_instances()
         count = len(data) if isinstance(data, list) else 0
         return {"status": "ready", "service": "evolution-gateway", "instances": count}
     except Exception as exc:

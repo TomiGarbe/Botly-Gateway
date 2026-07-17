@@ -1,4 +1,4 @@
-import { LayoutGrid, MessageSquare, Webhook, Settings, Zap } from 'lucide-react'
+import { Inbox, LayoutGrid, MessageSquare, Settings, Zap } from 'lucide-react'
 
 interface Props {
   onOpenSettings: () => void
@@ -7,9 +7,9 @@ interface Props {
 }
 
 const navItems = [
-  { icon: LayoutGrid, label: 'Instancias', view: 'instances' as const },
+  { icon: LayoutGrid, label: 'Conexiones', view: 'instances' as const },
   { icon: MessageSquare, label: 'Mensajes', view: 'messages' as const },
-  { icon: Webhook, label: 'Webhooks', view: 'webhooks' as const },
+  { icon: Inbox, label: 'Actividad', view: 'webhooks' as const },
 ]
 
 export default function Sidebar({ onOpenSettings, view, onChangeView }: Props) {
@@ -21,7 +21,7 @@ export default function Sidebar({ onOpenSettings, view, onChangeView }: Props) {
           <Zap size={14} className="text-white" />
         </div>
         <span className="font-semibold text-sm tracking-tight">
-          Botly <span className="text-zinc-500">Evolution</span>
+          Botly <span className="text-zinc-500">WhatsApp</span>
         </span>
       </div>
 

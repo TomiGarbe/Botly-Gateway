@@ -30,8 +30,8 @@ _fake_structlog = ModuleType("structlog")
 _fake_structlog.get_logger = lambda *args, **kwargs: _FakeLogger()
 sys.modules.setdefault("structlog", _fake_structlog)
 
-from app.services.event_pipeline import process_incoming_webhook, settings
-from app.services.group_messages import group_message_audit_context, is_group_message
+from app.services.event_pipeline import process_incoming_webhook, settings  # noqa: E402
+from app.services.group_messages import group_message_audit_context, is_group_message  # noqa: E402
 
 
 def _group_payload() -> dict:

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.core.logging import get_logger
 from app.models.requests import WebhookConfigRequest, WebhookEnabledRequest
+from app.services.audit import audit_event
 from app.services.instance_webhooks import (
     build_auth_headers,
     create_webhook,
@@ -70,6 +71,13 @@ async def create_webhook_route(instance_name: str, request: Request, body: Webho
         event_filters=body.eventFilters,
     )
     logger.info("webhook_create", instance=name, webhook_id=item["id"], auth_type=item["authType"])
+    audit_event(
+        "instance_webhook_created",
+        instance=name,
+        webhookId=item["id"],
+        authType=item["authType"],
+        enabled=item["enabled"],
+    )
     return item
 
 
@@ -91,6 +99,13 @@ async def update_webhook_route(instance_name: str, webhook_id: str, request: Req
     if not item:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
     logger.info("webhook_update", instance=name, webhook_id=webhook_id, auth_type=item["authType"], enabled=item["enabled"])
+    audit_event(
+        "instance_webhook_updated",
+        instance=name,
+        webhookId=webhook_id,
+        authType=item["authType"],
+        enabled=item["enabled"],
+    )
     return item
 
 
@@ -101,6 +116,7 @@ async def set_enabled_route(instance_name: str, webhook_id: str, request: Reques
     item = set_webhook_enabled(name, webhook_id, enabled=body.enabled)
     if not item:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
+    audit_event("instance_webhook_enabled_changed", instance=name, webhookId=webhook_id, enabled=item["enabled"])
     return item
 
 
@@ -111,6 +127,7 @@ async def set_filters_route(instance_name: str, webhook_id: str, request: Reques
     item = set_webhook_filters(name, webhook_id, body)
     if not item:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
+    audit_event("instance_webhook_filters_updated", instance=name, webhookId=webhook_id)
     return item
 
 
@@ -122,6 +139,7 @@ async def delete_webhook_route(instance_name: str, webhook_id: str, request: Req
     if not ok:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
     logger.info("webhook_delete", instance=name, webhook_id=webhook_id)
+    audit_event("instance_webhook_deleted", instance=name, webhookId=webhook_id)
     return {"ok": True}
 
 

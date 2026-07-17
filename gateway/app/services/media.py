@@ -12,11 +12,12 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from app.connections import get_connection_manager
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.services import evolution
 
 logger = get_logger(__name__)
+_connection_manager = get_connection_manager()
 _cleanup_lock = asyncio.Lock()
 _uploaded_files: dict[str, dict[str, str | int]] = {}
 
@@ -216,7 +217,7 @@ async def get_decrypted_media_bytes(metadata: dict[str, Any]) -> tuple[bytes, di
         }
     message_object = metadata.get("messageObject") if isinstance(metadata.get("messageObject"), dict) else {}
     convert_to_mp4 = kind == "video"
-    base64_payload = await evolution.get_base64_from_media_message(
+    base64_payload = await _connection_manager.get_base64_from_media_message(
         instance,
         message_key=message_key,
         message_object=message_object,

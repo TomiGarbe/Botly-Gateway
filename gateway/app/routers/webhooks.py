@@ -4,6 +4,7 @@ Evolution hace POST aca, el gateway lo procesa y lo reenvia al bot.
 """
 
 import asyncio
+import json
 import uuid
 from typing import Any
 
@@ -20,6 +21,7 @@ from app.services.normalization import list_events, save_pipeline_event
 from app.services.webhook_delivery import dispatch_webhook_with_retry
 from app.services.webhook_delivery import diagnose_webhook_target
 from app.services.evolution_auth import auth_runtime_snapshot, extract_evolution_auth, validate_evolution_auth
+from app.services.audit import audit_event
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -258,10 +260,14 @@ async def receive_webhook(request: Request):
     Responde 200 inmediatamente y procesa de forma asincrona.
     """
 
+    raw_body = await request.body()
     try:
-        payload: dict[str, Any] = await request.json()
+        payload_raw = json.loads(raw_body.decode("utf-8") or "{}")
+        if not isinstance(payload_raw, dict):
+            raise ValueError("expected object")
+        payload: dict[str, Any] = payload_raw
     except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Body JSON invalido")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Body JSON invalido. Envia un objeto JSON de webhook.")
     request_id = str(uuid.uuid4())[:12]
     instance = str(payload.get("instance", "unknown"))
     source_ip = request.client.host if request.client else "unknown"
@@ -337,7 +343,8 @@ async def receive_webhook(request: Request):
             )
         elif not provided_key:
             logger.warning("evolution_webhook_auth_missing", instance=instance, source=provided_source)
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Webhook auth missing")
+            audit_event("webhook_auth_failed", instance=instance, reason="missing_credentials", source=provided_source)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Autenticacion de webhook ausente. Configura la API key de Evolution para este endpoint.")
         else:
             logger.warning(
                 "evolution_webhook_auth_failed",
@@ -347,7 +354,8 @@ async def receive_webhook(request: Request):
                 expected_global_prefix=auth_validation["expectedGlobalPrefix"],
                 expected_instance_prefix=auth_validation["expectedInstancePrefix"],
             )
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Webhook auth failed")
+            audit_event("webhook_auth_failed", instance=instance, reason="invalid_credentials", source=provided_source)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Autenticacion de webhook invalida. Revisa la API key configurada en Evolution.")
     else:
         logger.info("evolution_webhook_auth_success", instance=instance, source=provided_source, mode=auth_validation["mode"])
 
@@ -355,7 +363,6 @@ async def receive_webhook(request: Request):
     logger.info("[OUTBOUND][WEBHOOK] evolution webhook received", request_id=request_id, instance=instance, source_event=payload.get("event"))
     pipeline_result = process_incoming_webhook(payload, request_id)
     normalized = pipeline_result.get("normalized") or {}
-    event = str(normalized.get("event") or payload.get("event") or "UNKNOWN")
 
     if pipeline_result.get("status") == "ignored_technical":
         logger.debug(

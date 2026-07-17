@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.services.instance_auth import authenticate_instance_token
+from app.services.audit import audit_event
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     ip=request.client.host if request.client else "unknown",
                     token_prefix=bearer_token[:8],
                 )
-                return JSONResponse(status_code=401, content={"detail": "Bearer token invalido o revocado"})
+                audit_event("auth_failed", path=request.url.path, reason="invalid_or_revoked_token", ip=request.client.host if request.client else "unknown")
+                return JSONResponse(status_code=401, content={"detail": "Token invalido o revocado. Genera una nueva API Key para la instancia."})
 
             path_instance = self._path_instance(request.url.path)
             if path_instance and path_instance != auth["instance"]:
@@ -86,10 +88,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     token_instance=auth["instance"],
                     path_instance=path_instance,
                 )
-                return JSONResponse(status_code=403, content={"detail": "Token no autorizado para esta instancia"})
+                audit_event("auth_failed", path=request.url.path, reason="instance_mismatch", tokenInstance=auth["instance"], pathInstance=path_instance)
+                return JSONResponse(status_code=403, content={"detail": "Token no autorizado para esta instancia. Usa la API Key correspondiente."})
 
             if request.url.path.startswith("/instances/") and not path_instance:
-                return JSONResponse(status_code=403, content={"detail": "Token de instancia no puede acceder a recursos globales"})
+                return JSONResponse(status_code=403, content={"detail": "Token de instancia no puede acceder a recursos globales. Usa la clave admin del gateway."})
 
             request.state.auth_mode = "instance"
             request.state.auth_instance = auth["instance"]
@@ -112,7 +115,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 ip=request.client.host if request.client else "unknown",
             )
+        audit_event("auth_failed", path=request.url.path, reason="missing_or_invalid_admin_credentials", ip=request.client.host if request.client else "unknown")
         return JSONResponse(
             status_code=401,
-            content={"detail": "Credenciales ausentes o invalidas. Usa X-API-Key o Authorization: Bearer <token>"},
+            content={"detail": "Credenciales ausentes o invalidas. Usa X-API-Key admin o Authorization: Bearer con una API Key de instancia."},
         )

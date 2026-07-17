@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
-import { Plus, RefreshCw, Server } from 'lucide-react'
+import { MessageCircle, Plus, RefreshCw } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import InstanceCard from './components/InstanceCard'
+import ConnectionDetails from './components/ConnectionDetails'
 import QRModal from './components/QRModal'
 import CreateModal from './components/CreateModal'
 import SettingsModal from './components/SettingsModal'
@@ -11,7 +12,7 @@ import InstanceApiKeyModal from './components/InstanceApiKeyModal'
 import WebhooksManager from './components/WebhooksManager'
 import { api, ApiError } from './lib/api'
 import { loadConfig, type GatewayConfig } from './lib/config'
-import type { Toast } from './types'
+import type { CreateConnectionPayload, Toast } from './types'
 
 function Toasts({ toasts, remove }: { toasts: Toast[]; remove: (id: string) => void }) {
   return (
@@ -39,18 +40,18 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 gap-5">
       <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center">
-        <Server size={28} className="text-zinc-600" />
+        <MessageCircle size={28} className="text-zinc-600" />
       </div>
       <div className="text-center">
-        <p className="font-semibold text-zinc-200">Sin instancias</p>
-        <p className="text-sm text-zinc-500 mt-1">Crea una instancia para vincular un numero de WhatsApp</p>
+        <p className="font-semibold text-zinc-200">Sin conexiones</p>
+        <p className="text-sm text-zinc-500 mt-1">Crea una conexion para vincular un numero de WhatsApp</p>
       </div>
       <button
         onClick={onAdd}
         className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
       >
         <Plus size={15} />
-        Nueva instancia
+        Nueva conexion
       </button>
     </div>
   )
@@ -64,6 +65,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [apiKeyTarget, setApiKeyTarget] = useState<string | null>(null)
   const [view, setView] = useState<'instances' | 'messages' | 'webhooks'>('instances')
+  const [selectedConnection, setSelectedConnection] = useState<string | null>(null)
 
   useEffect(() => {
     if (!config.apiKey) setShowSettings(true)
@@ -91,12 +93,16 @@ export default function App() {
     }
   )
 
-  const handleCreate = useCallback(async (name: string) => {
-    await api.instances.create(config, name)
-    addToast(`Instancia "${name}" creada`, 'success')
+  const handleCreate = useCallback(async (payload: CreateConnectionPayload) => {
+    const created = payload.connectionType === 'cloud_embedded'
+      ? await api.metaSignup.complete(config, payload)
+      : await api.instances.create(config, payload)
+    addToast(`Conexion "${payload.instanceName}" creada`, 'success')
     await mutate()
     setShowCreate(false)
-    setQrTarget(name)
+    if (created.connectionType !== 'cloud') {
+      setQrTarget(payload.instanceName)
+    }
   }, [config, mutate, addToast])
 
   const handleLogout = useCallback(async (name: string) => {
@@ -111,10 +117,11 @@ export default function App() {
   }, [config, mutate, addToast])
 
   const handleDelete = useCallback(async (name: string) => {
-    if (!confirm(`Eliminar la instancia "${name}"?\n\nEsta accion no se puede deshacer.`)) return
+    if (!confirm(`Eliminar la conexion "${name}"?\n\nEsta accion no se puede deshacer.`)) return
     try {
       await api.instances.delete(config, name)
-      addToast(`Instancia "${name}" eliminada`, 'success')
+      addToast(`Conexion "${name}" eliminada`, 'success')
+      setSelectedConnection(current => current === name ? null : current)
       mutate()
     } catch (e) {
       addToast(e instanceof ApiError ? e.message : 'Error al eliminar', 'error')
@@ -127,7 +134,18 @@ export default function App() {
     mutate()
   }, [addToast, mutate])
 
+  const handleReconnect = useCallback(async (name: string) => {
+    try {
+      await api.instances.reconnect(config, name)
+      addToast(`"${name}" reconectando`, 'success')
+      mutate()
+    } catch (e) {
+      addToast(e instanceof ApiError ? e.message : 'No se pudo reconectar', 'error')
+    }
+  }, [config, mutate, addToast])
+
   const list = Array.isArray(instances) ? instances : []
+  const selectedInstance = selectedConnection ? list.find(item => item.name === selectedConnection) || null : null
 
   return (
     <div className="flex min-h-screen">
@@ -136,10 +154,10 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="flex items-center justify-between px-8 h-14 border-b border-zinc-800 shrink-0">
           <div>
-            <h1 className="font-semibold text-sm">{view === 'instances' ? 'Instancias' : view === 'messages' ? 'Mensajes' : 'Webhooks'}</h1>
+            <h1 className="font-semibold text-sm">{view === 'instances' ? 'Conexiones' : view === 'messages' ? 'Mensajes' : 'Actividad'}</h1>
             {!isLoading && view === 'instances' && (
               <p className="text-xs text-zinc-500 mt-0.5">
-                {list.length} {list.length === 1 ? 'instancia' : 'instancias'} totales
+                {list.length} {list.length === 1 ? 'conexion' : 'conexiones'} totales
               </p>
             )}
           </div>
@@ -159,7 +177,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
                 >
                   <Plus size={13} />
-                  Nueva instancia
+                  Nueva conexion
                 </button>
               </>
             ) : null}
@@ -185,7 +203,7 @@ export default function App() {
             </div>
           ) : !config.apiKey ? (
             <div className="flex flex-col items-center justify-center py-24 gap-4">
-              <p className="text-zinc-500 text-sm">Configura el gateway para empezar</p>
+              <p className="text-zinc-500 text-sm">Configura el panel para empezar</p>
               <button
                 onClick={() => setShowSettings(true)}
                 className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
@@ -193,20 +211,32 @@ export default function App() {
                 Abrir configuracion
               </button>
             </div>
+          ) : selectedInstance ? (
+            <ConnectionDetails
+              config={config}
+              instance={selectedInstance}
+              onBack={() => setSelectedConnection(null)}
+              onToast={addToast}
+              onRefresh={() => void mutate()}
+              onQR={setQrTarget}
+              onReconnect={handleReconnect}
+              onApiKey={setApiKeyTarget}
+              onDelete={handleDelete}
+            />
           ) : list.length === 0 ? (
             <EmptyState onAdd={() => setShowCreate(true)} />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
               {list.map(inst => (
                 <InstanceCard
                   key={inst.id}
                   instance={inst}
-                  config={config}
-                  onToast={addToast}
+                  onOpenDetails={setSelectedConnection}
                   onQR={setQrTarget}
                   onLogout={handleLogout}
                   onDelete={handleDelete}
-                  onApiKey={setApiKeyTarget}
+                  onReconnect={handleReconnect}
+                  onRefresh={() => void mutate()}
                 />
               ))}
             </div>
@@ -224,6 +254,7 @@ export default function App() {
       )}
       {showCreate && (
         <CreateModal
+          config={config}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />

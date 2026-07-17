@@ -4,10 +4,11 @@ import re
 import time
 from typing import Any
 
+from app.connections import get_connection_manager
 from app.core.config import get_settings
-from app.services import evolution
 
 _TOKEN_CACHE: dict[str, Any] = {"expiresAt": 0.0, "byInstance": {}}
+_connection_manager = get_connection_manager()
 
 
 def _mask_prefix(value: str, size: int = 8) -> str:
@@ -56,7 +57,7 @@ async def _instance_tokens() -> dict[str, str]:
     now = time.time()
     if now < float(_TOKEN_CACHE["expiresAt"] or 0):
         return dict(_TOKEN_CACHE["byInstance"])
-    items = await evolution.fetch_instances()
+    items = await _connection_manager.list_instances()
     by_instance: dict[str, str] = {}
     if isinstance(items, list):
         for item in items:
