@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 
+from app.connections import get_connection_manager
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.requests import (
@@ -18,13 +19,13 @@ from app.models.requests import (
     SendUploadedMediaRequest,
     SendMessageRequest,
 )
-from app.services import evolution
 from app.services.media import consume_uploaded_file, file_to_base64, get_uploaded_file
 from app.services.normalization import save_business_event, save_event, save_pipeline_event
 from app.services.reliability import mark_outbound
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["messages"])
+_connection_manager = get_connection_manager()
 _MEDIA_TYPES = {"image", "audio", "video", "document", "file", "pdf"}
 
 
@@ -171,7 +172,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                     raise HTTPException(status_code=422, detail="text es obligatorio para type=text")
                 _log_message_start(instance_name, "text", number)
                 logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
-                result = await evolution.send_text(instance_name, number, text.strip())
+                result = await _connection_manager.send_text(instance_name, number, text.strip())
                 _persist_local_outbound_event(
                     instance_name=instance_name,
                     number=number,
@@ -197,7 +198,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                 logger.error("upload_fail", instance=instance_name, error=str(exc))
                 raise HTTPException(status_code=413, detail=str(exc)) from exc
 
-            result = await evolution.send_media(
+            result = await _connection_manager.send_media(
                 instance_name=instance_name,
                 number=number,
                 media_payload=media_base64,
@@ -230,7 +231,7 @@ async def _send_message_unified(instance_name: str, request: Request):
         if msg_type == "text":
             _log_message_start(instance_name, "text", number, payload.metadata)
             logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
-            result = await evolution.send_text(instance_name, number, (payload.text or "").strip())
+            result = await _connection_manager.send_text(instance_name, number, (payload.text or "").strip())
             _persist_local_outbound_event(
                 instance_name=instance_name,
                 number=number,
@@ -248,7 +249,7 @@ async def _send_message_unified(instance_name: str, request: Request):
         normalized_media_type = _normalize_media_type(msg_type, "application/octet-stream")
         media_payload = (payload.mediaUrl or "").strip() or (payload.base64 or "").strip()
         _log_message_start(instance_name, normalized_media_type, number, payload.metadata)
-        result = await evolution.send_media(
+        result = await _connection_manager.send_media(
             instance_name=instance_name,
             number=number,
             media_payload=media_payload,
@@ -275,10 +276,11 @@ async def _send_message_unified(instance_name: str, request: Request):
         return result
     except HTTPException:
         raise
-    except evolution.EvolutionError as exc:
-        logger.error("evolution_fail", instance=instance_name, error=str(exc))
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except Exception as exc:
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            logger.error("evolution_fail", instance=instance_name, error=str(exc))
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         logger.warning("invalid_payload", instance=instance_name, error=str(exc))
         raise HTTPException(status_code=422, detail=f"Payload invalido: {exc}") from exc
 
@@ -304,7 +306,7 @@ async def send_text(instance_name: str, body: SendTextRequest):
         details={"kind": "text", "number": body.number, "outboundFingerprint": payload_fp},
     )
     try:
-        result = await evolution.send_text(instance_name, body.number, body.text)
+        result = await _connection_manager.send_text(instance_name, body.number, body.text)
         save_business_event(
             {
                 "id": str(uuid.uuid4())[:16],
@@ -354,7 +356,7 @@ async def send_media(instance_name: str, body: SendMediaRequest):
         details={"kind": body.mediatype, "number": body.number, "outboundFingerprint": payload_fp},
     )
     try:
-        result = await evolution.send_media(
+        result = await _connection_manager.send_media(
             instance_name, body.number, body.media_url, body.mediatype, body.mimetype, body.file_name, body.caption
         )
         save_business_event(
@@ -425,7 +427,6 @@ async def send_uploaded_media(instance_name: str, body: SendUploadedMediaRequest
         if settings.debug:
             logger.info(
                 "media_send_payload_debug",
-                endpoint=f"/message/sendMedia/{instance_name}",
                 mediatype=normalized_media_type,
                 mimetype=mime_type,
                 fileName=file_name,
@@ -442,7 +443,7 @@ async def send_uploaded_media(instance_name: str, body: SendUploadedMediaRequest
             instance=instance_name,
             details={"kind": normalized_media_type, "number": body.number, "outboundFingerprint": payload_fp},
         )
-        result = await evolution.send_media(
+        result = await _connection_manager.send_media(
             instance_name=instance_name,
             number=body.number,
             media_payload=media_base64,
@@ -535,7 +536,7 @@ async def send_buttons(instance_name: str, body: SendButtonsRequest):
         ],
     }
     try:
-        result = await evolution.send_buttons(instance_name, payload)
+        result = await _connection_manager.send_buttons(instance_name, payload)
         save_pipeline_event(stage="send_whatsapp", status="ok", instance=instance_name, details={"kind": "buttons"})
         return result
     except Exception as exc:
@@ -575,7 +576,7 @@ async def send_list(instance_name: str, body: SendListRequest):
         ],
     }
     try:
-        result = await evolution.send_list(instance_name, payload)
+        result = await _connection_manager.send_list(instance_name, payload)
         save_pipeline_event(stage="send_whatsapp", status="ok", instance=instance_name, details={"kind": "list"})
         return result
     except Exception as exc:
@@ -591,6 +592,6 @@ async def send_list(instance_name: str, body: SendListRequest):
 @router.post("/instances/{instance_name}/messages/check-numbers")
 async def check_numbers(instance_name: str, body: CheckNumbersRequest):
     try:
-        return await evolution.check_whatsapp_numbers(instance_name, body.numbers)
+        return await _connection_manager.check_whatsapp_numbers(instance_name, body.numbers)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))

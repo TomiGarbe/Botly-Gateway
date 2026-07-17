@@ -1,13 +1,33 @@
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CreateInstanceRequest(BaseModel):
     instance_name: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")
+    connection_type: Literal["baileys", "cloud"] = "baileys"
     qrcode: bool = True
     token: str | None = None
+    phone_number_id: str | None = None
+    business_id: str | None = None
     # Configura el webhook automáticamente al crear la instancia
     auto_configure_webhook: bool = True
+
+    @model_validator(mode="after")
+    def validate_connection_payload(self) -> "CreateInstanceRequest":
+        if self.connection_type == "cloud":
+            missing = [
+                field
+                for field, value in {
+                    "token": self.token,
+                    "phone_number_id": self.phone_number_id,
+                    "business_id": self.business_id,
+                }.items()
+                if not str(value or "").strip()
+            ]
+            if missing:
+                raise ValueError(f"Campos obligatorios para WhatsApp Oficial: {', '.join(missing)}")
+            self.qrcode = False
+        return self
 
 
 class SendTextRequest(BaseModel):

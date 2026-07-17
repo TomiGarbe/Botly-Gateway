@@ -132,12 +132,11 @@ if __name__ == "__main__":
         print("Instancia creada:", result["instance"]["instanceName"])
 
         # 2. Obtener QR
-        qr = await get_qr("demo_support")
+        await get_qr("demo_support")
         print("QR listo — escanear con WhatsApp")
         # qr["base64"] → imagen PNG en base64, mostrar en frontend
 
         # 3. Esperar conexión (en producción esto viene por webhook CONNECTION_UPDATE)
-        import time
         for _ in range(30):
             state = await get_state("demo_support")
             print(f"Estado: {state}")

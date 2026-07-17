@@ -73,6 +73,22 @@ Las demás variables tienen valores por defecto funcionales para desarrollo loca
 - [Arquitectura multi-tenant](docs/architecture.md)
 - [Integración con el bot](docs/integration.md)
 
+## WhatsApp Oficial - frontera del Provider
+
+La arquitectura definitiva para WhatsApp Oficial es:
+
+```text
+Meta / WhatsApp Cloud -> Evolution -> Gateway -> Botly
+```
+
+Meta debe comunicarse unicamente con Evolution. El Gateway no es callback de Meta y no procesa `hub.challenge`, verify token ni `X-Hub-Signature-256`.
+
+El endpoint del Gateway `/webhooks/evolution` recibe solo eventos emitidos por Evolution. A partir de ese punto el Gateway valida autenticacion de Evolution, normaliza el evento y lo despacha hacia Botly.
+
+Embedded Signup termina cuando el Gateway obtiene `access_token`, `phone_number_id` y `business_account_id`, y crea la instancia oficial con `POST /instance/create` en Evolution. Desde ese momento la operacion de WhatsApp Cloud ocurre entre Meta y Evolution; el Gateway no consulta Graph API, no suscribe WABA, no administra callbacks y no mantiene estados runtime de Cloud API.
+
+El dominio del Gateway conserva solo metadata administrativa propia: onboarding, credenciales minimizadas para mostrar/recrear conexiones, configuracion de usuario y preferencias. Estados operativos como conexion, health, webhooks, tokens, coexistence y diagnosticos de runtime se proyectan desde Evolution cuando se consulta la instancia; no se persisten como fuente de verdad local.
+
 ## Integraciones externas (UX en Instancias)
 
 Cada instancia ahora muestra una seccion `Integration` con:

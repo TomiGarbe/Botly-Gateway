@@ -30,10 +30,10 @@ export default function SettingsModal({ config, onClose, onChange }: Props) {
     try {
       await api.health({ url, apiKey, publicBaseUrl: publicBaseUrl || url })
       setTest('ok')
-      setTestMsg('Gateway responde correctamente')
+      setTestMsg('Panel conectado correctamente')
     } catch (e) {
       setTest('error')
-      setTestMsg(e instanceof ApiError ? `Error ${e.status}: ${e.message}` : 'No se pudo conectar al gateway')
+      setTestMsg(e instanceof ApiError ? `Error ${e.status}: ${e.message}` : 'No se pudo conectar al panel')
     }
   }
 
@@ -63,7 +63,7 @@ export default function SettingsModal({ config, onClose, onChange }: Props) {
         {/* Body */}
         <div className="px-5 py-5 flex flex-col gap-5 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-zinc-400">Gateway URL</label>
+            <label className="text-xs font-medium text-zinc-400">URL del panel</label>
             <input
               value={url}
               onChange={e => { setUrl(e.target.value); setTest('idle') }}
@@ -76,26 +76,26 @@ export default function SettingsModal({ config, onClose, onChange }: Props) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-zinc-400">Public Base URL</label>
+            <label className="text-xs font-medium text-zinc-400">URL publica</label>
             <input
               value={publicBaseUrl}
               onChange={e => setPublicBaseUrl(e.target.value)}
-              placeholder="https://gateway.mi-dominio.com"
+              placeholder="https://whatsapp.mi-dominio.com"
               className="bg-zinc-800 border border-zinc-700 focus:border-blue-500 focus:outline-none rounded-lg px-3 py-2.5 text-sm font-mono placeholder:text-zinc-600 transition-colors"
             />
             <p className="text-xs text-zinc-600">
-              URL p&uacute;blica real para tus bots/integraciones. Si queda vac&iacute;a, usa Gateway URL.
+              URL publica real para Botly e integraciones. Si queda vacia, usa la URL del panel.
             </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-zinc-400">API Key</label>
+            <label className="text-xs font-medium text-zinc-400">Clave de administracion</label>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={e => { setApiKey(e.target.value); setTest('idle') }}
-                placeholder="tu GATEWAY_API_KEY"
+                placeholder="clave de administracion"
                 className="w-full bg-zinc-800 border border-zinc-700 focus:border-blue-500 focus:outline-none rounded-lg px-3 py-2.5 pr-9 text-sm font-mono placeholder:text-zinc-600 transition-colors"
               />
               <button

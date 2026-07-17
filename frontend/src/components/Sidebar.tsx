@@ -1,4 +1,4 @@
-import { LayoutGrid, MessageSquare, Settings, Webhook, X, Zap } from 'lucide-react'
+import { Inbox, LayoutGrid, MessageSquare, Settings, X, Zap } from 'lucide-react'
 
 interface Props {
   onOpenSettings: () => void
@@ -9,9 +9,9 @@ interface Props {
 }
 
 const navItems = [
-  { icon: LayoutGrid, label: 'Instancias', view: 'instances' as const },
+  { icon: LayoutGrid, label: 'Conexiones', view: 'instances' as const },
   { icon: MessageSquare, label: 'Mensajes', view: 'messages' as const },
-  { icon: Webhook, label: 'Webhooks', view: 'webhooks' as const },
+  { icon: Inbox, label: 'Actividad', view: 'webhooks' as const },
 ]
 
 export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen, onCloseMobile }: Props) {

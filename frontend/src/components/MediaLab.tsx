@@ -396,7 +396,7 @@ export default function MediaLab({
   }
 
   const validateCommon = (): string | null => {
-    if (!instance) return 'Selecciona una instancia conectada.'
+    if (!instance) return 'Selecciona una conexion activa.'
     const clean = cleanNumber(number)
     if (clean.length < 8) return 'Numero invalido. Usa formato internacional sin +.'
     return null
@@ -504,14 +504,14 @@ export default function MediaLab({
       <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <p className="text-sm font-semibold text-zinc-200">Consola de testing WhatsApp</p>
         <div className="space-y-1">
-          <label className="text-xs text-zinc-400">Instancia conectada</label>
+          <label className="text-xs text-zinc-400">Conexion activa</label>
           <select
             className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm disabled:opacity-60"
             value={instance}
             onChange={e => setInstance(e.target.value)}
             disabled={instancesLoading || openInstances.length === 0 || sending}
           >
-            <option value="">{instancesLoading ? 'Cargando instancias...' : 'Seleccionar instancia open'}</option>
+            <option value="">{instancesLoading ? 'Cargando conexiones...' : 'Seleccionar conexion activa'}</option>
             {openInstances.map(item => (
               <option key={item.id} value={item.name}>
                 {item.name} | {item.status} {item.phone ? `| ${item.phone}` : ''} {item.profileName ? `| ${item.profileName}` : ''}
@@ -519,7 +519,7 @@ export default function MediaLab({
             ))}
           </select>
           {instancesError ? <p className="text-xs text-red-400">{instancesError}</p> : null}
-          {!instancesLoading && openInstances.length === 0 ? <p className="text-xs text-amber-400">No hay instancias conectadas en estado open.</p> : null}
+          {!instancesLoading && openInstances.length === 0 ? <p className="text-xs text-amber-400">No hay conexiones activas.</p> : null}
         </div>
 
         <input

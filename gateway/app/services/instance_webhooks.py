@@ -350,7 +350,6 @@ def create_webhook(
             "failureCount": 0,
             "retryCount": 0,
             "unhealthyCount": 0,
-            "eventFilters": event_filters if isinstance(event_filters, dict) else dict(_DEFAULT_EVENT_FILTERS),
         },
     )
     with _LOCK:

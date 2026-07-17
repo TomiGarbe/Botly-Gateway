@@ -76,7 +76,7 @@ export default function QRModal({ instanceName, config, onClose, onConnected }: 
       await api.instances.reconnect(config, instanceName)
       await Promise.all([stateSwr.mutate(), qrSwr.mutate()])
     } catch (error) {
-      setErrorMessage(error instanceof ApiError ? error.message : 'No se pudo reconectar la instancia')
+      setErrorMessage(error instanceof ApiError ? error.message : 'No se pudo reconectar la conexion')
     } finally {
       setReconnecting(false)
     }
@@ -112,7 +112,7 @@ export default function QRModal({ instanceName, config, onClose, onConnected }: 
             <div className="flex flex-col items-center gap-3 py-6">
               <CheckCircle2 size={48} className="text-emerald-400" />
               <p className="font-semibold text-emerald-400">Numero conectado</p>
-              <p className="text-xs text-zinc-500 text-center">La instancia esta activa y lista para recibir mensajes.</p>
+              <p className="text-xs text-zinc-500 text-center">La conexion esta activa y lista para recibir mensajes.</p>
             </div>
           ) : base64 ? (
             <div className="bg-white rounded-xl p-3 flex items-center justify-center">
