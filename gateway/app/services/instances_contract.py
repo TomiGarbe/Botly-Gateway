@@ -39,7 +39,6 @@ def normalize_instance(raw: dict[str, Any]) -> dict[str, Any] | None:
     ).strip()
     raw_connection_type = str(raw.get("connectionType") or raw.get("connection_type") or "").strip().lower()
     connection_type = raw_connection_type or INTEGRATION_TO_CONNECTION_TYPE.get(integration, "baileys")
-    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     coexistence = raw.get("coexistence") if isinstance(raw.get("coexistence"), dict) else None
     instance_id = str(
         raw.get("instanceId")

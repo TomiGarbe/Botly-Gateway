@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.adapters.evolution import EvolutionError, get_evolution_adapter, get_evolution_client
+from app.adapters.evolution import get_evolution_adapter, get_evolution_client
 
 
 async def get_client():

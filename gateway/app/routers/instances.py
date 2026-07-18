@@ -83,7 +83,8 @@ async def create_instance(body: CreateInstanceRequest):
 
     if body.auto_configure_webhook:
         await _configure_webhook_if_needed(instance_name)
-    instance_auth.ensure_instance_key(instance_name, instance_id=instance_name)
+    # Devuelve el token en claro una unica vez para que el panel pueda revelarlo.
+    api_key_payload = instance_auth.create_or_regenerate_instance_key(instance_name, instance_id=instance_name)
     if body.connection_type == "cloud" and body.token and body.phone_number_id and body.business_id:
         get_credential_manager().upsert_official_credentials(
             instance_name=instance_name,
