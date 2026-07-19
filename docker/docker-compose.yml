@@ -42,6 +42,12 @@ services:
       DEL_INSTANCE: "false"
       CONFIG_SESSION_PHONE_CLIENT: "Evolution API"
       CONFIG_SESSION_PHONE_NAME: "Chrome"
+      # WhatsApp Cloud (canal meta). Sin estas variables Evolution usa sus
+      # defaults: Graph API v18.0 (EXPIRADA) y el verify token publico "evolution".
+      WA_BUSINESS_URL: https://graph.facebook.com
+      WA_BUSINESS_VERSION: ${META_GRAPH_VERSION:-v23.0}
+      WA_BUSINESS_TOKEN_WEBHOOK: ${WA_BUSINESS_TOKEN_WEBHOOK:?definir en config/.env}
+      WA_BUSINESS_LANGUAGE: ${WA_BUSINESS_LANGUAGE:-es}
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:

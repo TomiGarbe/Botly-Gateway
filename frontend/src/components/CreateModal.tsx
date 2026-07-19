@@ -43,9 +43,20 @@ const NAME_PATTERN = /^[a-z0-9_]{1,64}$/
 const FACEBOOK_SDK_ID = 'facebook-jssdk'
 const COEXISTENCE_FEATURE_TYPE = 'whatsapp_business_app_onboarding'
 
+// endsWith('facebook.com') tambien aceptaria https://evilfacebook.com: hay que
+// comparar el hostname completo contra el dominio y sus subdominios.
+function isFacebookOrigin(origin: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(origin)
+    if (protocol !== 'https:') return false
+    return hostname === 'facebook.com' || hostname.endsWith('.facebook.com')
+  } catch {
+    return false
+  }
+}
+
 function parseFacebookMessage(event: MessageEvent): EmbeddedSignupSession | 'cancelled' | null {
-  const origin = String(event.origin || '')
-  if (!origin.endsWith('facebook.com') && !origin.endsWith('facebook.com.ar')) return null
+  if (!isFacebookOrigin(String(event.origin || ''))) return null
 
   let payload: unknown = event.data
   if (typeof payload === 'string') {
@@ -77,11 +88,27 @@ async function loadFacebookSdk(appId: string, graphVersion: string): Promise<voi
   }
 
   await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => reject(new Error('El inicio guiado tardo demasiado en cargar')),
+      20000
+    )
     window.fbAsyncInit = () => {
       window.FB?.init({ appId, autoLogAppEvents: true, xfbml: true, version: graphVersion })
+      window.clearTimeout(timeout)
       resolve()
     }
-    if (document.getElementById(FACEBOOK_SDK_ID)) return
+    // Si ya hay una carga en curso, esperamos a que el SDK aparezca en vez de
+    // salir sin resolver la promesa (dejaba el modal colgado para siempre).
+    if (document.getElementById(FACEBOOK_SDK_ID)) {
+      const poll = window.setInterval(() => {
+        if (!window.FB) return
+        window.clearInterval(poll)
+        window.clearTimeout(timeout)
+        window.FB.init({ appId, autoLogAppEvents: true, xfbml: true, version: graphVersion })
+        resolve()
+      }, 150)
+      return
+    }
     const script = document.createElement('script')
     script.id = FACEBOOK_SDK_ID
     script.src = 'https://connect.facebook.net/en_US/sdk.js'
