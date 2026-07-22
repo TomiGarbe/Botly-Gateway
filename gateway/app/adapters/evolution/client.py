@@ -81,7 +81,7 @@ class EvolutionClient:
                     await asyncio.sleep(0.25 * (2**attempt))
                     continue
                 raise EvolutionError(
-                    message=f"Evolution timeout on {method} {path}",
+                    message=f"Botly Gateway timeout on {method} {path}",
                     status_code=504,
                     retryable=True,
                 ) from exc
@@ -106,7 +106,7 @@ class EvolutionClient:
                     attempt=attempt + 1,
                 )
                 raise EvolutionError(
-                    message=f"Evolution HTTP {response.status_code}: {message}",
+                    message=f"Botly Gateway HTTP {response.status_code}: {message}",
                     status_code=response.status_code,
                     detail={"method": method, "path": path, "response": message},
                     retryable=retryable,
@@ -126,7 +126,7 @@ class EvolutionClient:
                     await asyncio.sleep(0.25 * (2**attempt))
                     continue
                 raise EvolutionError(
-                    message=f"Evolution transport error on {method} {path}: {exc}",
+                    message=f"Botly Gateway transport error on {method} {path}: {exc}",
                     status_code=502,
                     retryable=True,
                 ) from exc

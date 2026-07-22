@@ -176,7 +176,7 @@ class EvolutionAdapter:
                 error=str(exc),
             )
             raise EvolutionError(
-                message=f"Evolution rechazo media en A/B: {attempts}",
+                message=f"Botly Gateway rechazo media en A/B: {attempts}",
                 status_code=exc.status_code,
                 detail={"attempts": attempts},
                 retryable=exc.retryable,
@@ -262,7 +262,7 @@ class EvolutionAdapter:
         candidate = self._find_base64_candidate(result)
         if not candidate:
             raise EvolutionError(
-                message="Evolution no devolvio base64 para media message",
+                message="Botly Gateway no devolvio base64 para media message",
                 status_code=502,
                 detail={
                     "endpoint": f"/chat/getBase64FromMediaMessage/{instance_name}",

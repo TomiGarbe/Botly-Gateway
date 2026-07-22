@@ -102,20 +102,25 @@ Cada instancia ahora muestra una seccion `Integration` con:
 
 Orden de prioridad para construir URLs visibles en frontend:
 1. `Public Base URL` guardada en Settings.
-2. `VITE_PUBLIC_BASE_URL` (si existe en build del frontend).
-3. `Gateway URL` configurada en Settings.
+2. `VITE_PUBLIC_APP_URL` (si existe en build del frontend).
+3. El origen actual de la aplicacion.
 
 Se normalizan quitando slash final para evitar rutas inconsistentes.
 
-### PUBLIC_BASE_URL (backend)
+`VITE_PUBLIC_BASE_URL` se mantiene solo como compatibilidad de lectura para builds anteriores; los nuevos despliegues deben usar `VITE_PUBLIC_APP_URL`.
 
-Se agrega `PUBLIC_BASE_URL` en `config/.env` y en Docker Compose para dejar explicita la URL publica real del gateway.
+El build de produccion usa `frontend/.env.production`: `VITE_PUBLIC_APP_URL` apunta a `https://gateway.botly.com.ar` (frontend) y `VITE_GATEWAY_URL` a `https://gateway-server.botly.com.ar` (API del Gateway en Contabo). El archivo `.env` sin sufijo puede mantenerse con valores locales para desarrollo.
+
+### PUBLIC_APP_URL (backend)
+
+Se agrega `PUBLIC_APP_URL` en `config/.env` y en Docker Compose para dejar explicita la URL publica real del Gateway Docker. En produccion debe ser `https://gateway-server.botly.com.ar`.
 Esta variable es de configuracion operativa para evitar usar `localhost` o hosts internos en integraciones.
+
+`PUBLIC_BASE_URL` se admite exclusivamente como alias temporal de lectura para despliegues anteriores; no debe usarse en configuraciones nuevas.
 
 ### CORS del gateway
 
 La configuracion CORS vive en el gateway FastAPI y se pasa al contenedor desde `docker/docker-compose.yml`.
-En produccion `CORS_ALLOWED_ORIGINS` debe incluir `https://panel-evolution.botly.com.ar` sin slash final.
 
 Variables:
 - `CORS_ALLOWED_ORIGINS`: lista separada por coma de origins permitidos.
@@ -125,11 +130,15 @@ Variables:
 Prueba rapida:
 
 ```bash
-curl -i -X OPTIONS "https://evolution.botly.com.ar/instances/" \
-  -H "Origin: https://panel-evolution.botly.com.ar" \
+curl -i -X OPTIONS "https://gateway-server.botly.com.ar/instances/" \
+  -H "Origin: https://gateway.botly.com.ar" \
   -H "Access-Control-Request-Method: GET" \
   -H "Access-Control-Request-Headers: x-api-key,content-type"
 ```
+
+### Meta Embedded Signup
+
+El flujo no construye callbacks ni redirects en el codigo del Gateway: Meta entrega el resultado en el popup y el frontend solo acepta mensajes HTTPS desde `facebook.com` y su subdominio. Antes del deploy, registrar `https://gateway.botly.com.ar` en los dominios/origins permitidos de la configuracion de Meta; mantener ambos hasta completar la transicion.
 
 ### Uso desde bots externos
 

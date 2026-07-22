@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 64" role="img" aria-label="Botly Gateway">
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#09090b"/>
+  <path d="M18 32h9m10 0h9M27 23v18m10-18v18" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+  <circle cx="18" cy="32" r="4" fill="#fff"/><circle cx="27" cy="23" r="4" fill="#fff"/><circle cx="27" cy="41" r="4" fill="#fff"/><circle cx="37" cy="23" r="4" fill="#fff"/><circle cx="37" cy="41" r="4" fill="#fff"/><circle cx="46" cy="32" r="4" fill="#fff"/>
+  <text x="78" y="41" fill="#f4f4f5" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="700" letter-spacing="-1">Botly</text>
+  <text x="157" y="41" fill="#a1a1aa" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="500" letter-spacing="-1">Gateway</text>
+</svg>

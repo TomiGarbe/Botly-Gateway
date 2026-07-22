@@ -5,6 +5,7 @@ export function isOfficialConnection(instance: Instance): boolean {
 }
 
 export function connectionTypeLabel(instance: Instance): string {
+  if (instance.methodDisplayName) return instance.methodDisplayName
   return isOfficialConnection(instance) ? 'WhatsApp Oficial' : 'WhatsApp Web'
 }
 

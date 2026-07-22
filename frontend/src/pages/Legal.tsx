@@ -1,4 +1,4 @@
-import { Zap } from 'lucide-react'
+import Brand from '../components/Brand'
 
 export const LEGAL_CONTACT = 'soporte@botly.com.ar'
 const LAST_UPDATED = '18 de julio de 2026'
@@ -47,14 +47,7 @@ function LegalLayout({ title, summary, current, children }: {
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <header className="border-b border-zinc-800">
         <div className="mx-auto max-w-3xl px-5 sm:px-8 py-4 flex items-center justify-between gap-3">
-          <a href="/" className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-              <Zap size={14} className="text-white" />
-            </div>
-            <span className="font-semibold text-sm tracking-tight truncate">
-              Botly <span className="text-zinc-500">Evolution</span>
-            </span>
-          </a>
+          <a href="/" className="min-w-0"><Brand /></a>
           <span className="text-xs text-zinc-500 shrink-0">Beta privada</span>
         </div>
       </header>
@@ -89,7 +82,7 @@ export function PrivacyPage() {
     <LegalLayout
       current="/privacy"
       title="Politica de Privacidad"
-      summary="Botly Evolution es la plataforma que conecta cuentas de WhatsApp con Botly. Este documento explica que datos tratamos, con que fin y como ejercer tus derechos. Aplica a la beta privada del servicio."
+      summary="Botly Gateway es la plataforma que conecta cuentas de WhatsApp con Botly. Este documento explica que datos tratamos, con que fin y como ejercer tus derechos. Aplica a la beta privada del servicio."
     >
       <Section title="Responsable del tratamiento">
         <p>
@@ -165,11 +158,11 @@ export function TermsPage() {
     <LegalLayout
       current="/terms"
       title="Terminos del Servicio"
-      summary="Estas condiciones regulan el uso de Botly Evolution durante su beta privada. Al usar el servicio aceptas los terminos descritos aqui."
+      summary="Estas condiciones regulan el uso de Botly Gateway durante su beta privada. Al usar el servicio aceptas los terminos descritos aqui."
     >
       <Section title="El servicio">
         <p>
-          Botly Evolution permite conectar cuentas de WhatsApp — mediante WhatsApp Cloud API oficial o vinculacion por
+          Botly Gateway permite conectar cuentas de WhatsApp — mediante WhatsApp Cloud API oficial o vinculacion por
           codigo QR — para que Botly pueda enviar y recibir mensajes en tu nombre. El servicio actua como intermediario
           tecnico entre WhatsApp y tu cuenta de Botly.
         </p>
@@ -243,7 +236,7 @@ export function DataDeletionPage() {
     >
       <Section title="Opcion 1: eliminar desde el panel (inmediato)">
         <p>
-          Es la via mas rapida y no requiere esperar una respuesta nuestra. En el panel de Botly Evolution, abri la
+          Es la via mas rapida y no requiere esperar una respuesta nuestra. En el panel de Botly Gateway, abri la
           conexion que quieras dar de baja y usa la opcion <strong className="text-zinc-200">Eliminar</strong>.
         </p>
         <p>Al eliminar una conexion se borran de forma inmediata:</p>

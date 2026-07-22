@@ -63,7 +63,7 @@ class ConnectionHealthService:
                 "connection_available",
                 "Conexion disponible",
                 HealthCheckStatus.WARNING,
-                details="Evolution todavia esta conectando la instancia.",
+                details="Botly Gateway todavia esta conectando la instancia.",
             )
         if provider_state in {"created", "configured"}:
             return ConnectionHealthCheck(
@@ -76,7 +76,7 @@ class ConnectionHealthService:
             "connection_available",
             "Conexion disponible",
             HealthCheckStatus.FAILED,
-            details="Evolution informa que la instancia no esta abierta.",
+            details="Botly Gateway informa que la instancia no esta abierta.",
         )
 
     def _check_token_configured(self, raw: dict[str, Any]) -> ConnectionHealthCheck:

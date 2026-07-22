@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.logging import get_logger
+from app.domain import get_default_domain_registry
 from app.services.connection_health import ConnectionHealthService
 
 logger = get_logger(__name__)
 _health_service = ConnectionHealthService()
+_domain = get_default_domain_registry()
 
 VALID_INSTANCE_STATES = {"open", "connecting", "close"}
 INTEGRATION_TO_CONNECTION_TYPE = {
@@ -39,6 +41,13 @@ def normalize_instance(raw: dict[str, Any]) -> dict[str, Any] | None:
     ).strip()
     raw_connection_type = str(raw.get("connectionType") or raw.get("connection_type") or "").strip().lower()
     connection_type = raw_connection_type or INTEGRATION_TO_CONNECTION_TYPE.get(integration, "baileys")
+    domain_integration = _domain.integration_for_runtime_integration(integration)
+    domain_channel = _domain.channels.get(domain_integration.channel_id) if domain_integration else None
+    domain_method = (
+        _domain.channels.get_method(domain_integration.channel_id, domain_integration.method_id)
+        if domain_integration
+        else None
+    )
     coexistence = raw.get("coexistence") if isinstance(raw.get("coexistence"), dict) else None
     instance_id = str(
         raw.get("instanceId")
@@ -60,6 +69,11 @@ def normalize_instance(raw: dict[str, Any]) -> dict[str, Any] | None:
         "createdAt": raw.get("createdAt"),
         "integration": integration or None,
         "connectionType": connection_type,
+        "channelId": domain_integration.channel_id.value if domain_integration else None,
+        "methodId": domain_integration.method_id.value if domain_integration else None,
+        "channelDisplayName": domain_channel.display_name if domain_channel else None,
+        "methodDisplayName": domain_method.display_name if domain_method else None,
+        "methodIcon": domain_method.icon if domain_method else None,
         "coexistence": coexistence,
     }
     health = _health_service.evaluate(

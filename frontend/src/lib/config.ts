@@ -13,7 +13,10 @@ export function loadConfig(): GatewayConfig {
   return {
     url: localStorage.getItem(STORAGE_URL) ?? fallbackUrl,
     apiKey: localStorage.getItem(STORAGE_KEY) ?? import.meta.env.VITE_GATEWAY_API_KEY ?? '',
-    publicBaseUrl: localStorage.getItem(STORAGE_PUBLIC_BASE_URL) ?? import.meta.env.VITE_PUBLIC_BASE_URL ?? fallbackUrl,
+    publicBaseUrl: localStorage.getItem(STORAGE_PUBLIC_BASE_URL)
+      ?? import.meta.env.VITE_PUBLIC_APP_URL
+      ?? import.meta.env.VITE_PUBLIC_BASE_URL
+      ?? window.location.origin,
   }
 }
 

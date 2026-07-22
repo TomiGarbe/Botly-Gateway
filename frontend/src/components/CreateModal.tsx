@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, BadgeCheck, Loader2, LogIn, QrCode, X } from 'lucide-react'
 import { api } from '../lib/api'
 import type { GatewayConfig } from '../lib/config'
-import type { CreateConnectionPayload, ConnectionType, MetaSignupConfig } from '../types'
+import type { ChannelCatalogItem, ChannelMethod, ConnectionType, CreateConnectionPayload, MetaSignupConfig } from '../types'
 
 interface Props {
   config: GatewayConfig
@@ -174,7 +174,9 @@ function loginWithFacebook(configId: string): Promise<string> {
 
 export default function CreateModal({ config, onClose, onCreate }: Props) {
   const [step, setStep] = useState<'type' | 'details'>('type')
-  const [connectionType, setConnectionType] = useState<ConnectionType>('baileys')
+  const [channels, setChannels] = useState<ChannelCatalogItem[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [selectedMethod, setSelectedMethod] = useState<{ channel: ChannelCatalogItem; method: ChannelMethod } | null>(null)
   const [name, setName] = useState('')
   const [cloud, setCloud] = useState<CloudFields>({ accessToken: '', phoneNumberId: '', businessId: '' })
   const [manualFallback, setManualFallback] = useState(false)
@@ -184,7 +186,28 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
 
   useEffect(() => {
     inputRef.current?.focus()
-  }, [step, connectionType])
+  }, [step, selectedMethod])
+
+  useEffect(() => {
+    let cancelled = false
+    setCatalogLoading(true)
+    api.channels.list(config)
+      .then(items => {
+        if (cancelled) return
+        setChannels(items.filter(channel => channel.visible && channel.enabled))
+        setError('')
+      })
+      .catch(e => {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : 'No se pudo cargar el catalogo de canales')
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [config])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -192,12 +215,14 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const selectType = (type: ConnectionType) => {
-    setConnectionType(type)
+  const selectMethod = (channel: ChannelCatalogItem, method: ChannelMethod) => {
+    setSelectedMethod({ channel, method })
     setManualFallback(false)
     setError('')
     setStep('details')
   }
+
+  const currentConnectionType = (selectedMethod?.method.currentConnectionType || 'baileys') as ConnectionType
 
   const validateName = () => {
     const trimmed = name.trim()
@@ -209,7 +234,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
   const validateManual = () => {
     const nameError = validateName()
     if (nameError) return nameError
-    if (connectionType === 'cloud') {
+    if (currentConnectionType === 'cloud') {
       if (!cloud.accessToken.trim()) return 'La credencial principal es obligatoria'
       if (!cloud.phoneNumberId.trim()) return 'El identificador del numero es obligatorio'
       if (!cloud.businessId.trim()) return 'El identificador de la cuenta es obligatorio'
@@ -225,7 +250,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
     }
 
     const instanceName = name.trim()
-    const payload: CreateConnectionPayload = connectionType === 'cloud'
+    const payload: CreateConnectionPayload = currentConnectionType === 'cloud'
       ? {
           connectionType: 'cloud',
           instanceName,
@@ -292,8 +317,12 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
     setCloud(current => ({ ...current, [key]: value }))
   }
 
-  const title = step === 'type' ? 'Nueva conexion' : connectionType === 'cloud' ? 'WhatsApp Oficial' : 'WhatsApp Web'
-  const canManualSubmit = Boolean(name.trim()) && (connectionType === 'baileys' || Boolean(cloud.accessToken && cloud.phoneNumberId && cloud.businessId))
+  const visibleMethods = channels
+    .flatMap(channel => (channel.methods || []).map(method => ({ channel, method })))
+    .filter(item => item.method.visible && item.method.enabled && item.method.currentConnectionType)
+    .sort((a, b) => a.channel.sortOrder - b.channel.sortOrder || a.method.sortOrder - b.method.sortOrder)
+  const title = step === 'type' ? 'Nueva conexion' : selectedMethod?.method.displayName || 'Nueva conexion'
+  const canManualSubmit = Boolean(name.trim()) && (currentConnectionType === 'baileys' || Boolean(cloud.accessToken && cloud.phoneNumberId && cloud.businessId))
 
   return (
     <div
@@ -321,28 +350,34 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
 
         {step === 'type' ? (
           <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={() => selectType('baileys')}
-              className="text-left border border-zinc-800 hover:border-blue-500 bg-zinc-950/50 rounded-xl p-4 transition-colors"
-            >
-              <span className="flex items-center justify-between gap-3">
-                <QrCode size={18} className="text-blue-400" />
-                <span className="text-[10px] uppercase text-zinc-500 font-medium">QR</span>
-              </span>
-              <span className="block text-sm font-semibold text-zinc-100 mt-4">WhatsApp Web</span>
-              <span className="block text-xs text-zinc-500 mt-1">Conecta escaneando un codigo QR desde el telefono.</span>
-            </button>
-            <button
-              onClick={() => selectType('cloud')}
-              className="text-left border border-zinc-800 hover:border-emerald-500 bg-zinc-950/50 rounded-xl p-4 transition-colors"
-            >
-              <span className="flex items-center justify-between gap-3">
-                <BadgeCheck size={18} className="text-emerald-400" />
-                <span className="text-[10px] uppercase text-zinc-500 font-medium">OFICIAL</span>
-              </span>
-              <span className="block text-sm font-semibold text-zinc-100 mt-4">WhatsApp Oficial</span>
-              <span className="block text-xs text-zinc-500 mt-1">Conexion guiada sin copiar credenciales.</span>
-            </button>
+            {catalogLoading ? (
+              <>
+                <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 h-32 animate-pulse" />
+                <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 h-32 animate-pulse" />
+              </>
+            ) : visibleMethods.length === 0 ? (
+              <p className="text-sm text-zinc-500 sm:col-span-2">{error || 'No hay metodos de conexion disponibles.'}</p>
+            ) : visibleMethods.map(({ channel, method }) => {
+              const Icon = method.icon === 'qr-code' ? QrCode : BadgeCheck
+              const buttonTone = method.currentConnectionType === 'cloud' ? 'hover:border-emerald-500' : 'hover:border-blue-500'
+              return (
+                <button
+                  key={`${channel.id}:${method.id}`}
+                  onClick={() => selectMethod(channel, method)}
+                  className={`text-left border border-zinc-800 ${buttonTone} bg-zinc-950/50 rounded-xl p-4 transition-colors`}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <Icon size={18} className={method.currentConnectionType === 'cloud' ? 'text-emerald-400' : 'text-blue-400'} />
+                    <span className="text-[10px] uppercase text-zinc-500 font-medium">{method.discovery === 'qr' ? 'QR' : method.name}</span>
+                  </span>
+                  <span className="block text-sm font-semibold text-zinc-100 mt-4">{method.displayName}</span>
+                  <span className="block text-xs text-zinc-500 mt-1">{method.description}</span>
+                </button>
+              )
+            })}
+            {error && visibleMethods.length > 0 && (
+              <p className="text-xs text-red-400 sm:col-span-2">{error}</p>
+            )}
           </div>
         ) : (
           <>
@@ -353,14 +388,14 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
                   ref={inputRef}
                   value={name}
                   onChange={e => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  onKeyDown={e => { if (e.key === 'Enter' && connectionType === 'baileys') handleManualSubmit() }}
+                  onKeyDown={e => { if (e.key === 'Enter' && currentConnectionType === 'baileys') handleManualSubmit() }}
                   placeholder="acme_support"
                   className="bg-zinc-800 border border-zinc-700 focus:border-blue-500 focus:outline-none rounded-lg px-3 py-2.5 text-sm font-mono placeholder:text-zinc-600 transition-colors"
                 />
                 <p className="text-xs text-zinc-600">Solo minusculas, numeros y guion bajo.</p>
               </div>
 
-              {connectionType === 'cloud' && !manualFallback && (
+              {currentConnectionType === 'cloud' && !manualFallback && (
                 <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 flex flex-col gap-3">
                   <div>
                     <p className="text-xs font-semibold text-zinc-300">Conexion guiada</p>
@@ -372,7 +407,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
                     className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                   >
                     {loading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-                    {loading ? 'Conectando...' : 'Conectar WhatsApp Oficial'}
+                    {loading ? 'Conectando...' : `Conectar ${selectedMethod?.method.displayName || 'conexion oficial'}`}
                   </button>
                   <button
                     onClick={() => setManualFallback(true)}
@@ -383,7 +418,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
                 </div>
               )}
 
-              {(connectionType === 'baileys' || manualFallback) && connectionType === 'cloud' && (
+              {(currentConnectionType === 'baileys' || manualFallback) && currentConnectionType === 'cloud' && (
                 <div className="grid grid-cols-1 gap-3">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-medium text-zinc-400">Credencial principal</label>
@@ -429,7 +464,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
               >
                 Cancelar
               </button>
-              {(connectionType === 'baileys' || manualFallback) && (
+              {(currentConnectionType === 'baileys' || manualFallback) && (
                 <button
                   onClick={handleManualSubmit}
                   disabled={loading || !canManualSubmit}

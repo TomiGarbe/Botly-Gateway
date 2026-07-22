@@ -1,4 +1,5 @@
-import { Inbox, LayoutGrid, MessageSquare, Settings, X, Zap } from 'lucide-react'
+import { Inbox, LayoutGrid, MessageSquare, Settings, X } from 'lucide-react'
+import Brand from './Brand'
 
 interface Props {
   onOpenSettings: () => void
@@ -23,14 +24,7 @@ export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen
   const navContent = (
     <>
       <div className="flex items-center justify-between gap-2 px-5 h-14 border-b border-zinc-800">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-            <Zap size={14} className="text-white" />
-          </div>
-          <span className="font-semibold text-sm tracking-tight truncate">
-            Botly <span className="text-zinc-500">Evolution</span>
-          </span>
-        </div>
+        <Brand />
         <button
           type="button"
           onClick={onCloseMobile}

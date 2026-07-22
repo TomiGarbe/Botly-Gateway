@@ -14,7 +14,7 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import instances, messages, webhooks, media, instance_webhooks, meta_signup
+from app.routers import channels, instances, messages, webhooks, media, instance_webhooks, meta_signup, provisioning
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
 
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
 
 
 api = FastAPI(
-    title="Botly Evolution Gateway",
+    title="Botly Gateway",
     version="1.0.0",
     docs_url="/docs",
     redoc_url=None,
@@ -100,6 +100,8 @@ api.add_middleware(AuthMiddleware)
 api.add_middleware(SlowAPIMiddleware)
 
 api.include_router(instances.router)
+api.include_router(channels.router)
+api.include_router(provisioning.router)
 api.include_router(messages.router)
 api.include_router(webhooks.router)
 api.include_router(media.router)

@@ -1,5 +1,9 @@
 export type ConnectionStatus = 'open' | 'connecting' | 'close'
 export type ConnectionType = 'baileys' | 'cloud'
+export type ChannelId = 'whatsapp' | 'instagram' | 'messenger' | 'telegram' | 'discord'
+export type MethodId = 'official' | 'web' | 'bot_api' | 'bot'
+export type DiscoveryType = 'embedded_signup' | 'qr' | 'manual' | 'none'
+export type AuthenticationType = 'embedded_signup' | 'qr' | 'bot_token' | 'oauth' | 'none'
 export type LifecycleState =
   | 'provisioning'
   | 'configured'
@@ -46,12 +50,55 @@ export interface MetaSignupConfig {
   missing: string[]
 }
 
+export interface ChannelMethod {
+  id: MethodId
+  name: string
+  displayName: string
+  description: string
+  icon: string
+  logo?: string | null
+  color?: string | null
+  platformId?: string | null
+  authentication: AuthenticationType
+  discovery: DiscoveryType
+  capabilities: string[]
+  supportsDiscovery: boolean
+  supportsOauth: boolean
+  supportsRefresh: boolean
+  visible: boolean
+  enabled: boolean
+  sortOrder: number
+  currentConnectionType?: ConnectionType | null
+}
+
+export interface ChannelCatalogItem {
+  id: ChannelId
+  name: string
+  displayName: string
+  description: string
+  icon: string
+  logo?: string | null
+  color?: string | null
+  supportsMultiChannel: boolean
+  supportsDiscovery: boolean
+  visible: boolean
+  enabled: boolean
+  sortOrder: number
+  capabilities: string[]
+  methods: ChannelMethod[]
+}
+
 export interface Instance {
   id: string
   name: string
   status: ConnectionStatus
   connectionType?: ConnectionType
   integration?: string
+  channelId?: ChannelId
+  methodId?: MethodId
+  channelDisplayName?: string
+  methodDisplayName?: string
+  methodIcon?: string
   lifecycleState?: LifecycleState
   health?: HealthStatus
   coexistence?: CoexistenceInfo

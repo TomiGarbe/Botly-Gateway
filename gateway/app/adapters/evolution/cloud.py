@@ -9,7 +9,7 @@ class CloudEvolutionAdapter:
 
     def _not_implemented(self, operation: str) -> EvolutionError:
         return EvolutionError(
-            message=f"Evolution Cloud operation '{operation}' is not implemented yet.",
+            message=f"Botly Gateway Cloud operation '{operation}' is not implemented yet.",
             status_code=501,
             retryable=False,
         )

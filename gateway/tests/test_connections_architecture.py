@@ -202,6 +202,9 @@ def test_normalize_instance_marks_whatsapp_business_as_cloud() -> None:
     assert normalized is not None
     assert normalized["connectionType"] == "cloud"
     assert normalized["integration"] == "WHATSAPP-BUSINESS"
+    assert normalized["channelId"] == "whatsapp"
+    assert normalized["methodId"] == "official"
+    assert normalized["methodDisplayName"] == "WhatsApp Oficial"
     assert normalized["phone"] == "phone_123"
     assert normalized["lifecycleState"] == ConnectionLifecycleState.WARNING.value
     assert normalized["health"] == ConnectionHealthStatus.DEGRADED.value

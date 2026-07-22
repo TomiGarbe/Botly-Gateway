@@ -1,6 +1,6 @@
 """
-Receptor de webhooks de Evolution API.
-Evolution hace POST aca, el gateway lo procesa y lo reenvia al bot.
+Receptor de webhooks de Botly Gateway.
+Botly Gateway recibe el POST, lo procesa y lo reenvia al bot.
 """
 
 import asyncio
@@ -154,7 +154,7 @@ async def _forward_to_instance_webhooks(payload: dict[str, Any], request_id: str
 
 
 def _resolve_public_gateway_base_url() -> str:
-    configured = (settings.public_base_url or "").strip().rstrip("/")
+    configured = (settings.public_app_url or "").strip().rstrip("/")
     if configured:
         return configured
     return f"http://127.0.0.1:{settings.gateway_port}".rstrip("/")
@@ -256,7 +256,7 @@ def _to_bot_payload(normalized: dict[str, Any]) -> dict[str, Any] | None:
 @router.post("/evolution")
 async def receive_webhook(request: Request):
     """
-    Endpoint que recibe todos los eventos de Evolution.
+    Endpoint que recibe todos los eventos de Botly Gateway.
     Responde 200 inmediatamente y procesa de forma asincrona.
     """
 
@@ -344,7 +344,7 @@ async def receive_webhook(request: Request):
         elif not provided_key:
             logger.warning("evolution_webhook_auth_missing", instance=instance, source=provided_source)
             audit_event("webhook_auth_failed", instance=instance, reason="missing_credentials", source=provided_source)
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Autenticacion de webhook ausente. Configura la API key de Evolution para este endpoint.")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Autenticacion de webhook ausente. Configura la API key de Botly Gateway para este endpoint.")
         else:
             logger.warning(
                 "evolution_webhook_auth_failed",
@@ -355,7 +355,7 @@ async def receive_webhook(request: Request):
                 expected_instance_prefix=auth_validation["expectedInstancePrefix"],
             )
             audit_event("webhook_auth_failed", instance=instance, reason="invalid_credentials", source=provided_source)
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Autenticacion de webhook invalida. Revisa la API key configurada en Evolution.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Autenticacion de webhook invalida. Revisa la API key configurada en Botly Gateway.")
     else:
         logger.info("evolution_webhook_auth_success", instance=instance, source=provided_source, mode=auth_validation["mode"])
 

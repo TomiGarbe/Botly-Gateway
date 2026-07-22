@@ -1,5 +1,5 @@
 import type { GatewayConfig } from './config'
-import type { CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
+import type { ChannelCatalogItem, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10000
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
@@ -107,6 +107,11 @@ function normalizeInstance(raw: unknown): Instance | null {
     status: normalizeStatus(data.status),
     connectionType: normalizeConnectionType(data.connectionType, integration),
     integration,
+    channelId: typeof data.channelId === 'string' ? data.channelId as Instance['channelId'] : undefined,
+    methodId: typeof data.methodId === 'string' ? data.methodId as Instance['methodId'] : undefined,
+    channelDisplayName: typeof data.channelDisplayName === 'string' ? data.channelDisplayName : undefined,
+    methodDisplayName: typeof data.methodDisplayName === 'string' ? data.methodDisplayName : undefined,
+    methodIcon: typeof data.methodIcon === 'string' ? data.methodIcon : undefined,
     lifecycleState: normalizeLifecycle(data.lifecycleState),
     health: normalizeHealth(data.health),
     coexistence: normalizeCoexistence(data.coexistence),
@@ -182,6 +187,13 @@ async function request<T>(
 }
 
 export const api = {
+  channels: {
+    list: async (cfg: GatewayConfig) => {
+      const raw = await request<{ items?: unknown[] }>(cfg, 'GET', '/channels/')
+      return (Array.isArray(raw.items) ? raw.items : []) as ChannelCatalogItem[]
+    },
+  },
+
   instances: {
     list: async (cfg: GatewayConfig) => {
       const raw = await request<unknown[]>(cfg, 'GET', '/instances/')

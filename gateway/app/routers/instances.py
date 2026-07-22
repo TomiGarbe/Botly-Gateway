@@ -40,7 +40,7 @@ def _apply_http_error(exc: Exception, *, fallback_status: int = 502) -> HTTPExce
     if isinstance(status, int):
         status_code = status if 100 <= status <= 599 else fallback_status
         return HTTPException(status_code=status_code, detail=str(exc))
-    return HTTPException(status_code=fallback_status, detail=f"Evolution error: {exc}")
+    return HTTPException(status_code=fallback_status, detail=f"Botly Gateway error: {exc}")
 
 
 async def _configure_webhook_if_needed(instance_name: str) -> bool:

@@ -8,12 +8,17 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'apple-touch-icon.png'],
+      includeAssets: [
+        'favicon.ico', 'favicon.svg', 'favicon-16x16.png', 'favicon-32x32.png',
+        'apple-touch-icon.png', 'android-chrome-192x192.png', 'android-chrome-512x512.png',
+        'mstile-150x150.png', 'safari-pinned-tab.svg', 'browserconfig.xml',
+        'logo-gateway.svg', 'logo-gateway-light.svg', 'logo-gateway-mark.svg', 'logo-gateway.png',
+      ],
       manifest: {
         id: '/',
-        name: 'Botly Evolution Manager',
-        short_name: 'Botly',
-        description: 'Panel de Botly Evolution para administrar instancias, mensajes y webhooks.',
+        name: 'Botly Gateway',
+        short_name: 'Botly Gateway',
+        description: 'Conecta y administra tus canales, mensajes y webhooks.',
         theme_color: '#09090b',
         background_color: '#09090b',
         display: 'standalone',
@@ -23,17 +28,17 @@ export default defineConfig({
         lang: 'es',
         icons: [
           {
-            src: '/icons/icon-192.png',
+            src: '/android-chrome-192x192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/icons/icon-512.png',
+            src: '/android-chrome-512x512.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: '/icons/icon-512.png',
+            src: '/android-chrome-512x512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable',

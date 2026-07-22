@@ -227,7 +227,7 @@ async def get_decrypted_media_bytes(metadata: dict[str, Any]) -> tuple[bytes, di
         payload = base64.b64decode(base64_payload, validate=True)
     except Exception as exc:
         logger.error("media_decrypt_failed", instance=instance, media_id=media_id, reason="invalid_base64", error=str(exc))
-        raise ValueError("Evolution devolvio base64 invalido") from exc
+        raise ValueError("Botly Gateway devolvio base64 invalido") from exc
 
     valid, magic = _validate_magic(payload, mime_type)
     logger.info(

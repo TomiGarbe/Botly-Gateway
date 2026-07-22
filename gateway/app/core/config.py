@@ -1,6 +1,7 @@
 from functools import lru_cache
 import re
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,11 +9,17 @@ class Settings(BaseSettings):
     # Gateway
     gateway_api_key: str
     gateway_port: int = 9000
-    public_base_url: str = ""
+    # PUBLIC_BASE_URL se conserva como alias de lectura para no interrumpir
+    # despliegues existentes durante la migracion del dominio.
+    public_app_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("PUBLIC_APP_URL", "PUBLIC_BASE_URL"),
+    )
     log_level: str = "info"
     debug: bool = False
     cors_allowed_origins: str = (
         "https://panel-evolution.botly.com.ar,"
+        "https://gateway.botly.com.ar,"
         "http://localhost:5174,"
         "http://127.0.0.1:5174"
     )
@@ -53,6 +60,8 @@ class Settings(BaseSettings):
     instance_webhooks_path: str = "/tmp/botly_instance_webhooks.json"
     connection_metadata_path: str = "/tmp/botly_connection_metadata.json"
     official_credentials_path: str = "/tmp/botly_official_credentials.json"
+    meta_resources_path: str = "/tmp/botly_meta_resources.json"
+    channel_records_path: str = "/tmp/botly_channel_records.json"
     instance_webhook_timeout: int = 8
     webhook_debug: bool = False
     webhook_dispatch_history_limit: int = 30
@@ -72,6 +81,7 @@ class Settings(BaseSettings):
         env_file="../config/.env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     @property
