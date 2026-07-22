@@ -1,4 +1,4 @@
-# Botly Evolution Provider
+# Botly Gateway
 
 Gateway propio sobre Evolution API v2 para gestión multi-tenant de instancias WhatsApp.
 
