@@ -140,6 +140,8 @@ services:
       # credenciales oficiales se perderian al recrear el contenedor.
       CONNECTION_METADATA_PATH: /var/lib/botly/connection_metadata.json
       OFFICIAL_CREDENTIALS_PATH: /var/lib/botly/official_credentials.json
+      META_RESOURCES_PATH: /var/lib/botly/meta_resources.json
+      CHANNEL_RECORDS_PATH: /var/lib/botly/channel_records.json
       # Meta / WhatsApp Cloud — Embedded Signup con Configuration ID
       META_APP_ID: ${META_APP_ID:-}
       META_APP_SECRET: ${META_APP_SECRET:-}

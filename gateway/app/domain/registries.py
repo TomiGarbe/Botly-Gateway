@@ -10,9 +10,7 @@ from app.domain.models import (
     MethodDefinition,
     MethodId,
     PlatformDefinition,
-    PlatformId,
     RuntimeDefinition,
-    RuntimeId,
 )
 
 T = TypeVar("T")
