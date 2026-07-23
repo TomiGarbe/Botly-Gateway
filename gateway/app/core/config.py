@@ -18,13 +18,18 @@ class Settings(BaseSettings):
     log_level: str = "info"
     debug: bool = False
     cors_allowed_origins: str = (
-        "https://panel-evolution.botly.com.ar,"
         "https://gateway.botly.com.ar,"
         "http://localhost:5174,"
         "http://127.0.0.1:5174"
     )
     cors_allow_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     cors_debug: bool = False
+    feature_provider_evolution: bool = False
+    feature_provider_baileys: bool = False
+    feature_whatsapp_web: bool = False
+    feature_qr_login: bool = False
+    feature_instagram: bool = True
+    feature_whatsapp_cloud: bool = True
 
     # Evolution API
     evolution_url: str = "http://evolution:8080"
@@ -74,6 +79,10 @@ class Settings(BaseSettings):
     meta_embedded_signup_config_id: str = ""
     meta_graph_version: str = "v23.0"
     meta_signup_timeout_seconds: int = 30
+    # Webhook oficial de WhatsApp Cloud API. No reutilizar la clave de Evolution:
+    # Meta llama al Gateway directamente y firma cada POST con META_APP_SECRET.
+    meta_webhook_verify_token: str = ""
+    meta_webhook_require_signature: bool = True
 
     model_config = SettingsConfigDict(
         # En Docker las variables llegan por environment: en el compose.

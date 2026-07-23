@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, BadgeCheck, Loader2, LogIn, QrCode, X } from 'lucide-react'
 import { api } from '../lib/api'
+import { publicChannels, resolveFeatures } from '../lib/features'
 import type { GatewayConfig } from '../lib/config'
 import type { ChannelCatalogItem, ChannelMethod, ConnectionType, CreateConnectionPayload, MetaSignupConfig } from '../types'
 
@@ -317,7 +318,7 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
     setCloud(current => ({ ...current, [key]: value }))
   }
 
-  const visibleMethods = channels
+  const visibleMethods = publicChannels(channels, resolveFeatures(undefined))
     .flatMap(channel => (channel.methods || []).map(method => ({ channel, method })))
     .filter(item => item.method.visible && item.method.enabled && item.method.currentConnectionType)
     .sort((a, b) => a.channel.sortOrder - b.channel.sortOrder || a.method.sortOrder - b.method.sortOrder)

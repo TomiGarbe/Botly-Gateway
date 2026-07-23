@@ -22,6 +22,11 @@ jobs:
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
+        env:
+          # Sin estas variables el bundle queda con el fallback http://localhost:9000
+          # y el panel solo funciona si el navegador ya tiene botly_gateway_url en localStorage.
+          VITE_GATEWAY_URL: https://gateway-server.botly.com.ar
+          VITE_PUBLIC_APP_URL: https://gateway.botly.com.ar
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_DUNE_0DA0D830F }}
           repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)

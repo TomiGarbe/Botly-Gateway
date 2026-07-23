@@ -14,7 +14,7 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import channels, instances, messages, webhooks, media, instance_webhooks, meta_signup, provisioning
+from app.routers import channels, instances, messages, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
 
@@ -104,6 +104,7 @@ api.include_router(channels.router)
 api.include_router(provisioning.router)
 api.include_router(messages.router)
 api.include_router(webhooks.router)
+api.include_router(meta_webhook.router)
 api.include_router(media.router)
 api.include_router(instance_webhooks.router)
 api.include_router(meta_signup.router)

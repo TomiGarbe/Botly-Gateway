@@ -11,7 +11,7 @@ from app.services.audit import audit_event
 
 logger = get_logger(__name__)
 
-_PUBLIC_PATHS = {"/health", "/webhooks/evolution"}
+_PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta"}
 _PUBLIC_PREFIXES = ("/media/upload/",)
 _PUBLIC_MEDIA_ROUTE = re.compile(r"^/instances/[^/]+/media/[^/]+/?$")
 

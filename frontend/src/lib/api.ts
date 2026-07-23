@@ -1,5 +1,5 @@
 import type { GatewayConfig } from './config'
-import type { ChannelCatalogItem, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
+import type { ChannelCatalogItem, ChannelCatalogResponse, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10000
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
@@ -188,9 +188,12 @@ async function request<T>(
 
 export const api = {
   channels: {
+    catalog: async (cfg: GatewayConfig): Promise<ChannelCatalogResponse> => {
+      const raw = await request<{ items?: unknown[]; features?: unknown }>(cfg, 'GET', '/channels/')
+      return { items: (Array.isArray(raw.items) ? raw.items : []) as ChannelCatalogItem[], features: (raw.features && typeof raw.features === 'object' ? raw.features : {}) as ChannelCatalogResponse['features'] }
+    },
     list: async (cfg: GatewayConfig) => {
-      const raw = await request<{ items?: unknown[] }>(cfg, 'GET', '/channels/')
-      return (Array.isArray(raw.items) ? raw.items : []) as ChannelCatalogItem[]
+      return (await api.channels.catalog(cfg)).items
     },
   },
 

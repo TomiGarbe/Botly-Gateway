@@ -20,7 +20,7 @@ def test_provisioning_catalog_is_public_and_registry_driven(tmp_path) -> None:
     payload = [item.model_dump() for item in catalog]
 
     assert payload[0]["channel"] == "whatsapp"
-    assert [method["id"] for method in payload[0]["methods"]] == ["web", "official"]
+    assert [method["id"] for method in payload[0]["methods"]] == ["official"]
     assert "supports_text" in payload[0]["methods"][0]["capabilities"]
     assert "runtime" not in str(payload).lower()
     assert "integration" not in str(payload).lower()
@@ -110,4 +110,4 @@ def test_provisioning_router_catalog_path_returns_public_list(tmp_path, monkeypa
     payload = asyncio.run(provisioning_router.get_catalog())
 
     assert payload[0].channel == "whatsapp"
-    assert payload[0].methods[0].id == "web"
+    assert payload[0].methods[0].id == "official"

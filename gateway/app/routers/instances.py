@@ -15,6 +15,7 @@ from app.services.credential_manager import get_credential_manager
 from app.services.connection_metadata import delete_connection_metadata, enrich_instance_payload
 from app.services.instance_webhooks import delete_all_instance_webhooks
 from app.services.instances_contract import normalize_instance, normalize_instance_list, normalize_instance_status
+from app.services.features import get_feature_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/instances", tags=["instances"])
@@ -67,6 +68,8 @@ async def _configure_webhook_if_needed(instance_name: str) -> bool:
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_instance(body: CreateInstanceRequest):
+    if not get_feature_service().connection_type_enabled(body.connection_type):
+        raise HTTPException(status_code=404, detail="Connection type not available")
     instance_name = _validate_instance_name(body.instance_name)
     try:
         result = await _connection_manager.create(
@@ -121,7 +124,7 @@ async def list_instances():
         raise _apply_http_error(exc)
 
     enriched_instances = [enrich_instance_payload(item) if isinstance(item, dict) else item for item in instances]
-    normalized = normalize_instance_list(enriched_instances)
+    normalized = [item for item in normalize_instance_list(enriched_instances) if get_feature_service().connection_type_enabled(item.get("connectionType"))]
     for item in normalized:
         instance_auth.ensure_instance_key(item["name"], instance_id=item.get("id"))
     return normalized
@@ -170,6 +173,8 @@ async def get_state(instance_name: str):
 
 @router.get("/{instance_name}/qr")
 async def get_qr(instance_name: str, refresh: bool = Query(default=False)):
+    if not get_feature_service().flags.qr_login:
+        raise HTTPException(status_code=404, detail="Resource not found")
     instance_name = _validate_instance_name(instance_name)
     try:
         state_data = await _connection_manager.get_status(instance_name)

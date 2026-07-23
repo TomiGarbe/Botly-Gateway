@@ -88,6 +88,20 @@ export interface ChannelCatalogItem {
   methods: ChannelMethod[]
 }
 
+export interface FeatureCapabilities {
+  providerEvolution: boolean
+  providerBaileys: boolean
+  whatsappWeb: boolean
+  qrLogin: boolean
+  instagram: boolean
+  whatsappCloud: boolean
+}
+
+export interface ChannelCatalogResponse {
+  items: ChannelCatalogItem[]
+  features: FeatureCapabilities
+}
+
 export interface Instance {
   id: string
   name: string

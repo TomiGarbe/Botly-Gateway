@@ -22,8 +22,8 @@ def test_legacy_public_base_url_remains_a_read_alias() -> None:
     assert settings.public_app_url == "https://previous-gateway.example"
 
 
-def test_cors_supports_both_migration_origins() -> None:
+def test_cors_uses_the_rebranded_gateway_origin() -> None:
     settings = _settings()
 
-    assert settings.is_cors_origin_allowed("https://panel-evolution.botly.com.ar")
     assert settings.is_cors_origin_allowed("https://gateway.botly.com.ar")
+    assert not settings.is_cors_origin_allowed("https://panel-evolution.botly.com.ar")

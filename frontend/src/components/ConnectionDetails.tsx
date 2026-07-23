@@ -16,6 +16,7 @@ interface Props {
   onReconnect: (name: string) => void
   onApiKey: (name: string) => void
   onDelete: (name: string) => void
+  qrEnabled: boolean
 }
 
 function normalizeBaseUrl(raw: string): string {
@@ -59,7 +60,7 @@ function ActivityRow({ event }: { event: PipelineEvent }) {
   )
 }
 
-export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete }: Props) {
+export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete, qrEnabled }: Props) {
   const [adminMode, setAdminMode] = useState(false)
   const [copyKey, setCopyKey] = useState('')
   const activityRef = useRef<HTMLDivElement>(null)
@@ -151,7 +152,7 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
             <RefreshCcw size={13} />
             Reconectar
           </button>
-          {!official && instance.status !== 'open' ? (
+          {qrEnabled && !official && instance.status !== 'open' ? (
             <button onClick={() => onQR(instance.name)} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500">
               <QrCode size={13} />
               Escanear QR
@@ -242,7 +243,7 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
                 <TerminalSquare size={14} />
                 Ver actividad
               </button>
-              {!official && instance.status !== 'open' ? (
+              {qrEnabled && !official && instance.status !== 'open' ? (
                 <button onClick={() => onQR(instance.name)} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-sm text-zinc-300 hover:border-zinc-700">
                   <QrCode size={14} />
                   Escanear QR

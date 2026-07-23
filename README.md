@@ -78,14 +78,14 @@ Las demás variables tienen valores por defecto funcionales para desarrollo loca
 La arquitectura definitiva para WhatsApp Oficial es:
 
 ```text
-Meta / WhatsApp Cloud -> Evolution -> Gateway -> Botly
+Meta / WhatsApp Cloud -> Gateway -> Botly
 ```
 
-Meta debe comunicarse unicamente con Evolution. El Gateway no es callback de Meta y no procesa `hub.challenge`, verify token ni `X-Hub-Signature-256`.
+Meta debe comunicarse con el callback oficial del Gateway: `GET` y `POST /webhooks/meta`. El Gateway valida `hub.challenge`, el Verify Token y `X-Hub-Signature-256` antes de aceptar eventos.
 
 El endpoint del Gateway `/webhooks/evolution` recibe solo eventos emitidos por Evolution. A partir de ese punto el Gateway valida autenticacion de Evolution, normaliza el evento y lo despacha hacia Botly.
 
-Embedded Signup termina cuando el Gateway obtiene `access_token`, `phone_number_id` y `business_account_id`, y crea la instancia oficial con `POST /instance/create` en Evolution. Desde ese momento la operacion de WhatsApp Cloud ocurre entre Meta y Evolution; el Gateway no consulta Graph API, no suscribe WABA, no administra callbacks y no mantiene estados runtime de Cloud API.
+Embedded Signup termina cuando el Gateway obtiene `access_token`, `phone_number_id` y `business_account_id`, y crea la instancia oficial. El mismo `phone_number_id` vincula los eventos de Meta que llegan a `/webhooks/meta` con la instancia correspondiente. Evolution puede seguir usándose para las operaciones de instancia, pero no es el callback configurado en Meta Developers.
 
 El dominio del Gateway conserva solo metadata administrativa propia: onboarding, credenciales minimizadas para mostrar/recrear conexiones, configuracion de usuario y preferencias. Estados operativos como conexion, health, webhooks, tokens, coexistence y diagnosticos de runtime se proyectan desde Evolution cuando se consulta la instancia; no se persisten como fuente de verdad local.
 
@@ -136,9 +136,33 @@ curl -i -X OPTIONS "https://gateway-server.botly.com.ar/instances/" \
   -H "Access-Control-Request-Headers: x-api-key,content-type"
 ```
 
+### Feature Flags de proveedores
+
+La exposicion publica se controla desde el Gateway, no desde condicionales de UI. Por defecto se ocultan los flujos legacy y se mantienen habilitados WhatsApp Oficial e Instagram:
+
+- `FEATURE_PROVIDER_EVOLUTION=false`
+- `FEATURE_PROVIDER_BAILEYS=false`
+- `FEATURE_WHATSAPP_WEB=false`
+- `FEATURE_QR_LOGIN=false`
+- `FEATURE_INSTAGRAM=true`
+- `FEATURE_WHATSAPP_CLOUD=true`
+
+El frontend consume estas capacidades junto con el catalogo de `/channels/`. Para reactivar un flujo legacy se modifican las flags y se reinicia el Gateway; no se elimina ni se reemplaza codigo.
+
+Como proteccion adicional para demostraciones, el frontend oculta por defecto los metodos e instancias legacy aunque el servidor remoto aun entregue datos antiguos. Para revisarlos solo en soporte interno, configurar `VITE_SHOW_LEGACY_CONNECTIONS=true` y recompilar el frontend.
+
 ### Meta Embedded Signup
 
 El flujo no construye callbacks ni redirects en el codigo del Gateway: Meta entrega el resultado en el popup y el frontend solo acepta mensajes HTTPS desde `facebook.com` y su subdominio. Antes del deploy, registrar `https://gateway.botly.com.ar` en los dominios/origins permitidos de la configuracion de Meta; mantener ambos hasta completar la transicion.
+
+### Webhook oficial de WhatsApp Cloud API
+
+Configurar en Meta Developers:
+
+- **Callback URL:** `https://gateway-server.botly.com.ar/webhooks/meta`
+- **Verify Token:** el valor secreto de `META_WEBHOOK_VERIFY_TOKEN` en `config/.env`.
+
+El mismo endpoint responde el GET de validacion con el valor exacto de `hub.challenge` y recibe el POST firmado de mensajes, estados, cambios y errores. `META_APP_SECRET` es obligatorio para validar `X-Hub-Signature-256`; no desactivar `META_WEBHOOK_REQUIRE_SIGNATURE` en produccion.
 
 ### Uso desde bots externos
 

@@ -144,9 +144,9 @@ def test_channels_router_exposes_catalog_from_domain_registry() -> None:
     payload = asyncio.run(channels_router.list_channels())
 
     assert payload["items"][0]["id"] == "whatsapp"
-    assert [method["id"] for method in payload["items"][0]["methods"]] == ["web", "official"]
-    assert payload["items"][0]["methods"][0]["currentConnectionType"] == "baileys"
-    assert payload["items"][0]["methods"][1]["currentConnectionType"] == "cloud"
+    assert [method["id"] for method in payload["items"][0]["methods"]] == ["official"]
+    assert payload["items"][0]["methods"][0]["currentConnectionType"] == "cloud"
+    assert payload["features"]["qrLogin"] is False
     assert payload["items"][1]["id"] == "instagram"
     assert payload["items"][1]["methods"][0]["id"] == "official"
     assert payload["items"][1]["methods"][0]["currentConnectionType"] is None

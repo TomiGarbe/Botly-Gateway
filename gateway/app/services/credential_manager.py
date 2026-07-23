@@ -139,6 +139,16 @@ class CredentialManager:
             return None
         return self._record_from_dict(record)
 
+    def find_instance_by_phone_number_id(self, phone_number_id: str) -> str | None:
+        """Resolve the Cloud API phone id supplied by Meta to a Gateway instance."""
+        target = str(phone_number_id or "").strip()
+        if not target:
+            return None
+        for instance_name, record in self._load()["official"].items():
+            if isinstance(record, dict) and str(record.get("phoneNumberId") or "").strip() == target:
+                return str(instance_name)
+        return None
+
     def delete_official_credentials(self, instance_name: str) -> None:
         payload = self._load()
         official = payload["official"]

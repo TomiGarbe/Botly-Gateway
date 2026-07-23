@@ -13,4 +13,8 @@ COPY app/ ./app/
 
 EXPOSE 9000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000"]
+# --proxy-headers + --forwarded-allow-ips: sin esto uvicorn ignora el
+# X-Forwarded-Proto de Nginx (llega desde la IP del bridge Docker, no 127.0.0.1)
+# y los redirects de FastAPI salen como http://, que el navegador bloquea por
+# mixed content. Solo es seguro con el puerto publicado en loopback.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000", "--proxy-headers", "--forwarded-allow-ips", "*"]

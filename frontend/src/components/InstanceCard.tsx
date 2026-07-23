@@ -10,9 +10,10 @@ interface Props {
   onDelete: (name: string) => void
   onReconnect: (name: string) => void
   onRefresh: () => void
+  qrEnabled: boolean
 }
 
-export default function InstanceCard({ instance, onOpenDetails, onQR, onLogout, onDelete, onReconnect, onRefresh }: Props) {
+export default function InstanceCard({ instance, onOpenDetails, onQR, onLogout, onDelete, onReconnect, onRefresh, qrEnabled }: Props) {
   const official = isOfficialConnection(instance)
   const tone = statusTone(instance)
 
@@ -54,7 +55,7 @@ export default function InstanceCard({ instance, onOpenDetails, onQR, onLogout, 
           <RefreshCcw size={13} />
           Actualizar
         </button>
-        {!official && instance.status !== 'open' ? (
+        {qrEnabled && !official && instance.status !== 'open' ? (
           <button
             onClick={() => onQR(instance.name)}
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"

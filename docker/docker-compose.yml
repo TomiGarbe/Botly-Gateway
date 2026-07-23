@@ -68,7 +68,10 @@ services:
     container_name: evolution_postgres
     restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"   # expuesto al host para PgAdmin/DBeaver
+      # Izquierda = puerto del host (5433 por defecto, para no pisar al otro stack
+      # del VPS). Derecha = puerto interno del contenedor, siempre 5432: es el que
+      # usan los demas servicios via DATABASE_URL (postgres:5432).
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -119,7 +122,9 @@ services:
     container_name: evolution_gateway
     restart: unless-stopped
     ports:
-      - "${GATEWAY_PORT:-9000}:9000"
+      # Solo loopback: el acceso publico entra por Nginx con TLS. Publicarlo en
+      # 0.0.0.0 dejaba el gateway accesible por HTTP plano en el puerto 9000.
+      - "127.0.0.1:${GATEWAY_PORT:-9000}:9000"
     env_file:
       - ../config/.env
     environment:
@@ -128,6 +133,12 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://gateway.botly.com.ar,http://localhost:5174,http://127.0.0.1:5174}
       CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-https?://(localhost|127\.0\.0\.1)(:\d+)?}
       CORS_DEBUG: ${CORS_DEBUG:-false}
+      FEATURE_PROVIDER_EVOLUTION: ${FEATURE_PROVIDER_EVOLUTION:-false}
+      FEATURE_PROVIDER_BAILEYS: ${FEATURE_PROVIDER_BAILEYS:-false}
+      FEATURE_WHATSAPP_WEB: ${FEATURE_WHATSAPP_WEB:-false}
+      FEATURE_QR_LOGIN: ${FEATURE_QR_LOGIN:-false}
+      FEATURE_INSTAGRAM: ${FEATURE_INSTAGRAM:-true}
+      FEATURE_WHATSAPP_CLOUD: ${FEATURE_WHATSAPP_CLOUD:-true}
       EVOLUTION_URL: http://evolution:8080
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       BOT_WEBHOOK_URL: ${BOT_WEBHOOK_URL:-}
@@ -148,6 +159,8 @@ services:
       META_EMBEDDED_SIGNUP_CONFIG_ID: ${META_EMBEDDED_SIGNUP_CONFIG_ID:-}
       META_GRAPH_VERSION: ${META_GRAPH_VERSION:-v23.0}
       META_SIGNUP_TIMEOUT_SECONDS: ${META_SIGNUP_TIMEOUT_SECONDS:-30}
+      META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
+      META_WEBHOOK_REQUIRE_SIGNATURE: ${META_WEBHOOK_REQUIRE_SIGNATURE:-true}
     volumes:
       - gateway_data:/var/lib/botly
     depends_on:

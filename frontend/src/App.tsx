@@ -13,6 +13,7 @@ import WebhooksManager from './components/WebhooksManager'
 import ApiKeyRevealModal from './components/ApiKeyRevealModal'
 import { api, ApiError } from './lib/api'
 import { loadConfig, type GatewayConfig } from './lib/config'
+import { publicInstances, resolveFeatures } from './lib/features'
 import type { CreateConnectionPayload, Toast } from './types'
 
 function Toasts({ toasts, remove }: { toasts: Toast[]; remove: (id: string) => void }) {
@@ -100,6 +101,13 @@ export default function App() {
       errorRetryInterval: 8000,
     }
   )
+  const { data: channelCatalog } = useSWR(
+    config.apiKey ? 'channel-catalog' : null,
+    () => api.channels.catalog(config),
+    { revalidateOnFocus: false, dedupingInterval: 30000 }
+  )
+  const features = resolveFeatures(channelCatalog?.features)
+  const qrEnabled = features.qrLogin
 
   const handleCreate = useCallback(async (payload: CreateConnectionPayload) => {
     if (payload.connectionType === 'cloud_embedded') {
@@ -107,7 +115,7 @@ export default function App() {
       addToast(`Conexion "${payload.instanceName}" creada`, 'success')
       await mutate()
       setShowCreate(false)
-      if (created.connectionType !== 'cloud') {
+      if (qrEnabled && created.connectionType !== 'cloud') {
         setQrTarget(payload.instanceName)
       }
       return
@@ -124,10 +132,10 @@ export default function App() {
         description: 'Guardala ahora. Esta es la unica vez que el panel muestra la API key completa al crear la conexion.',
       })
     }
-    if (created.instance.connectionType !== 'cloud') {
+    if (qrEnabled && created.instance.connectionType !== 'cloud') {
       setQrTarget(payload.instanceName)
     }
-  }, [config, mutate, addToast])
+  }, [config, mutate, addToast, qrEnabled])
 
   const handleLogout = useCallback(async (name: string) => {
     if (!confirm(`Desconectar "${name}" de WhatsApp?\n\nHabra que re-escanear el QR para volver a conectar.`)) return
@@ -168,7 +176,7 @@ export default function App() {
     }
   }, [config, mutate, addToast])
 
-  const list = Array.isArray(instances) ? instances : []
+  const list = publicInstances(Array.isArray(instances) ? instances : [], features)
   const selectedInstance = selectedConnection ? list.find(item => item.name === selectedConnection) || null : null
 
   return (
@@ -263,6 +271,7 @@ export default function App() {
               onReconnect={handleReconnect}
               onApiKey={setApiKeyTarget}
               onDelete={handleDelete}
+              qrEnabled={qrEnabled}
             />
           ) : list.length === 0 ? (
             <EmptyState onAdd={() => setShowCreate(true)} />
@@ -278,6 +287,7 @@ export default function App() {
                   onDelete={handleDelete}
                   onReconnect={handleReconnect}
                   onRefresh={() => void mutate()}
+                  qrEnabled={qrEnabled}
                 />
               ))}
             </div>
@@ -285,7 +295,7 @@ export default function App() {
         </main>
       </div>
 
-      {qrTarget && (
+      {qrEnabled && qrTarget && (
         <QRModal
           instanceName={qrTarget}
           config={config}

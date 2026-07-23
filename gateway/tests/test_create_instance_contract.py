@@ -31,6 +31,7 @@ def _isolate_key_store(monkeypatch, tmp_path) -> None:
 def test_create_instance_returns_instance_and_plaintext_api_key(monkeypatch, tmp_path) -> None:
     """El panel revela la API key una unica vez al crear: la respuesta debe traerla."""
     _isolate_key_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(instances_router, "get_feature_service", lambda: SimpleNamespace(connection_type_enabled=lambda _value: True))
     monkeypatch.setattr(
         instances_router,
         "_connection_manager",

@@ -25,6 +25,7 @@ from app.provisioning.public_models import (
     ProvisioningResource,
 )
 from app.provisioning.types import ProvisioningState
+from app.services.features import FeatureService, get_feature_service
 
 
 class ProvisioningResourceNotFoundError(LookupError):
@@ -45,6 +46,7 @@ class ProvisioningService:
         channel_store: ChannelStore | None = None,
         meta_resource_store: MetaResourceStore | None = None,
         channel_provisioning: ChannelProvisioningService | None = None,
+        features: FeatureService | None = None,
     ) -> None:
         self._domain = domain or get_default_domain_registry()
         self._channel_store = channel_store or get_channel_store()
@@ -55,6 +57,7 @@ class ProvisioningService:
             meta_resource_store=self._meta_resource_store,
         )
         self._runtime_resolver = RuntimeResolver(self._domain)
+        self._features = features
         self._instance_provisioners = {
             provisioner.connection_type: provisioner for provisioner in (instance_provisioners or [])
         }
@@ -66,7 +69,7 @@ class ProvisioningService:
     def list_catalog(self) -> list[CatalogItem]:
         items: list[CatalogItem] = []
         channels = sorted(
-            (channel for channel in self._domain.channels.list() if channel.visible),
+            (channel for channel in self._domain.channels.list() if channel.visible and channel.enabled),
             key=lambda item: item.sort_order,
         )
         for channel in channels:
@@ -81,7 +84,7 @@ class ProvisioningService:
                     enabled=method.enabled,
                 )
                 for method in sorted(
-                    (method for method in channel.methods if method.visible),
+                    (method for method in channel.methods if method.visible and method.enabled and self._feature_service().method_enabled(channel.id.value, method.id.value)),
                     key=lambda item: item.sort_order,
                 )
             ]
@@ -114,6 +117,8 @@ class ProvisioningService:
     def start_connection(self, request: ConnectionRequest) -> ConnectionStart:
         channel = self._domain.channels.require(request.channel)
         method = self._domain.channels.require_method(channel.id, request.method)
+        if not self._feature_service().method_enabled(channel.id.value, method.id.value):
+            raise RegistryError("Channel method not available")
         resolution = self._runtime_resolver.resolve(channel.id, method.id)
         if not resolution.integration.enabled:
             raise RegistryError(f"Integration disabled for {channel.id.value} / {method.id.value}")
@@ -220,6 +225,9 @@ class ProvisioningService:
             if resource.id == resource_id:
                 return resource
         return None
+
+    def _feature_service(self) -> FeatureService:
+        return self._features or get_feature_service()
 
     def _public_channel(self, channel) -> PublicProvisionedChannel:
         return PublicProvisionedChannel(
