@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.domain import ChannelId, RegistryError, get_default_domain_registry
+from app.domain import ChannelId, get_default_domain_registry
 from app.services.features import get_feature_service
 
 router = APIRouter(prefix="/channels", tags=["channels"])
