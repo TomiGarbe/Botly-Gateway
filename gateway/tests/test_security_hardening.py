@@ -11,7 +11,10 @@ def test_credential_manager_does_not_persist_plaintext_access_token(monkeypatch,
     store_path = tmp_path / "official_credentials.json"
     monkeypatch.setattr(
         "app.services.credential_manager.get_settings",
-        lambda: SimpleNamespace(official_credentials_path=str(store_path)),
+        lambda: SimpleNamespace(
+            official_credentials_path=str(store_path),
+            official_credentials_encryption_key="test-encryption-key",
+        ),
     )
 
     record = CredentialManager().upsert_official_credentials(
@@ -29,12 +32,16 @@ def test_credential_manager_does_not_persist_plaintext_access_token(monkeypatch,
     assert "secret-access-token" not in str(public)
     assert record.access_token_hash == hashlib.sha256(b"secret-access-token").hexdigest()
     assert public["hasAccessTokenHash"] is True
+    assert CredentialManager().get_official_access_token("cloud_instance") == "secret-access-token"
 
 
 def test_connection_diagnostics_reports_missing_official_credentials(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.credential_manager.get_settings",
-        lambda: SimpleNamespace(official_credentials_path=str(tmp_path / "empty_credentials.json")),
+        lambda: SimpleNamespace(
+            official_credentials_path=str(tmp_path / "empty_credentials.json"),
+            official_credentials_encryption_key="test-encryption-key",
+        ),
     )
 
     diagnostics = ConnectionDiagnosticsService().diagnose(

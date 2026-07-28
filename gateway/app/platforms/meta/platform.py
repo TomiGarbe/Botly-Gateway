@@ -104,10 +104,25 @@ class MetaPlatform:
         return await MetaDiscoveryService(platform=self).discover(credentials=credentials)
 
     async def request(self, method: str, path: str, **kwargs) -> Any:
+        # Only outbound message sends opt into response logging. OAuth responses
+        # can contain access tokens and must never be logged.
+        log_response = bool(kwargs.pop("log_response", False))
         client = self.get_graph_client()
         close_client = self._client is None
         try:
             response = await client.request(method, path, **kwargs)
+            if log_response:
+                try:
+                    logged_body: Any = response.json()
+                except Exception:
+                    logged_body = response.text
+                logger.info(
+                    "meta_graph_outbound_response",
+                    method=method,
+                    path=path,
+                    status=response.status_code,
+                    response=logged_body,
+                )
             if response.status_code >= 400:
                 detail = self._extract_error(response)
                 logger.warning("meta_graph_error", method=method, path=path, status=response.status_code, detail=detail)

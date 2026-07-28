@@ -10,6 +10,15 @@ export class ApiError extends Error {
   }
 }
 
+function errorDetailMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (detail && typeof detail === 'object') {
+    const message = (detail as Record<string, unknown>).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return fallback
+}
+
 const VALID_STATUS = new Set(['open', 'connecting', 'close'])
 const VALID_LIFECYCLE = new Set(['provisioning', 'configured', 'connected', 'warning', 'disconnected', 'token_expired', 'webhook_invalid', 'needs_attention', 'failed'])
 const VALID_HEALTH = new Set(['healthy', 'degraded', 'unhealthy', 'unknown'])
@@ -158,7 +167,7 @@ async function request<T>(
 
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const err = new ApiError(res.status, data?.detail ?? `HTTP ${res.status}`)
+        const err = new ApiError(res.status, errorDetailMessage(data?.detail, `HTTP ${res.status}`))
         if (attempt < retries && RETRYABLE_STATUS.has(res.status)) {
           await new Promise(resolve => window.setTimeout(resolve, 300 * (attempt + 1)))
           continue
@@ -432,8 +441,8 @@ export const api = {
             return
           }
 
-          const data = (payload && typeof payload === 'object' ? payload : {}) as { detail?: string }
-          reject(new ApiError(xhr.status || 500, data.detail ?? `HTTP ${xhr.status || 500}`))
+          const data = (payload && typeof payload === 'object' ? payload : {}) as { detail?: unknown }
+          reject(new ApiError(xhr.status || 500, errorDetailMessage(data.detail, `HTTP ${xhr.status || 500}`)))
         }
 
         xhr.onerror = () => reject(new ApiError(502, 'Error enviando archivo'))

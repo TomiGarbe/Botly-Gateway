@@ -41,7 +41,14 @@ def test_meta_webhook_accepts_signed_message_status_and_error(monkeypatch, tmp_p
     settings = _settings()
     store_path = tmp_path / "credentials.json"
     monkeypatch.setattr(meta_webhook, "get_settings", lambda: settings)
-    monkeypatch.setattr(credential_manager, "get_settings", lambda: SimpleNamespace(official_credentials_path=str(store_path)))
+    monkeypatch.setattr(
+        credential_manager,
+        "get_settings",
+        lambda: SimpleNamespace(
+            official_credentials_path=str(store_path),
+            official_credentials_encryption_key="test-encryption-key",
+        ),
+    )
     credential_manager.get_credential_manager().upsert_official_credentials(
         instance_name="cloud_test",
         access_token="access-token",

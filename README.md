@@ -87,6 +87,8 @@ El endpoint del Gateway `/webhooks/evolution` recibe solo eventos emitidos por E
 
 Embedded Signup termina cuando el Gateway obtiene `access_token`, `phone_number_id` y `business_account_id`, y crea la instancia oficial. El mismo `phone_number_id` vincula los eventos de Meta que llegan a `/webhooks/meta` con la instancia correspondiente. Evolution puede seguir usándose para las operaciones de instancia, pero no es el callback configurado en Meta Developers.
 
+Los envíos salientes de WhatsApp Oficial usan directamente `POST /{phone_number_id}/messages` de Graph API. Definí `OFFICIAL_CREDENTIALS_ENCRYPTION_KEY` (un secreto aleatorio y persistente) para cifrar el access token en el volumen del Gateway. Al actualizar desde una versión anterior, repetí Embedded Signup una vez: los registros antiguos guardaban solo el hash del token y, deliberadamente, no pueden descifrarse.
+
 El dominio del Gateway conserva solo metadata administrativa propia: onboarding, credenciales minimizadas para mostrar/recrear conexiones, configuracion de usuario y preferencias. Estados operativos como conexion, health, webhooks, tokens, coexistence y diagnosticos de runtime se proyectan desde Evolution cuando se consulta la instancia; no se persisten como fuente de verdad local.
 
 ## Integraciones externas (UX en Instancias)

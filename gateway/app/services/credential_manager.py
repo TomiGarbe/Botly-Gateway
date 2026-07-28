@@ -4,8 +4,11 @@ import hashlib
 import json
 import os
 import time
+from base64 import urlsafe_b64encode
 from dataclasses import dataclass, field
 from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -102,6 +105,28 @@ class CredentialManager:
             logger.debug("credential_store_chmod_skipped", path=tmp_path)
         os.replace(tmp_path, path)
 
+    def _cipher(self) -> Fernet:
+        """Return the local at-rest cipher without ever logging key material."""
+        settings = get_settings()
+        configured_key = str(getattr(settings, "official_credentials_encryption_key", "") or "").strip()
+        # The API key is only a backwards-compatible fallback. It is not stored
+        # in the credentials file, and deployments can (and should) set a
+        # dedicated OFFICIAL_CREDENTIALS_ENCRYPTION_KEY.
+        fallback_key = str(getattr(settings, "gateway_api_key", "") or "").strip()
+        material = configured_key or fallback_key
+        if not material:
+            raise RuntimeError("No hay clave configurada para cifrar credenciales oficiales")
+        return Fernet(urlsafe_b64encode(hashlib.sha256(material.encode("utf-8")).digest()))
+
+    def _encrypt_access_token(self, access_token: str) -> str:
+        return self._cipher().encrypt(access_token.encode("utf-8")).decode("ascii")
+
+    def _decrypt_access_token(self, ciphertext: str) -> str:
+        try:
+            return self._cipher().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError) as exc:
+            raise RuntimeError("No se pudo descifrar la credencial oficial; reconecta WhatsApp Oficial") from exc
+
     def upsert_official_credentials(
         self,
         *,
@@ -123,6 +148,7 @@ class CredentialManager:
             "businessAccountId": business_account_id,
             "accessTokenRef": access_token_ref,
             "accessTokenHash": _hash_secret(access_token),
+            "accessTokenCiphertext": self._encrypt_access_token(access_token),
             "source": source,
             "createdAt": previous.get("createdAt") or now,
             "updatedAt": now,
@@ -138,6 +164,16 @@ class CredentialManager:
         if not isinstance(record, dict):
             return None
         return self._record_from_dict(record)
+
+    def get_official_access_token(self, instance_name: str) -> str | None:
+        """Resolve the encrypted token solely for the outbound Graph request."""
+        record = self._load()["official"].get(instance_name)
+        if not isinstance(record, dict):
+            return None
+        ciphertext = record.get("accessTokenCiphertext")
+        if not isinstance(ciphertext, str) or not ciphertext.strip():
+            return None
+        return self._decrypt_access_token(ciphertext)
 
     def find_instance_by_phone_number_id(self, phone_number_id: str) -> str | None:
         """Resolve the Cloud API phone id supplied by Meta to a Gateway instance."""

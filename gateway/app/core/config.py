@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     instance_webhooks_path: str = "/tmp/botly_instance_webhooks.json"
     connection_metadata_path: str = "/tmp/botly_connection_metadata.json"
     official_credentials_path: str = "/tmp/botly_official_credentials.json"
+    # Key used to encrypt the long-lived WhatsApp Cloud token at rest.  When it
+    # is not explicitly configured, the gateway API key is used as key material
+    # so existing installations remain operable; production deployments should
+    # provide a distinct, high-entropy value.
+    official_credentials_encryption_key: str = ""
     meta_resources_path: str = "/tmp/botly_meta_resources.json"
     channel_records_path: str = "/tmp/botly_channel_records.json"
     instance_webhook_timeout: int = 8

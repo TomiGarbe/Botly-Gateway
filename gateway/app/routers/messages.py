@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
+from pydantic import ValidationError
 
 from app.connections import get_connection_manager
 from app.core.config import get_settings
@@ -22,6 +23,9 @@ from app.models.requests import (
 from app.services.media import consume_uploaded_file, file_to_base64, get_uploaded_file
 from app.services.normalization import save_business_event, save_event, save_pipeline_event
 from app.services.reliability import mark_outbound
+from app.platforms.meta import MetaPlatformError
+from app.providers.whatsapp_official import get_official_whatsapp_provider
+from app.services.credential_manager import get_credential_manager
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["messages"])
@@ -98,7 +102,12 @@ def _validate_message_payload(payload: SendMessageRequest) -> tuple[str, str]:
 
 
 def _log_message_start(instance_name: str, msg_type: str, number: str, metadata: dict[str, Any] | None = None) -> None:
-    logger.info("message_send_start", instance=instance_name, type=msg_type, number=number, metadata=metadata or {})
+    safe_metadata = {
+        str(key): type(value).__name__
+        for key, value in (metadata or {}).items()
+        if "token" not in str(key).lower() and "secret" not in str(key).lower()
+    }
+    logger.info("message_send_start", instance=instance_name, type=msg_type, number=number, metadata=safe_metadata)
 
 
 def _log_message_success(instance_name: str, msg_type: str, number: str) -> None:
@@ -116,9 +125,14 @@ def _persist_local_outbound_event(
     evolution_result: dict[str, Any] | None = None,
 ) -> None:
     content_text = (text or caption or "").strip()
+    result = evolution_result if isinstance(evolution_result, dict) else {}
+    key = result.get("key") if isinstance(result.get("key"), dict) else {}
+    message = result.get("message") if isinstance(result.get("message"), dict) else {}
+    nested_key = message.get("key") if isinstance(message.get("key"), dict) else {}
     message_id = str(
-        ((evolution_result or {}).get("key") or {}).get("id")
-        or ((evolution_result or {}).get("message") or {}).get("key", {}).get("id")
+        result.get("messageId")
+        or key.get("id")
+        or nested_key.get("id")
         or f"local_{uuid.uuid4().hex[:12]}"
     )
     event = {
@@ -142,10 +156,27 @@ def _persist_local_outbound_event(
         "error": None,
         "message": {"id": message_id, "from": f"{number}@s.whatsapp.net", "fromMe": True, "kind": msg_type, "text": content_text},
         "media": media,
-        "raw": {"source": "gateway_send_api", "evolutionResult": evolution_result or {}},
+        "raw": {"source": "gateway_send_api", "providerResult": result},
     }
     save_event(event)
     logger.info("[OUTBOUND][PERSIST] local outbound persisted", instance=instance_name, number=number, message_type=msg_type, message_id=message_id)
+
+
+def _received_json_log(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"bodyType": type(data).__name__}
+    return {
+        "bodyType": "object",
+        "keys": sorted(str(key) for key in data.keys()),
+        "fieldTypes": {str(key): type(value).__name__ for key, value in data.items()},
+        "number": _clean_number(data.get("number")),
+        "type": str(data.get("type") or ""),
+        "textLength": len(str(data.get("text") or "")),
+    }
+
+
+def _is_official_instance(instance_name: str) -> bool:
+    return get_credential_manager().get_official_credentials_info(instance_name) is not None
 
 
 async def _send_message_unified(instance_name: str, request: Request):
@@ -156,6 +187,12 @@ async def _send_message_unified(instance_name: str, request: Request):
     try:
         if "multipart/form-data" in content_type:
             form = await request.form()
+            logger.info(
+                "message_send_request_received",
+                instance=instance_name,
+                content_type="multipart/form-data",
+                fields=sorted(str(key) for key in form.keys()),
+            )
             msg_type = _normalize_message_type(form.get("type"))
             number = _clean_number(form.get("number"))
             caption = str(form.get("caption") or "")
@@ -172,7 +209,11 @@ async def _send_message_unified(instance_name: str, request: Request):
                     raise HTTPException(status_code=422, detail="text es obligatorio para type=text")
                 _log_message_start(instance_name, "text", number)
                 logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
-                result = await _connection_manager.send_text(instance_name, number, text.strip())
+                result = (
+                    await get_official_whatsapp_provider().send_text(instance_name=instance_name, number=number, text=text.strip())
+                    if _is_official_instance(instance_name)
+                    else await _connection_manager.send_text(instance_name, number, text.strip())
+                )
                 _persist_local_outbound_event(
                     instance_name=instance_name,
                     number=number,
@@ -186,6 +227,11 @@ async def _send_message_unified(instance_name: str, request: Request):
             if msg_type not in _MEDIA_TYPES:
                 logger.warning("unsupported_media", instance=instance_name, type=msg_type)
                 raise HTTPException(status_code=422, detail="type invalido para media")
+            if _is_official_instance(instance_name):
+                raise HTTPException(
+                    status_code=501,
+                    detail="El envio de archivos para WhatsApp Oficial aun no esta disponible; envia texto o implementa la carga de media de Meta.",
+                )
             if not isinstance(file, UploadFile):
                 logger.warning("invalid_payload", instance=instance_name, reason="missing_file")
                 raise HTTPException(status_code=422, detail="file es obligatorio para multipart media")
@@ -225,13 +271,32 @@ async def _send_message_unified(instance_name: str, request: Request):
             return result
 
         data = await request.json()
+        logger.info("message_send_request_received", instance=instance_name, content_type="application/json", payload=_received_json_log(data))
+        if not isinstance(data, dict):
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "El body JSON debe ser un objeto.", "field": "body", "receivedType": type(data).__name__},
+            )
         payload = SendMessageRequest.model_validate(data)
         number, msg_type = _validate_message_payload(payload)
+        logger.info(
+            "message_send_payload_validated",
+            instance=instance_name,
+            payload={"number": number, "type": msg_type, "textLength": len((payload.text or "")), "metadataKeys": sorted(payload.metadata.keys())},
+        )
 
         if msg_type == "text":
             _log_message_start(instance_name, "text", number, payload.metadata)
             logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
-            result = await _connection_manager.send_text(instance_name, number, (payload.text or "").strip())
+            result = (
+                await get_official_whatsapp_provider().send_text(
+                    instance_name=instance_name,
+                    number=number,
+                    text=(payload.text or "").strip(),
+                )
+                if _is_official_instance(instance_name)
+                else await _connection_manager.send_text(instance_name, number, (payload.text or "").strip())
+            )
             _persist_local_outbound_event(
                 instance_name=instance_name,
                 number=number,
@@ -245,6 +310,11 @@ async def _send_message_unified(instance_name: str, request: Request):
         if msg_type not in _MEDIA_TYPES:
             logger.warning("unsupported_media", instance=instance_name, type=msg_type)
             raise HTTPException(status_code=422, detail="type invalido para media")
+        if _is_official_instance(instance_name):
+            raise HTTPException(
+                status_code=501,
+                detail="El envio de archivos para WhatsApp Oficial aun no esta disponible; envia texto o implementa la carga de media de Meta.",
+            )
 
         normalized_media_type = _normalize_media_type(msg_type, "application/octet-stream")
         media_payload = (payload.mediaUrl or "").strip() or (payload.base64 or "").strip()
@@ -276,13 +346,31 @@ async def _send_message_unified(instance_name: str, request: Request):
         return result
     except HTTPException:
         raise
+    except ValidationError as exc:
+        errors = exc.errors(include_url=False)
+        logger.warning("message_send_validation_failed", instance=instance_name, errors=errors)
+        first = errors[0] if errors else {}
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Payload invalido.",
+                "field": ".".join(str(item) for item in first.get("loc", ())) or "body",
+                "reason": first.get("msg", "Formato invalido"),
+            },
+        ) from exc
+    except MetaPlatformError as exc:
+        logger.warning("meta_whatsapp_send_failed", instance=instance_name, error=str(exc), meta_detail=exc.detail)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"message": str(exc), "provider": "meta_whatsapp", "meta": exc.detail},
+        ) from exc
     except Exception as exc:
         status_code = getattr(exc, "status_code", None)
         if isinstance(status_code, int):
             logger.error("evolution_fail", instance=instance_name, error=str(exc))
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-        logger.warning("invalid_payload", instance=instance_name, error=str(exc))
-        raise HTTPException(status_code=422, detail=f"Payload invalido: {exc}") from exc
+        logger.exception("message_send_unexpected_error", instance=instance_name, error=str(exc))
+        raise HTTPException(status_code=500, detail="Error interno al procesar el envio del mensaje.") from exc
 
 
 @router.post("/messages/{instance_name}")
