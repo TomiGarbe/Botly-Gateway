@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import time
@@ -73,7 +74,7 @@ def _business_events_path() -> Path:
 
 
 def _restore_business_events() -> None:
-    """Restore the bounded timeline without making a corrupt file fatal."""
+    """Restore the bounded activity timeline without making a corrupt file fatal."""
     path = _business_events_path()
     if not path.exists():
         return
@@ -83,12 +84,16 @@ def _restore_business_events() -> None:
         if not isinstance(items, list):
             return
         for event in reversed(items[-_settings.webhook_event_retention :]):
-            if isinstance(event, dict) and event.get("layer") == "business":
+            if not isinstance(event, dict):
+                continue
+            if event.get("layer") == "business":
                 _business_events.appendleft(event)
                 key = _event_dedupe_key(event)
                 if key:
                     _business_event_keys_order.append(key)
                     _business_event_keys.add(key)
+            elif event.get("layer") == "operational":
+                _operational_events.appendleft(event)
     except Exception as exc:
         logger.warning("business_event_store_restore_failed", path=str(path), error=str(exc))
 
@@ -97,7 +102,11 @@ def _persist_business_events() -> bool:
     path = _business_events_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"items": list(_business_events)}
+        # Keep the public file name for backwards compatibility, while storing
+        # both business and operational activity.  The timeline is bounded.
+        items = list(_business_events) + list(_operational_events)
+        items.sort(key=lambda item: int(item.get("timestamp") or 0), reverse=True)
+        payload = {"items": items[: _settings.webhook_event_retention]}
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), default=str), encoding="utf-8")
         try:
@@ -937,6 +946,7 @@ def normalize_webhook(payload: dict[str, Any]) -> dict[str, Any]:
 def save_business_event(event: dict[str, Any]) -> bool:
     if event.get("layer") != "business":
         return True
+    _enrich_business_activity(event)
     _business_events.appendleft(event)
     return _persist_business_events()
 
@@ -950,6 +960,7 @@ def save_raw_event(event: dict[str, Any]) -> None:
 def save_event(normalized: dict[str, Any]) -> bool:
     if normalized.get("layer") != "business":
         return True
+    _enrich_business_activity(normalized)
     dedupe_key = _event_dedupe_key(normalized)
     if dedupe_key and dedupe_key in _business_event_keys:
         return True
@@ -1019,6 +1030,30 @@ def _event_dedupe_key(normalized: dict[str, Any]) -> str | None:
     return "|".join([instance, event, msg_id, direction, subtype])
 
 
+def _enrich_business_activity(event: dict[str, Any]) -> None:
+    """Make business messages conform to the same observable event contract."""
+    error = event.get("error") if isinstance(event.get("error"), dict) else {}
+    status_value = str(event.get("status") or ("failed" if error else "received"))
+    direction = str(event.get("direction") or "")
+    if error:
+        severity = "ERROR"
+    elif direction == "outbound" or status_value.lower() in {"sent", "delivered", "read"}:
+        severity = "SUCCESS"
+    else:
+        severity = "INFO"
+    meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+    pipeline = event.get("pipeline") if isinstance(event.get("pipeline"), dict) else {}
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    event.setdefault("component", "Mensajería")
+    event.setdefault("severity", severity)
+    event.setdefault("result", status_value)
+    event.setdefault("durationMs", None)
+    event.setdefault("description", "Mensaje enviado" if direction == "outbound" else "Mensaje recibido")
+    event.setdefault("correlationId", meta.get("requestId") or pipeline.get("requestId") or pipeline.get("conversationId") or message.get("id"))
+    if error and not event.get("action"):
+        event["action"] = "Revisa el detalle del error y vuelve a intentar cuando corresponda."
+
+
 # The helper is deliberately invoked after _event_dedupe_key is defined.  The
 # file is bounded by WEBHOOK_EVENT_RETENTION, so startup work stays bounded too.
 _restore_business_events()
@@ -1034,24 +1069,70 @@ def save_pipeline_event(
     request_id: str | None = None,
     event: str = "PIPELINE",
     details: dict[str, Any] | None = None,
+    component: str | None = None,
+    severity: str | None = None,
+    duration_ms: float | int | None = None,
+    action: str | None = None,
+    operator: str | None = None,
 ) -> None:
-    _operational_events.appendleft(
-        {
+    stage_value = str(stage or "pipeline")
+    status_value = str(status or "unknown")
+    details_value = details or {}
+    lowered = f"{stage_value} {status_value} {event}".lower()
+    inferred_component = component or (
+        "Meta" if "meta" in lowered or "oauth" in lowered or "discovery" in lowered or "subscription" in lowered or "phone" in lowered
+        else "Webhook" if "webhook" in lowered or "dispatch" in lowered
+        else "Mensajería" if "send" in lowered or "message" in lowered
+        else "Gateway"
+    )
+    inferred_severity = severity or (
+        "CRITICAL" if "critical" in lowered
+        else "ERROR" if any(token in lowered for token in ("failed", "error", "fail", "dropped"))
+        else "WARNING" if any(token in lowered for token in ("warning", "retry", "throttled", "ignored", "stale"))
+        else "SUCCESS" if any(token in lowered for token in ("ok", "accepted", "completed", "ready", "passed", "verified"))
+        else "INFO"
+    )
+    suggested_action = action or (str(details_value.get("action")) if details_value.get("action") else None)
+    event_item = {
             "id": str(uuid.uuid4())[:16],
             "layer": "operational",
             "event": event,
             "instance": instance,
             "timestamp": int(time.time() * 1000),
+            "component": inferred_component,
+            "severity": inferred_severity,
+            "result": status_value,
+            "description": f"{stage_value.replace('_', ' ')}: {status_value.replace('_', ' ')}",
+            "durationMs": duration_ms,
+            "action": suggested_action,
+            "operator": operator,
+            "correlationId": request_id or conversation_id or message_id,
             "pipeline": {
-                "stage": stage,
-                "status": status,
+                "stage": stage_value,
+                "status": status_value,
                 "requestId": request_id,
                 "conversationId": conversation_id,
                 "messageId": message_id,
             },
-            "details": details or {},
+            "details": details_value,
         }
-    )
+    _operational_events.appendleft(event_item)
+    _persist_business_events()
+    # Event-triggered automations are dispatched asynchronously so observing an
+    # event never delays the connection, messaging or webhook path.
+    try:
+        loop = asyncio.get_running_loop()
+        async def dispatch() -> None:
+            from app.connections import get_connection_manager
+            from app.services.automations import dispatch_event_automations
+            from app.services.instances_contract import normalize_instance_list
+
+            raw = await get_connection_manager().list_instances()
+            await dispatch_event_automations(event_item, instances=normalize_instance_list(raw if isinstance(raw, list) else []))
+        loop.create_task(dispatch())
+    except RuntimeError:
+        # Some startup/test code emits audit records without a running loop.
+        pass
 
 
 def list_events(instance: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

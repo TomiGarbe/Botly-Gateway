@@ -123,6 +123,7 @@ def _persist_local_outbound_event(
     caption: str | None = None,
     media: dict[str, Any] | None = None,
     evolution_result: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     content_text = (text or caption or "").strip()
     result = evolution_result if isinstance(evolution_result, dict) else {}
@@ -154,6 +155,8 @@ def _persist_local_outbound_event(
         "fromBot": False,
         "forwarding": {"status": "local_api_send"},
         "error": None,
+        "correlationId": correlation_id,
+        "meta": {"requestId": correlation_id} if correlation_id else {},
         "message": {"id": message_id, "from": f"{number}@s.whatsapp.net", "fromMe": True, "kind": msg_type, "text": content_text},
         "media": media,
         "raw": {"source": "gateway_send_api", "providerResult": result},
@@ -293,6 +296,7 @@ async def _send_message_unified(instance_name: str, request: Request):
             )
         payload = SendMessageRequest.model_validate(data)
         number, msg_type = _validate_message_payload(payload)
+        correlation_id = str(payload.metadata.get("correlationId") or "").strip()[:120] or None
         logger.info(
             "message_send_payload_validated",
             instance=instance_name,
@@ -307,6 +311,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                 stage="send_whatsapp",
                 status="attempt",
                 instance=instance_name,
+                request_id=correlation_id,
                 details={"kind": "text", "number": number, "outboundFingerprint": outbound_fp},
             )
             result = (
@@ -324,12 +329,14 @@ async def _send_message_unified(instance_name: str, request: Request):
                 msg_type="text",
                 text=(payload.text or "").strip(),
                 evolution_result=result if isinstance(result, dict) else {},
+                correlation_id=correlation_id,
             )
             save_pipeline_event(
                 stage="send_whatsapp",
                 status="accepted",
                 instance=instance_name,
                 message_id=str((result or {}).get("messageId") or "") or None if isinstance(result, dict) else None,
+                request_id=correlation_id,
                 details={"kind": "text", "provider": "meta_whatsapp" if _is_official_instance(instance_name) else "evolution"},
             )
             _log_message_success(instance_name, "text", number)

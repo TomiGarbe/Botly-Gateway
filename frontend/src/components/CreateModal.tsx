@@ -4,11 +4,14 @@ import { api } from '../lib/api'
 import { publicChannels, resolveFeatures } from '../lib/features'
 import type { GatewayConfig } from '../lib/config'
 import type { ChannelCatalogItem, ChannelMethod, ConnectionType, CreateConnectionPayload, MetaSignupConfig } from '../types'
+import ConnectionOnboardingWizard from './ConnectionOnboardingWizard'
 
-interface Props {
+export interface CreateModalProps {
   config: GatewayConfig
   onClose: () => void
-  onCreate: (payload: CreateConnectionPayload) => Promise<void>
+  onCreate: (payload: CreateConnectionPayload) => Promise<import('../types').Instance>
+  onOpenWorkspace?: (name: string) => void
+  onOpenTests?: (name: string) => void
 }
 
 type CloudFields = {
@@ -173,7 +176,7 @@ function loginWithFacebook(configId: string): Promise<string> {
   })
 }
 
-export default function CreateModal({ config, onClose, onCreate }: Props) {
+export function LegacyCreateModal({ config, onClose, onCreate }: CreateModalProps) {
   const [step, setStep] = useState<'type' | 'details'>('type')
   const [channels, setChannels] = useState<ChannelCatalogItem[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -481,4 +484,8 @@ export default function CreateModal({ config, onClose, onCreate }: Props) {
       </div>
     </div>
   )
+}
+
+export default function CreateModal(props: CreateModalProps) {
+  return <ConnectionOnboardingWizard {...props} />
 }

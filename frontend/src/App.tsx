@@ -2,19 +2,25 @@ import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import { Menu, MessageCircle, Plus, RefreshCw } from 'lucide-react'
 import Sidebar from './components/Sidebar'
-import InstanceCard from './components/InstanceCard'
+import ConnectionInventory from './components/ConnectionInventory'
 import ConnectionDetails from './components/ConnectionDetails'
 import QRModal from './components/QRModal'
 import CreateModal from './components/CreateModal'
 import SettingsModal from './components/SettingsModal'
 import MediaLab from './components/MediaLab'
+import TestCenter from './components/TestCenter'
 import InstanceApiKeyModal from './components/InstanceApiKeyModal'
 import WebhooksManager from './components/WebhooksManager'
 import ApiKeyRevealModal from './components/ApiKeyRevealModal'
+import OperationalDashboard from './components/OperationalDashboard'
+import ActivityCenter from './components/ActivityCenter'
+import AlertsCenter from './components/AlertsCenter'
+import AutomationCenter from './components/AutomationCenter'
+import OperationsCenter from './components/OperationsCenter'
 import { api, ApiError } from './lib/api'
 import { loadConfig, type GatewayConfig } from './lib/config'
 import { publicInstances, resolveFeatures } from './lib/features'
-import type { CreateConnectionPayload, Toast } from './types'
+import type { CreateConnectionPayload, OperationType, PipelineEvent, Toast } from './types'
 
 function Toasts({ toasts, remove }: { toasts: Toast[]; remove: (id: string) => void }) {
   return (
@@ -66,10 +72,12 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [apiKeyTarget, setApiKeyTarget] = useState<string | null>(null)
-  const [view, setView] = useState<'instances' | 'messages' | 'webhooks'>('instances')
+  const [view, setView] = useState<'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations'>('dashboard')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [revealedApiKey, setRevealedApiKey] = useState<{ instanceName: string; apiKey: string; title: string; description: string } | null>(null)
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null)
+  const [activityConnection, setActivityConnection] = useState<string | null>(null)
+  const [workspaceTab, setWorkspaceTab] = useState<'summary' | 'activity' | 'tests' | 'webhooks' | 'diagnostics' | 'settings'>('summary')
 
   useEffect(() => {
     if (!config.apiKey) setShowSettings(true)
@@ -106,6 +114,40 @@ export default function App() {
     () => api.channels.catalog(config),
     { revalidateOnFocus: false, dedupingInterval: 30000 }
   )
+  const { data: globalActivity } = useSWR(
+    config.apiKey ? ['global-activity', config.url] : null,
+    () => api.webhooks.events<PipelineEvent>(config, undefined, 500),
+    { refreshInterval: () => (document.hidden ? 30000 : 15000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const { data: alertsData, isLoading: alertsLoading, mutate: mutateAlerts } = useSWR(
+    config.apiKey ? ['alerts', config.url] : null,
+    () => api.alerts.list(config),
+    { refreshInterval: () => (document.hidden ? 30000 : 15000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const alerts = alertsData?.items || []
+  const { data: automationsData, isLoading: automationsLoading, mutate: mutateAutomations } = useSWR(
+    config.apiKey ? ['automations', config.url] : null,
+    () => api.automations.list(config),
+    { refreshInterval: () => (document.hidden ? 30000 : 15000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const { data: automationExecutionsData, mutate: mutateAutomationExecutions } = useSWR(
+    config.apiKey ? ['automation-executions', config.url] : null,
+    () => api.automations.executions(config, { limit: 100 }),
+    { refreshInterval: () => (document.hidden ? 30000 : 15000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const automations = automationsData?.items || []
+  const automationExecutions = automationExecutionsData?.items || []
+  const { data: operationsData, isLoading: operationsLoading, mutate: mutateOperations } = useSWR(
+    config.apiKey ? ['operations', config.url] : null,
+    () => api.operations.list(config, { limit: 100 }),
+    { refreshInterval: () => (document.hidden ? 30000 : 5000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const { data: operationsSummaryData, mutate: mutateOperationsSummary } = useSWR(
+    config.apiKey ? ['operations-summary', config.url] : null,
+    () => api.operations.summary(config),
+    { refreshInterval: () => (document.hidden ? 30000 : 5000), revalidateOnFocus: true, shouldRetryOnError: false }
+  )
+  const operations = operationsData?.items || []
   const features = resolveFeatures(channelCatalog?.features)
   const qrEnabled = features.qrLogin
 
@@ -114,16 +156,14 @@ export default function App() {
       const created = await api.metaSignup.complete(config, payload)
       addToast(`Conexion "${payload.instanceName}" creada`, 'success')
       await mutate()
-      setShowCreate(false)
       if (qrEnabled && created.connectionType !== 'cloud') {
         setQrTarget(payload.instanceName)
       }
-      return
+      return created
     }
     const created = await api.instances.create(config, payload)
     addToast(`Conexion "${payload.instanceName}" creada`, 'success')
     await mutate()
-    setShowCreate(false)
     if (created.apiKey) {
       setRevealedApiKey({
         instanceName: payload.instanceName,
@@ -135,6 +175,7 @@ export default function App() {
     if (qrEnabled && created.instance.connectionType !== 'cloud') {
       setQrTarget(payload.instanceName)
     }
+    return created.instance
   }, [config, mutate, addToast, qrEnabled])
 
   const handleLogout = useCallback(async (name: string) => {
@@ -176,6 +217,26 @@ export default function App() {
     }
   }, [config, mutate, addToast])
 
+  const enqueueOperation = useCallback(async (type: OperationType, targets: string[], scope: 'selected' | 'all' = 'selected') => {
+    try {
+      await api.operations.create(config, { type, targets, scope })
+      await Promise.all([mutateOperations(), mutateOperationsSummary()])
+      addToast('Operación agregada a la cola', 'success')
+    } catch (error) {
+      addToast(error instanceof ApiError ? error.message : 'No se pudo encolar la operación', 'error')
+    }
+  }, [config, mutateOperations, mutateOperationsSummary, addToast])
+
+  const executeAutomation = useCallback(async (id: string) => {
+    try {
+      await api.automations.execute(config, id)
+      await Promise.all([mutateAutomations(), mutateAutomationExecutions(), mutateAlerts()])
+      addToast('Automatización ejecutada', 'success')
+    } catch (error) {
+      addToast(error instanceof ApiError ? error.message : 'No se pudo ejecutar la automatización', 'error')
+    }
+  }, [config, mutateAutomations, mutateAutomationExecutions, mutateAlerts, addToast])
+
   const list = publicInstances(Array.isArray(instances) ? instances : [], features)
   const selectedInstance = selectedConnection ? list.find(item => item.name === selectedConnection) || null : null
 
@@ -184,7 +245,7 @@ export default function App() {
       <Sidebar
         onOpenSettings={() => setShowSettings(true)}
         view={view}
-        onChangeView={setView}
+        onChangeView={next => { if (next === 'activity') setActivityConnection(null); setView(next) }}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
       />
@@ -201,7 +262,7 @@ export default function App() {
               >
                 <Menu size={16} />
               </button>
-              <h1 className="font-semibold text-sm">{view === 'instances' ? 'Conexiones' : view === 'messages' ? 'Mensajes' : 'Actividad'}</h1>
+              <h1 className="font-semibold text-sm">{view === 'dashboard' ? 'Dashboard Operativo' : view === 'instances' ? 'Conexiones' : view === 'messages' ? 'Mensajes' : view === 'tests' ? 'Centro de Pruebas' : view === 'webhooks' ? 'Webhooks' : view === 'alerts' ? 'Centro de Alertas' : view === 'automations' ? 'Centro de Automatizaciones' : view === 'operations' ? 'Centro de Operaciones' : 'Centro de Actividad'}</h1>
             </div>
             {!isLoading && view === 'instances' && (
               <p className="text-xs text-zinc-500 mt-0.5 ml-12 lg:ml-0">
@@ -211,7 +272,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {view === 'instances' ? (
+            {view === 'dashboard' || view === 'instances' ? (
               <>
                 <button
                   onClick={() => mutate()}
@@ -234,7 +295,25 @@ export default function App() {
         </header>
 
         <main className="flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-6">
-          {view === 'messages' ? (
+          {view === 'dashboard' ? (
+            <OperationalDashboard
+              instances={list}
+              events={globalActivity?.items || []}
+              alerts={alerts}
+              automations={automations}
+              automationExecutions={automationExecutions}
+              operations={operations}
+              isLoading={isLoading}
+              onNewConnection={() => setShowCreate(true)}
+              onOpenTests={() => setView('tests')}
+              onOpenActivity={() => { setActivityConnection(null); setView('activity') }}
+              onOpenAlerts={() => setView('alerts')}
+              onOpenAutomations={() => setView('automations')}
+              onOpenOperations={() => setView('operations')}
+              onOpenConnections={() => setView('instances')}
+              onOpenWorkspace={name => { setWorkspaceTab('summary'); setSelectedConnection(name); setView('instances') }}
+            />
+          ) : view === 'messages' ? (
             <MediaLab
               config={config}
               instances={list}
@@ -242,8 +321,50 @@ export default function App() {
               instancesError={instancesError instanceof Error ? instancesError.message : undefined}
               onToast={addToast}
             />
+          ) : view === 'tests' ? (
+            <TestCenter
+              config={config}
+              instances={list}
+              selectedConnection={selectedConnection}
+              onToast={addToast}
+            />
           ) : view === 'webhooks' ? (
             <WebhooksManager config={config} instances={list} onToast={addToast} />
+          ) : view === 'activity' ? (
+            <div className="mx-auto max-w-7xl"><ActivityCenter events={(globalActivity?.items || []).filter(event => !activityConnection || event.instance === activityConnection)} /></div>
+          ) : view === 'alerts' ? (
+            <AlertsCenter
+              alerts={alerts}
+              loading={alertsLoading}
+              onUpdate={async (id, status) => { await api.alerts.update(config, id, status); await mutateAlerts() }}
+              onOpenWorkspace={name => { setWorkspaceTab('summary'); setSelectedConnection(name); setView('instances') }}
+              onOpenActivity={name => { setActivityConnection(name); setView('activity') }}
+              onOpenDiagnostics={name => { setWorkspaceTab('diagnostics'); setSelectedConnection(name); setView('instances') }}
+              onOpenTests={name => { setSelectedConnection(name); setView('tests') }}
+              onReconnect={handleReconnect}
+            />
+          ) : view === 'automations' ? (
+            <AutomationCenter
+              automations={automations}
+              executions={automationExecutions}
+              instances={list}
+              loading={automationsLoading}
+              onCreate={async draft => { await api.automations.create(config, { name: draft.name, description: null, provider: null, company: null, connection: draft.connection || null, trigger: draft.trigger === 'interval' ? { type: draft.trigger, intervalMinutes: draft.intervalMinutes } : { type: draft.trigger }, conditions: [], actions: [{ type: draft.action, params: {} }], retryPolicy: { maxAttempts: draft.retries, backoff: draft.retries === 3 } }); await Promise.all([mutateAutomations(), mutateAutomationExecutions()]) }}
+              onUpdate={async (id, status) => { await api.automations.update(config, id, { status }); await mutateAutomations() }}
+              onExecute={executeAutomation}
+              onOpenWorkspace={name => { setWorkspaceTab('summary'); setSelectedConnection(name); setView('instances') }}
+            />
+          ) : view === 'operations' ? (
+            <OperationsCenter
+              jobs={operations}
+              summary={operationsSummaryData}
+              instances={list}
+              loading={operationsLoading}
+              onCreate={enqueueOperation}
+              onCancel={async id => { try { await api.operations.cancel(config, id); await Promise.all([mutateOperations(), mutateOperationsSummary()]); addToast('Operación cancelada', 'success') } catch (error) { addToast(error instanceof ApiError ? error.message : 'No se pudo cancelar la operación', 'error') } }}
+              onRetry={async id => { try { await api.operations.retry(config, id); await Promise.all([mutateOperations(), mutateOperationsSummary()]); addToast('Reintento agregado a la cola', 'success') } catch (error) { addToast(error instanceof ApiError ? error.message : 'No se pudo reintentar la operación', 'error') } }}
+              onDuplicate={async id => { try { await api.operations.duplicate(config, id); await Promise.all([mutateOperations(), mutateOperationsSummary()]); addToast('Operación duplicada', 'success') } catch (error) { addToast(error instanceof ApiError ? error.message : 'No se pudo duplicar la operación', 'error') } }}
+            />
           ) : isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(3)].map((_, i) => (
@@ -264,7 +385,7 @@ export default function App() {
             <ConnectionDetails
               config={config}
               instance={selectedInstance}
-              onBack={() => setSelectedConnection(null)}
+              onBack={() => { setWorkspaceTab('summary'); setSelectedConnection(null) }}
               onToast={addToast}
               onRefresh={() => void mutate()}
               onQR={setQrTarget}
@@ -272,27 +393,36 @@ export default function App() {
               onApiKey={setApiKeyTarget}
               onDelete={handleDelete}
               onOpenMessages={() => setView('messages')}
+              onOpenTests={() => setView('tests')}
               onOpenWebhooks={() => setView('webhooks')}
+              alerts={alerts}
+              onOpenAlerts={() => setView('alerts')}
+              automations={automations}
+              onOpenAutomations={() => setView('automations')}
+              onExecuteAutomation={id => { void executeAutomation(id) }}
+              operations={operations}
+              onOpenOperations={() => setView('operations')}
               qrEnabled={qrEnabled}
+              initialTab={workspaceTab}
             />
           ) : list.length === 0 ? (
             <EmptyState onAdd={() => setShowCreate(true)} />
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {list.map(inst => (
-                <InstanceCard
-                  key={inst.id}
-                  instance={inst}
-                  onOpenDetails={setSelectedConnection}
-                  onQR={setQrTarget}
-                  onLogout={handleLogout}
-                  onDelete={handleDelete}
-                  onReconnect={handleReconnect}
-                  onRefresh={() => void mutate()}
-                  qrEnabled={qrEnabled}
-                />
-              ))}
-            </div>
+            <ConnectionInventory
+              config={config}
+              instances={list}
+              events={globalActivity?.items || []}
+              alerts={alerts}
+              onOpenWorkspace={name => { setWorkspaceTab('summary'); setSelectedConnection(name) }}
+              onOpenTests={name => { setSelectedConnection(name); setView('tests') }}
+              onReconnect={handleReconnect}
+              onLogout={handleLogout}
+              onDelete={handleDelete}
+              onOpenActivity={name => { setActivityConnection(name); setView('activity') }}
+              onOpenDiagnostics={name => { setWorkspaceTab('diagnostics'); setSelectedConnection(name) }}
+              onBulkOperation={(type, targets) => { void enqueueOperation(type, targets) }}
+              onToast={addToast}
+            />
           )}
         </main>
       </div>
@@ -310,6 +440,8 @@ export default function App() {
           config={config}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
+          onOpenWorkspace={name => { setShowCreate(false); setWorkspaceTab('summary'); setSelectedConnection(name); setView('instances') }}
+          onOpenTests={name => { setShowCreate(false); setSelectedConnection(name); setView('tests') }}
         />
       )}
       {showSettings && (
@@ -349,7 +481,14 @@ export default function App() {
       <Toasts toasts={toasts} remove={removeToast} />
 
       <nav className="lg:hidden fixed inset-x-0 bottom-0 z-30 border-t border-zinc-800 bg-zinc-950/95 backdrop-blur px-2 py-2">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="mobile-nav">
+          <button
+            type="button"
+            onClick={() => setView('dashboard')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'dashboard' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Inicio
+          </button>
           <button
             type="button"
             onClick={() => setView('instances')}
@@ -366,10 +505,45 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setView('tests')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'tests' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Pruebas
+          </button>
+          <button
+            type="button"
             onClick={() => setView('webhooks')}
-            className={`rounded-lg px-3 py-2 text-xs ${view === 'webhooks' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'webhooks' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Webhooks
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('activity')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'activity' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
           >
             Actividad
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('alerts')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'alerts' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Alertas
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('automations')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'automations' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Flujos
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('operations')}
+            className={`rounded-lg px-2 py-2 text-xs ${view === 'operations' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500'}`}
+          >
+            Operaciones
           </button>
           <button
             type="button"

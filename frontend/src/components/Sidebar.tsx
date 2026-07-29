@@ -1,22 +1,28 @@
-import { Inbox, LayoutGrid, MessageSquare, Settings, X } from 'lucide-react'
+import { Activity, BellRing, FlaskConical, Inbox, LayoutDashboard, LayoutGrid, MessageSquare, Settings, ServerCog, Workflow, X } from 'lucide-react'
 import Brand from './Brand'
 
 interface Props {
   onOpenSettings: () => void
-  view: 'instances' | 'messages' | 'webhooks'
-  onChangeView: (view: 'instances' | 'messages' | 'webhooks') => void
+  view: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations'
+  onChangeView: (view: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations') => void
   mobileOpen: boolean
   onCloseMobile: () => void
 }
 
 const navItems = [
+  { icon: LayoutDashboard, label: 'Dashboard', view: 'dashboard' as const },
   { icon: LayoutGrid, label: 'Conexiones', view: 'instances' as const },
+  { icon: FlaskConical, label: 'Centro de Pruebas', view: 'tests' as const },
   { icon: MessageSquare, label: 'Mensajes', view: 'messages' as const },
-  { icon: Inbox, label: 'Actividad', view: 'webhooks' as const },
+  { icon: Inbox, label: 'Webhooks', view: 'webhooks' as const },
+  { icon: BellRing, label: 'Alertas', view: 'alerts' as const },
+  { icon: Workflow, label: 'Automatizaciones', view: 'automations' as const },
+  { icon: ServerCog, label: 'Operaciones', view: 'operations' as const },
+  { icon: Activity, label: 'Actividad', view: 'activity' as const },
 ]
 
 export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen, onCloseMobile }: Props) {
-  const handleChangeView = (nextView: 'instances' | 'messages' | 'webhooks') => {
+  const handleChangeView = (nextView: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations') => {
     onChangeView(nextView)
     onCloseMobile()
   }

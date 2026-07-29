@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     # Gateway restart so a received first message is not lost before the UI
     # reads it.
     webhook_events_path: str = "/tmp/botly_webhook_events.json"
+    # Alertas operativas persistentes. Se mantiene separado del timeline para
+    # que reconocer o resolver una alerta no modifique la evidencia original.
+    alerts_path: str = "/tmp/botly_alerts.json"
+    # Definiciones y ejecuciones del motor operativo. El historial se conserva
+    # separado de la configuración para que pueda auditarse sin reconstruirlo.
+    automations_path: str = "/tmp/botly_automations.json"
+    automation_scheduler_enabled: bool = True
+    operations_path: str = "/tmp/botly_operations.json"
+    operations_worker_enabled: bool = True
+    operations_target_concurrency: int = 8
     # Key used to encrypt the long-lived WhatsApp Cloud token at rest.  When it
     # is not explicitly configured, the gateway API key is used as key material
     # so existing installations remain operable; production deployments should

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.connections import get_connection_manager
-from app.models.requests import CreateInstanceRequest
+from app.models.requests import ActivityTestRecordRequest, CreateInstanceRequest
 from app.services import instance_auth
 from app.services.audit import audit_event
 from app.services.connection_diagnostics import ConnectionDiagnosticsService
@@ -16,6 +16,7 @@ from app.services.connection_metadata import delete_connection_metadata, enrich_
 from app.services.instance_webhooks import delete_all_instance_webhooks
 from app.services.instances_contract import normalize_instance, normalize_instance_list, normalize_instance_status
 from app.services.features import get_feature_service
+from app.services.normalization import save_pipeline_event
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/instances", tags=["instances"])
@@ -97,6 +98,7 @@ async def create_instance(body: CreateInstanceRequest):
             source="manual_fallback",
             metadata={"onboarding": "manual_fallback"},
         )
+    audit_event("connection_created", instance=instance_name, connectionType=body.connection_type)
 
     if isinstance(result, dict):
         normalized = normalize_instance(result)
@@ -223,8 +225,10 @@ async def reconnect(instance_name: str):
         payload: dict[str, Any] = {"instance": {"id": instance_name, "name": instance_name, "status": normalized_state}}
         if normalized_state != "open":
             payload["qr"] = await _connection_manager.connect(instance_name)
+        audit_event("connection_reconnected", instance=instance_name, status=normalized_state)
         return payload
     except Exception as exc:
+        save_pipeline_event(stage="connection_reconnect", status="failed", instance=instance_name, details={"error": str(exc)[:220], "action": "Revisa el estado del proveedor y vuelve a intentar."})
         raise _apply_http_error(exc)
 
 
@@ -233,6 +237,7 @@ async def logout(instance_name: str):
     instance_name = _validate_instance_name(instance_name)
     try:
         result = await _connection_manager.disconnect(instance_name)
+        audit_event("connection_disconnected", instance=instance_name)
         return {"ok": True, "instance": {"id": instance_name, "name": instance_name, "status": "close"}, "raw": result}
     except Exception as exc:
         # Idempotencia operativa: si Evolution rechaza logout por estado/ausencia, tratamos como cerrado.
@@ -240,6 +245,31 @@ async def logout(instance_name: str):
             logger.warning("logout_idempotent_fallback", instance=instance_name, error=str(exc))
             return {"ok": True, "instance": {"id": instance_name, "name": instance_name, "status": "close"}, "stale": True}
         raise _apply_http_error(exc)
+
+
+@router.post("/{instance_name}/activity/tests")
+async def record_activity_test(instance_name: str, body: ActivityTestRecordRequest, request: Request):
+    """Persist a Test Center execution without coupling tests to messaging."""
+    name = _validate_instance_name(instance_name)
+    auth_instance = getattr(request.state, "auth_instance", None)
+    if auth_instance and auth_instance != name:
+        raise HTTPException(status_code=403, detail="Token no autorizado para esta instancia")
+    result = body.result.lower()
+    status_value = "passed" if result == "passed" else "warning" if result == "warning" else "failed" if result == "failed" else "started"
+    save_pipeline_event(
+        stage="smoke_test" if body.test_type == "smoke" else "connection_test",
+        status=status_value,
+        instance=name,
+        request_id=body.correlation_id,
+        event="SMOKE_TEST" if body.test_type == "smoke" else "CONNECTION_TEST",
+        component="Centro de Pruebas",
+        severity="SUCCESS" if result == "passed" else "WARNING" if result == "warning" else "ERROR" if result == "failed" else "INFO",
+        duration_ms=body.duration_ms,
+        operator=body.operator,
+        action=body.action,
+        details={"testType": body.test_type, "operator": body.operator, "error": body.error, "source": "test_center"},
+    )
+    return {"ok": True}
 
 
 @router.delete("/{instance_name}")

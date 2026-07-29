@@ -42,7 +42,9 @@ nano config/.env
 ./scripts/status.sh
 ```
 
-La API queda disponible en `http://localhost:8080` (o el puerto que configuraste en `EVOLUTION_PORT`).
+Evolution API queda disponible en `http://localhost:8080` (o el puerto de
+`EVOLUTION_PORT`). El Gateway de Botly queda disponible en
+`http://localhost:9000` (o el puerto de `GATEWAY_PORT`).
 
 ## Variables obligatorias
 
@@ -137,6 +139,19 @@ curl -i -X OPTIONS "https://gateway-server.botly.com.ar/instances/" \
   -H "Access-Control-Request-Method: GET" \
   -H "Access-Control-Request-Headers: x-api-key,content-type"
 ```
+
+### Estado operativo persistente
+
+La actividad, alertas, automatizaciones y operaciones usan almacenamiento
+durable del Gateway. En Docker Compose las rutas se guardan bajo
+`/var/lib/botly` dentro del volumen `gateway_data`; no deben quedar en `/tmp`
+en producción. Para despliegues sin Docker, configurar rutas persistentes y
+con permisos restringidos para `WEBHOOK_EVENTS_PATH`, `ALERTS_PATH`,
+`AUTOMATIONS_PATH` y `OPERATIONS_PATH`.
+
+El worker de operaciones y el scheduler de automatizaciones se habilitan con
+`OPERATIONS_WORKER_ENABLED` y `AUTOMATION_SCHEDULER_ENABLED`. Ajustar
+`OPERATIONS_TARGET_CONCURRENCY` según la capacidad del proveedor y del host.
 
 ### Feature Flags de proveedores
 

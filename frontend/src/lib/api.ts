@@ -1,5 +1,5 @@
 import type { GatewayConfig } from './config'
-import type { ChannelCatalogItem, ChannelCatalogResponse, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaOnboardingStatus, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
+import type { AlertStatus, AlertSummary, AutomationExecution, AutomationStatus, AutomationSummary, ChannelCatalogItem, ChannelCatalogResponse, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaOnboardingStatus, MetaSignupConfig, OperationJob, OperationJobStatus, OperationSummary, OperationType, OperationalAlert, OperationalAutomation, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10000
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
@@ -196,6 +196,51 @@ async function request<T>(
 }
 
 export const api = {
+  operations: {
+    list: (cfg: GatewayConfig, options?: { status?: OperationJobStatus; connection?: string; limit?: number }) => {
+      const params = new URLSearchParams()
+      if (options?.status) params.set('status', options.status)
+      if (options?.connection) params.set('connection', options.connection)
+      if (options?.limit) params.set('limit', String(options.limit))
+      return request<{ items: OperationJob[] }>(cfg, 'GET', `/operations${params.size ? `?${params.toString()}` : ''}`)
+    },
+    summary: (cfg: GatewayConfig) => request<OperationSummary>(cfg, 'GET', '/operations/summary'),
+    create: (cfg: GatewayConfig, body: { type: OperationType; targets: string[]; scope?: 'selected' | 'all'; operator?: string; policy?: { maxAttempts: 0 | 1 | 3; backoff: boolean } }) => request<OperationJob>(cfg, 'POST', '/operations', body),
+    cancel: (cfg: GatewayConfig, id: string) => request<OperationJob>(cfg, 'POST', `/operations/${encodeURIComponent(id)}/cancel`),
+    retry: (cfg: GatewayConfig, id: string) => request<OperationJob>(cfg, 'POST', `/operations/${encodeURIComponent(id)}/retry`),
+    duplicate: (cfg: GatewayConfig, id: string) => request<OperationJob>(cfg, 'POST', `/operations/${encodeURIComponent(id)}/duplicate`),
+  },
+  automations: {
+    list: (cfg: GatewayConfig, options?: { status?: AutomationStatus; connection?: string }) => {
+      const params = new URLSearchParams()
+      if (options?.status) params.set('status', options.status)
+      if (options?.connection) params.set('connection', options.connection)
+      return request<{ items: OperationalAutomation[] }>(cfg, 'GET', `/automations${params.size ? `?${params.toString()}` : ''}`)
+    },
+    summary: (cfg: GatewayConfig) => request<AutomationSummary>(cfg, 'GET', '/automations/summary'),
+    executions: (cfg: GatewayConfig, options?: { automationId?: string; connection?: string; limit?: number }) => {
+      const params = new URLSearchParams()
+      if (options?.automationId) params.set('automationId', options.automationId)
+      if (options?.connection) params.set('connection', options.connection)
+      if (options?.limit) params.set('limit', String(options.limit))
+      return request<{ items: AutomationExecution[] }>(cfg, 'GET', `/automations/executions${params.size ? `?${params.toString()}` : ''}`)
+    },
+    create: (cfg: GatewayConfig, body: Omit<OperationalAutomation, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'lastExecutionAt' | 'lastResult' | 'nextExecutionAt'>) => request<OperationalAutomation>(cfg, 'POST', '/automations', body),
+    update: (cfg: GatewayConfig, id: string, body: Partial<OperationalAutomation>) => request<OperationalAutomation>(cfg, 'PATCH', `/automations/${encodeURIComponent(id)}`, body),
+    execute: (cfg: GatewayConfig, id: string) => request<AutomationExecution>(cfg, 'POST', `/automations/${encodeURIComponent(id)}/execute`),
+  },
+  alerts: {
+    list: (cfg: GatewayConfig, options?: { status?: string; severity?: string; instance?: string; limit?: number }) => {
+      const params = new URLSearchParams()
+      if (options?.status) params.set('status', options.status)
+      if (options?.severity) params.set('severity', options.severity)
+      if (options?.instance) params.set('instance', options.instance)
+      params.set('limit', String(options?.limit || 500))
+      return request<{ items: OperationalAlert[] }>(cfg, 'GET', `/alerts?${params.toString()}`)
+    },
+    summary: (cfg: GatewayConfig, instance?: string) => request<AlertSummary>(cfg, 'GET', `/alerts/summary${instance ? `?instance=${encodeURIComponent(instance)}` : ''}`),
+    update: (cfg: GatewayConfig, id: string, status: AlertStatus) => request<OperationalAlert>(cfg, 'PATCH', `/alerts/${encodeURIComponent(id)}`, { status }),
+  },
   channels: {
     catalog: async (cfg: GatewayConfig): Promise<ChannelCatalogResponse> => {
       const raw = await request<{ items?: unknown[]; features?: unknown }>(cfg, 'GET', '/channels/')
@@ -297,6 +342,18 @@ export const api = {
     diagnostics: (cfg: GatewayConfig, name: string) => {
       assertInstanceName(name)
       return request<ConnectionDiagnosticsResponse>(cfg, 'GET', `/instances/${name}/diagnostics`)
+    },
+    recordTestActivity: (cfg: GatewayConfig, name: string, body: { testType: string; result: 'started' | 'passed' | 'warning' | 'failed'; correlationId: string; operator?: string; durationMs?: number; error?: string; action?: string }) => {
+      assertInstanceName(name)
+      return request<{ ok: boolean }>(cfg, 'POST', `/instances/${name}/activity/tests`, {
+        test_type: body.testType,
+        result: body.result,
+        correlation_id: body.correlationId,
+        operator: body.operator,
+        duration_ms: body.durationMs,
+        error: body.error,
+        action: body.action,
+      })
     },
   },
 

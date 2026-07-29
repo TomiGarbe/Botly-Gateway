@@ -152,6 +152,9 @@ services:
       CONNECTION_METADATA_PATH: /var/lib/botly/connection_metadata.json
       OFFICIAL_CREDENTIALS_PATH: /var/lib/botly/official_credentials.json
       WEBHOOK_EVENTS_PATH: /var/lib/botly/webhook_events.json
+      ALERTS_PATH: /var/lib/botly/alerts.json
+      AUTOMATIONS_PATH: /var/lib/botly/automations.json
+      OPERATIONS_PATH: /var/lib/botly/operations.json
       OFFICIAL_CREDENTIALS_ENCRYPTION_KEY: ${OFFICIAL_CREDENTIALS_ENCRYPTION_KEY:-}
       META_ONBOARDING_PATH: /var/lib/botly/meta_onboarding.json
       META_RESOURCES_PATH: /var/lib/botly/meta_resources.json

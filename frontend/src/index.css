@@ -6,8 +6,16 @@
   * { @apply border-zinc-800; }
   html { color-scheme: dark; }
   body { @apply bg-zinc-950 text-zinc-50; }
+  :focus-visible { @apply outline-none ring-2 ring-blue-400 ring-offset-2 ring-offset-zinc-950; }
   ::-webkit-scrollbar { @apply w-1.5; }
   ::-webkit-scrollbar-track { @apply bg-transparent; }
   ::-webkit-scrollbar-thumb { @apply bg-zinc-700 rounded-full; }
   ::-webkit-scrollbar-thumb:hover { @apply bg-zinc-600; }
+}
+
+@layer components {
+  select.filter { @apply rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-400; }
+  button.action { @apply flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800; }
+  .mobile-nav { @apply flex gap-1 overflow-x-auto pb-0.5; }
+  .mobile-nav > button { @apply min-w-[72px] shrink-0; }
 }

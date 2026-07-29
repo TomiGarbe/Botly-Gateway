@@ -14,14 +14,25 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import channels, instances, messages, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning
+from app.routers import alerts, automations, channels, instances, messages, operations, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
+from app.services.automations import AutomationScheduler
+from app.services.operations import OperationWorker
 
 settings = get_settings()
 setup_logging(settings.log_level)
 logger = get_logger(__name__)
 _connection_manager = get_connection_manager()
+
+
+async def _automation_instances() -> list[dict]:
+    raw = await _connection_manager.list_instances()
+    return normalize_instance_list(raw if isinstance(raw, list) else [])
+
+
+_automation_scheduler = AutomationScheduler(_automation_instances)
+_operation_worker = OperationWorker(_automation_instances)
 
 # Rate limiter - usa IP como clave por defecto
 limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
@@ -69,6 +80,8 @@ async def lifespan(app: FastAPI):
         connection_metadata_path=settings.connection_metadata_path,
         official_credentials_path=settings.official_credentials_path,
         webhook_events_path=settings.webhook_events_path,
+        automations_path=settings.automations_path,
+        operations_path=settings.operations_path,
         media_cache_dir=settings.media_cache_dir,
     )
     logger.info("[BOOT][MIGRATIONS] gateway has no DB migrations at startup")
@@ -79,7 +92,11 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.critical("startup_recovery_crashed", error=str(exc), exc_info=settings.debug)
         raise
+    _automation_scheduler.start()
+    _operation_worker.start()
     yield
+    await _operation_worker.stop()
+    await _automation_scheduler.stop()
     await webhooks.shutdown_forward_workers()
     await _connection_manager.close_default()
     logger.info("gateway_stopped")
@@ -109,6 +126,9 @@ api.include_router(meta_webhook.router)
 api.include_router(media.router)
 api.include_router(instance_webhooks.router)
 api.include_router(meta_signup.router)
+api.include_router(alerts.router)
+api.include_router(automations.router)
+api.include_router(operations.router)
 
 
 @api.get("/health", tags=["system"])

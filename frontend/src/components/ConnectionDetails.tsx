@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import {
   Activity, AlertTriangle, ArrowLeft, BadgeCheck, Check, CheckCircle2, Clipboard,
@@ -7,9 +7,10 @@ import {
   Smartphone, TerminalSquare, Unplug,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import ActivityCenter from './ActivityCenter'
 import type { GatewayConfig } from '../lib/config'
-import type { ConnectionDiagnostic, HealthCheck, Instance, MetaOnboardingStatus, PipelineEvent, Toast } from '../types'
-import { connectionIconTone, connectionTypeLabel, diagnosticText, eventDescription, eventTitle, formatActivity, healthLabel, isOfficialConnection, statusLabel, statusTone } from '../lib/connectionUx'
+import type { ConnectionDiagnostic, HealthCheck, Instance, MetaOnboardingStatus, OperationJob, OperationalAlert, OperationalAutomation, PipelineEvent, Toast } from '../types'
+import { connectionIconTone, connectionTypeLabel, diagnosticText, healthLabel, isOfficialConnection, statusLabel, statusTone } from '../lib/connectionUx'
 
 type WorkspaceTab = 'summary' | 'activity' | 'tests' | 'webhooks' | 'diagnostics' | 'settings'
 type ComponentState = 'healthy' | 'attention' | 'pending'
@@ -25,8 +26,17 @@ interface Props {
   onApiKey: (name: string) => void
   onDelete: (name: string) => void
   onOpenMessages: () => void
+  onOpenTests: () => void
   onOpenWebhooks: () => void
+  alerts?: OperationalAlert[]
+  onOpenAlerts?: () => void
+  automations?: OperationalAutomation[]
+  onOpenAutomations?: () => void
+  onExecuteAutomation?: (automationId: string) => void
+  operations?: OperationJob[]
+  onOpenOperations?: () => void
   qrEnabled: boolean
+  initialTab?: WorkspaceTab
 }
 
 const TABS: Array<{ id: WorkspaceTab; label: string }> = [
@@ -107,21 +117,6 @@ function HealthItem({ label, state, lastChange, detail }: { label: string; state
   )
 }
 
-function ActivityRow({ event }: { event: PipelineEvent }) {
-  return (
-    <div className="flex gap-3 border-b border-zinc-800 py-3 last:border-b-0">
-      <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-zinc-500" />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <p className="text-sm font-medium text-zinc-200">{eventTitle(event)}</p>
-          <span className="text-xs text-zinc-600">{formatActivity(event.timestamp)}</span>
-        </div>
-        <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{eventDescription(event)}</p>
-      </div>
-    </div>
-  )
-}
-
 function ProblemRow({ item }: { item: ConnectionDiagnostic }) {
   const text = diagnosticText(item)
   return (
@@ -139,8 +134,11 @@ function StepState({ state }: { state: 'complete' | 'current' | 'pending' | 'err
   return <span className="h-5 w-5 rounded-full border border-zinc-600" aria-label="Pendiente" />
 }
 
-export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete, onOpenMessages, onOpenWebhooks, qrEnabled }: Props) {
+export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete, onOpenMessages, onOpenTests, onOpenWebhooks, alerts = [], onOpenAlerts, automations = [], onOpenAutomations, onExecuteAutomation, operations = [], onOpenOperations, qrEnabled, initialTab = 'summary' }: Props) {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary')
+  const activeAlerts = useMemo(() => alerts.filter(alert => alert.connection === instance.name && ['new', 'acknowledged', 'in_progress'].includes(alert.status)), [alerts, instance.name])
+  const connectionAutomations = useMemo(() => automations.filter(automation => automation.connection === instance.name), [automations, instance.name])
+  const connectionOperations = useMemo(() => operations.filter(operation => operation.targets.includes(instance.name)), [operations, instance.name])
   const [adminMode, setAdminMode] = useState(false)
   const [copyKey, setCopyKey] = useState('')
   const official = isOfficialConnection(instance)
@@ -149,6 +147,10 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
   const callbackUrl = `${publicBaseUrl}/webhooks/${official ? 'meta' : 'evolution'}`
   const sendUrl = `${publicBaseUrl}/messages/${instance.name}`
 
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab, instance.name])
+
   const { data: diagnosticsData, isLoading: diagnosticsLoading } = useSWR(
     config.apiKey ? ['connection-diagnostics', config.url, instance.name] : null,
     () => api.instances.diagnostics(config, instance.name),
@@ -156,8 +158,13 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
   )
   const { data: activityData } = useSWR(
     config.apiKey ? ['connection-activity', config.url, instance.name] : null,
-    () => api.webhooks.events<PipelineEvent>(config, instance.name, 80),
+    () => api.webhooks.events<PipelineEvent>(config, instance.name, 500),
     { refreshInterval: 20000, revalidateOnFocus: true }
+  )
+  const { data: deliveryData } = useSWR(
+    config.apiKey ? ['connection-deliveries', config.url, instance.name] : null,
+    () => api.webhooks.deliveries(config, instance.name, 50),
+    { refreshInterval: 30000, revalidateOnFocus: true, shouldRetryOnError: false }
   )
   const { data: apiKeyInfo } = useSWR(
     config.apiKey ? ['connection-key', config.url, instance.name] : null,
@@ -182,6 +189,9 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
   const latestEvent = activity[0]
   const latestInbound = activity.find(item => item.direction === 'inbound')
   const latestOutbound = activity.find(item => item.direction === 'outbound' || item.fromMe)
+  const latestWebhook = activity.find(item => /webhook|dispatch|ingest/i.test(`${item.event} ${item.pipeline?.stage || ''}`))
+  const latestError = activity.find(item => item.severity === 'ERROR' || item.severity === 'CRITICAL' || /failed|error|fail/i.test(`${item.event} ${item.pipeline?.status || ''}`))
+  const latestTest = activity.find(item => /smoke|test/i.test(`${item.event} ${item.pipeline?.stage || ''}`))
   const webhookCheck = healthChecks.find(item => item.code.includes('webhook'))
   const credentialsCheck = healthChecks.find(item => item.code.includes('token') || item.code.includes('credential'))
   const hasErrors = visibleDiagnostics.some(item => item.severity === 'error')
@@ -271,7 +281,37 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
 
   const renderTimeline = (limit = 6) => (
     <Section title="Timeline" description="Eventos importantes ordenados del más reciente al más antiguo." icon={Activity} action={<button onClick={() => setActiveTab('activity')} className="text-xs text-blue-300 hover:text-blue-200">Ver todos</button>}>
-      {activity.length === 0 ? <p className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">No se registraron eventos para esta conexión.</p> : <div>{activity.slice(0, limit).map(event => <ActivityRow key={`${event.id || event.timestamp}-${event.event}`} event={event} />)}</div>}
+      <ActivityCenter events={activity.slice(0, limit)} compact />
+    </Section>
+  )
+
+  const renderOperationalState = () => {
+    const retries = Number(deliveryData?.metrics?.retries || 0) + activity.reduce((total, event) => total + Number(event.details?.retriesUsed || event.details?.retryCount || 0), 0)
+    const values = [
+      ['Último mensaje enviado', relativeTime(latestOutbound?.timestamp)], ['Último mensaje recibido', relativeTime(latestInbound?.timestamp)],
+      ['Último webhook', relativeTime(latestWebhook?.timestamp)], ['Última sincronización', 'No disponible'],
+      ['Último error', relativeTime(latestError?.timestamp)], ['Última prueba', relativeTime(latestTest?.timestamp)],
+      ['Latencia promedio', deliveryData?.metrics ? `${Math.round(deliveryData.metrics.averageResponseTimeMs)} ms` : 'No disponible'], ['Reintentos', deliveryData?.metrics || retries > 0 ? String(retries) : 'No disponible'],
+      ['Provisioning', official ? (onboarding?.status || 'No disponible') : 'No aplica'], ['Webhook', onboarding?.steps?.webhook ? 'Verificado' : webhookCheck?.status === 'passed' ? 'Operativo' : webhookCheck?.status === 'failed' ? 'Con error' : 'No disponible'],
+    ]
+    return <Section title="Estado operativo" description="Señales disponibles del backend; sin inferir métricas ausentes." icon={HeartPulse}><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">{values.map(([label, value]) => <div key={label} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3"><p className="text-[11px] text-zinc-500">{label}</p><p className="mt-1 text-sm font-medium text-zinc-200">{value}</p></div>)}</div></Section>
+  }
+
+  const renderAlerts = () => (
+    <Section title="Alertas activas" description="Incidentes persistentes asociados a esta conexión." icon={AlertTriangle} action={onOpenAlerts ? <button onClick={onOpenAlerts} className="text-xs text-blue-300 hover:text-blue-200">Abrir Centro de Alertas</button> : null}>
+      {activeAlerts.length === 0 ? <p className="rounded-lg border border-emerald-900/70 bg-emerald-950/20 px-3 py-3 text-sm text-emerald-300">No hay alertas activas para esta conexión.</p> : <div className="space-y-2">{activeAlerts.slice(0, 3).map(alert => <div key={alert.id} className="rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-3"><div className="flex flex-wrap items-start justify-between gap-2"><p className="text-sm font-medium text-zinc-100">{alert.message}</p><span className="rounded-full border border-amber-800 px-2 py-0.5 text-[11px] font-medium text-amber-200">{alert.severity}</span></div><p className="mt-1 text-xs text-zinc-400">{alert.component} · {alert.action}</p></div>)}</div>}
+    </Section>
+  )
+
+  const renderAutomations = () => (
+    <Section title="Automatizaciones" description="Tareas programadas o disparadas por eventos para esta conexión." icon={Settings2} action={onOpenAutomations ? <button onClick={onOpenAutomations} className="text-xs text-blue-300 hover:text-blue-200">Abrir Centro de Automatizaciones</button> : null}>
+      {connectionAutomations.length === 0 ? <p className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">No hay automatizaciones asociadas a esta conexión.</p> : <div className="space-y-2">{connectionAutomations.slice(0, 3).map(automation => <div key={automation.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium text-zinc-100">{automation.name}</p><span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300">{automation.status}</span></div><p className="mt-1 text-xs text-zinc-500">{automation.trigger.type} · próxima ejecución: {automation.nextExecutionAt ? relativeTime(automation.nextExecutionAt) : 'No programada'}</p>{onExecuteAutomation ? <button onClick={() => onExecuteAutomation(automation.id)} disabled={automation.status !== 'active'} className="mt-2 inline-flex items-center gap-1 rounded border border-violet-800 px-2 py-1 text-xs text-violet-200 disabled:opacity-40"><RefreshCcw size={12} />Ejecutar ahora</button> : null}</div>)}</div>}
+    </Section>
+  )
+
+  const renderOperations = () => (
+    <Section title="Operaciones recientes" description="Jobs masivos que incluyen esta conexión." icon={Settings2} action={onOpenOperations ? <button onClick={onOpenOperations} className="text-xs text-blue-300 hover:text-blue-200">Abrir Centro de Operaciones</button> : null}>
+      {connectionOperations.length === 0 ? <p className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">No hay Jobs masivos registrados para esta conexión.</p> : <div className="space-y-2">{connectionOperations.slice(0, 3).map(operation => <div key={operation.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium text-zinc-100">{operation.operation.type}</p><span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300">{operation.status}</span></div><p className="mt-1 text-xs text-zinc-500">{operation.progress.completed}/{operation.progress.total} completadas · {operation.progress.errors} errores</p></div>)}</div>}
     </Section>
   )
 
@@ -285,7 +325,7 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
 
   const renderQuickActions = () => (
     <div className="flex flex-wrap gap-2">
-      <button onClick={onOpenMessages} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Enviar prueba</button>
+      <button onClick={onOpenTests} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Centro de Pruebas</button>
       <button onClick={runReconnect} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><RefreshCcw size={13} />Reconectar</button>
       <button onClick={() => window.open('https://business.facebook.com/latest/whatsapp_manager', '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><ExternalLink size={13} />Abrir Meta</button>
       <button onClick={() => void copyText(callbackUrl, 'callback', 'Callback copiado')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600">{copyKey === 'callback' ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}Copiar callback</button>
@@ -324,9 +364,9 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
         </div>
       </div>
 
-      {activeTab === 'summary' ? <div className="flex flex-col gap-5">{renderHealth()}{renderProvisioning()}{renderInsights()}{renderTimeline()}</div> : null}
-      {activeTab === 'activity' ? renderTimeline(80) : null}
-      {activeTab === 'tests' ? <Section title="Pruebas" description="Esta fase centraliza el acceso a la prueba existente sin crear un centro de pruebas nuevo." icon={Send}><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-sm text-zinc-200">Envía un mensaje de prueba desde la herramienta de Mensajes ya disponible.</p><p className="mt-1 text-xs text-zinc-500">El resultado aparecerá luego en Actividad y Health.</p><button onClick={onOpenMessages} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Ir a enviar prueba</button></div></Section> : null}
+      {activeTab === 'summary' ? <div className="flex flex-col gap-5">{renderOperationalState()}{renderAlerts()}{renderAutomations()}{renderOperations()}{renderHealth()}{renderProvisioning()}{renderInsights()}{renderTimeline()}</div> : null}
+      {activeTab === 'activity' ? <ActivityCenter events={activity} /> : null}
+      {activeTab === 'tests' ? <Section title="Centro de Pruebas" description="Ejecuta pruebas operacionales y revisa el recorrido completo sin volver a elegir esta conexión." icon={Send}><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-sm text-zinc-200">Smoke Test, mensajería, multimedia, Round Trip y webhook están centralizados en un único lugar.</p><p className="mt-1 text-xs text-zinc-500">La conexión actual se abre preseleccionada y el historial queda guardado localmente.</p><button onClick={onOpenTests} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Abrir Centro de Pruebas</button><button onClick={onOpenMessages} className="ml-2 mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><Send size={13} />Consola técnica</button></div></Section> : null}
       {activeTab === 'webhooks' ? <Section title="Webhooks" description="La administración detallada se mantiene en el módulo existente de webhooks." icon={Radio}><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-sm text-zinc-200">Callback actual: <span className="font-mono text-xs text-zinc-400">{callbackUrl}</span></p><p className="mt-1 text-xs text-zinc-500">Última recepción: {relativeTime(latestInbound?.timestamp)}.</p><button onClick={onOpenWebhooks} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><Radio size={13} />Administrar webhooks</button></div></Section> : null}
       {activeTab === 'diagnostics' ? <Section title="Diagnóstico" description="Problemas detectados y controles técnicos existentes." icon={ShieldCheck} action={diagnosticsLoading ? <Loader2 size={15} className="animate-spin text-zinc-500" /> : null}>{visibleDiagnostics.length === 0 ? <div className="rounded-lg border border-emerald-900/70 bg-emerald-950/20 px-3 py-3 text-sm text-emerald-300">No hay problemas detectados. {healthLabel(instance)}</div> : <div className="grid grid-cols-1 gap-2">{visibleDiagnostics.map(item => <ProblemRow key={`${item.code}-${item.message}`} item={item} />)}</div>}<div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">{healthChecks.map((check: HealthCheck) => <div key={check.code} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3"><p className="text-sm text-zinc-200">{check.label}</p><p className="mt-1 text-xs text-zinc-500">{check.status === 'passed' ? 'Correcto' : check.details || 'Sin detalle adicional'}</p></div>)}</div></Section> : null}
       {activeTab === 'settings' ? <Section title="Configuración" description="Datos operativos y accesos técnicos por niveles." icon={Settings2}><div className="grid grid-cols-1 gap-3 lg:grid-cols-2"><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-xs text-zinc-500">Callback de recepción</p><p className="mt-1 break-all font-mono text-xs text-zinc-300">{callbackUrl}</p><button onClick={() => void copyText(callbackUrl, 'settings-callback', 'Callback copiado')} className="mt-3 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><Clipboard size={13} />Copiar callback</button></div><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-xs text-zinc-500">Endpoint de envío</p><p className="mt-1 break-all font-mono text-xs text-zinc-300">{sendUrl}</p><button onClick={() => void copyText(sendUrl, 'send', 'Endpoint de envío copiado')} className="mt-3 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><Copy size={13} />Copiar endpoint</button></div></div><div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><button onClick={() => setAdminMode(value => !value)} className="flex w-full items-center justify-between text-sm font-medium text-zinc-100"><span className="flex items-center gap-2">{adminMode ? <EyeOff size={14} /> : <Eye size={14} />}Detalles técnicos</span></button>{adminMode ? <div className="mt-3 space-y-1.5 text-xs text-zinc-500"><p>Nombre interno: <span className="font-mono text-zinc-300">{instance.name}</span></p><p>ID: <span className="font-mono text-zinc-300">{instance.id}</span></p><p>Estado de ciclo: <span className="font-mono text-zinc-300">{instance.lifecycleState || '-'}</span></p><p>API key: <span className="font-mono text-zinc-300">{apiKeyInfo?.hasApiKey ? apiKeyInfo.maskedApiKey || 'generada' : 'sin generar'}</span></p><button onClick={() => onApiKey(instance.name)} className="mt-2 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><KeyRound size={13} />Administrar acceso interno</button></div> : <p className="mt-2 text-xs text-zinc-500">Los identificadores internos permanecen ocultos por defecto.</p>}</div><button onClick={() => onDelete(instance.name)} className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-red-900/70 px-3 py-2 text-xs text-red-300 hover:border-red-800"><Unplug size={13} />Eliminar conexión</button></Section> : null}

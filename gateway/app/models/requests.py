@@ -64,6 +64,16 @@ class SendMessageRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ActivityTestRecordRequest(BaseModel):
+    test_type: str = Field(min_length=1, max_length=60)
+    result: Literal["started", "passed", "warning", "failed"] = "started"
+    correlation_id: str = Field(min_length=1, max_length=120)
+    operator: str | None = Field(default=None, max_length=120)
+    duration_ms: int | None = Field(default=None, ge=0)
+    error: str | None = Field(default=None, max_length=500)
+    action: str | None = Field(default=None, max_length=500)
+
+
 class ButtonItem(BaseModel):
     display_text: str
     id: str

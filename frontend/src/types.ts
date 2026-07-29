@@ -235,6 +235,14 @@ export interface PipelineEvent {
   event: string
   instance: string
   timestamp: number
+  severity?: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  component?: string
+  description?: string
+  durationMs?: number | null
+  result?: string
+  action?: string | null
+  correlationId?: string | null
+  operator?: string | null
   direction?: 'inbound' | 'outbound' | 'system'
   type?: 'message' | 'delivery' | 'error'
   messageType?: string
@@ -328,6 +336,117 @@ export interface PipelineEvent {
     newsletter?: boolean
     statusMessage?: boolean
   }
+}
+
+export type AlertSeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+export type AlertStatus = 'new' | 'acknowledged' | 'in_progress' | 'resolved' | 'dismissed'
+
+export interface OperationalAlert {
+  id: string
+  type: string
+  severity: AlertSeverity
+  status: AlertStatus
+  company?: string | null
+  connection?: string | null
+  component: string
+  createdAt: number
+  updatedAt: number
+  message: string
+  action: string
+  evidence?: Record<string, unknown>
+}
+
+export interface AlertSummary {
+  active: number
+  critical: number
+  bySeverity: Record<AlertSeverity, number>
+  byConnection: Record<string, number>
+}
+
+export type AutomationStatus = 'active' | 'paused' | 'error'
+export type AutomationTriggerType = 'manual' | 'schedule' | 'interval' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'state_change' | 'event_received' | 'error_detected' | 'webhook' | 'provisioning_completed' | 'smoke_test_completed' | 'connection_created'
+export type AutomationActionType = 'run_smoke_test' | 'reconnect_connection' | 'retry_provisioning' | 'refresh_health' | 'refresh_dashboard' | 'create_alert' | 'close_alert' | 'register_event' | 'register_audit'
+
+export interface OperationalAutomation {
+  id: string
+  name: string
+  description?: string | null
+  status: AutomationStatus
+  provider?: string | null
+  company?: string | null
+  connection?: string | null
+  trigger: { type: AutomationTriggerType; intervalMinutes?: number; at?: string; event?: string | null }
+  conditions: Array<{ field: string; operator: string; value?: unknown }>
+  actions: Array<{ type: AutomationActionType; params?: Record<string, unknown> }>
+  retryPolicy: { maxAttempts: 0 | 1 | 3; backoff: boolean }
+  createdAt: number
+  updatedAt: number
+  lastExecutionAt?: number | null
+  lastResult?: 'succeeded' | 'failed' | 'skipped' | null
+  nextExecutionAt?: number | null
+}
+
+export interface AutomationExecution {
+  id: string
+  automationId: string
+  automationName: string
+  connection?: string | null
+  trigger: string
+  operator?: string | null
+  startedAt: number
+  completedAt?: number | null
+  durationMs?: number | null
+  status: 'running' | 'succeeded' | 'failed' | 'skipped'
+  attempts: Array<{ action: string; attempt: number; status: string; message: string; startedAt: number; completedAt: number }>
+  logs: Array<{ level: string; message: string }>
+  error?: string | null
+}
+
+export interface AutomationSummary {
+  active: number
+  paused: number
+  errors: number
+  failedExecutions: number
+  recentExecutions: AutomationExecution[]
+}
+
+export type OperationType = 'smoke_test' | 'reconnect' | 'provisioning_retry' | 'credentials_revalidate' | 'health_refresh' | 'reindex' | 'synchronize' | 'export' | 'import' | 'retry'
+export type OperationJobStatus = 'pending' | 'running' | 'completed' | 'error' | 'cancelled' | 'retrying'
+
+export interface OperationTargetResult {
+  connection: string
+  status: 'completed' | 'error' | 'skipped'
+  startedAt: number
+  completedAt: number
+  durationMs: number
+  message: string
+  error?: string | null
+}
+
+export interface OperationJob {
+  id: string
+  operation: { type: OperationType; policy: { maxAttempts: 0 | 1 | 3; backoff: boolean } }
+  targets: string[]
+  operator?: string | null
+  status: OperationJobStatus
+  createdAt: number
+  startedAt?: number | null
+  completedAt?: number | null
+  updatedAt: number
+  workerId?: string | null
+  cancelRequested?: boolean
+  results: OperationTargetResult[]
+  error?: string | null
+  sourceJobId?: string | null
+  progress: { total: number; completed: number; pending: number; errors: number; durationMs?: number | null; velocityPerSecond?: number | null; estimatedRemainingMs?: number | null }
+}
+
+export interface OperationSummary {
+  active: number
+  queued: number
+  errors: number
+  recent: OperationJob[]
+  workers: Array<{ id: string; status: 'online' | 'offline'; lastHeartbeat: number; concurrency: number }>
 }
 
 export type WebhookAuthType = 'NONE' | 'BEARER' | 'API_KEY' | 'BASIC' | 'CUSTOM_HEADERS'
