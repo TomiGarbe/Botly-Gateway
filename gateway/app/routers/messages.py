@@ -209,6 +209,13 @@ async def _send_message_unified(instance_name: str, request: Request):
                     raise HTTPException(status_code=422, detail="text es obligatorio para type=text")
                 _log_message_start(instance_name, "text", number)
                 logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
+                outbound_fp = mark_outbound(instance_name, number, "text", text.strip())
+                save_pipeline_event(
+                    stage="send_whatsapp",
+                    status="attempt",
+                    instance=instance_name,
+                    details={"kind": "text", "number": number, "outboundFingerprint": outbound_fp},
+                )
                 result = (
                     await get_official_whatsapp_provider().send_text(instance_name=instance_name, number=number, text=text.strip())
                     if _is_official_instance(instance_name)
@@ -220,6 +227,13 @@ async def _send_message_unified(instance_name: str, request: Request):
                     msg_type="text",
                     text=text.strip(),
                     evolution_result=result if isinstance(result, dict) else {},
+                )
+                save_pipeline_event(
+                    stage="send_whatsapp",
+                    status="accepted",
+                    instance=instance_name,
+                    message_id=str((result or {}).get("messageId") or "") or None if isinstance(result, dict) else None,
+                    details={"kind": "text", "provider": "meta_whatsapp" if _is_official_instance(instance_name) else "evolution"},
                 )
                 _log_message_success(instance_name, "text", number)
                 return result
@@ -288,6 +302,13 @@ async def _send_message_unified(instance_name: str, request: Request):
         if msg_type == "text":
             _log_message_start(instance_name, "text", number, payload.metadata)
             logger.info("[OUTBOUND][SEND] gateway send request", instance=instance_name, number=number, message_type="text")
+            outbound_fp = mark_outbound(instance_name, number, "text", (payload.text or "").strip())
+            save_pipeline_event(
+                stage="send_whatsapp",
+                status="attempt",
+                instance=instance_name,
+                details={"kind": "text", "number": number, "outboundFingerprint": outbound_fp},
+            )
             result = (
                 await get_official_whatsapp_provider().send_text(
                     instance_name=instance_name,
@@ -303,6 +324,13 @@ async def _send_message_unified(instance_name: str, request: Request):
                 msg_type="text",
                 text=(payload.text or "").strip(),
                 evolution_result=result if isinstance(result, dict) else {},
+            )
+            save_pipeline_event(
+                stage="send_whatsapp",
+                status="accepted",
+                instance=instance_name,
+                message_id=str((result or {}).get("messageId") or "") or None if isinstance(result, dict) else None,
+                details={"kind": "text", "provider": "meta_whatsapp" if _is_official_instance(instance_name) else "evolution"},
             )
             _log_message_success(instance_name, "text", number)
             return result
@@ -359,12 +387,24 @@ async def _send_message_unified(instance_name: str, request: Request):
             },
         ) from exc
     except MetaPlatformError as exc:
+        save_pipeline_event(
+            stage="send_whatsapp",
+            status="failed",
+            instance=instance_name,
+            details={"provider": "meta_whatsapp", "cause": str(exc), "action": "Revisar token, numero destino y ventana de mensajeria de Meta."},
+        )
         logger.warning("meta_whatsapp_send_failed", instance=instance_name, error=str(exc), meta_detail=exc.detail)
         raise HTTPException(
             status_code=exc.status_code,
             detail={"message": str(exc), "provider": "meta_whatsapp", "meta": exc.detail},
         ) from exc
     except Exception as exc:
+        save_pipeline_event(
+            stage="send_whatsapp",
+            status="failed",
+            instance=instance_name,
+            details={"cause": str(exc), "action": "Revisar la conectividad y el estado del proveedor de mensajeria."},
+        )
         status_code = getattr(exc, "status_code", None)
         if isinstance(status_code, int):
             logger.error("evolution_fail", instance=instance_name, error=str(exc))

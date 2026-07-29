@@ -7,9 +7,9 @@ from app.models.meta import MetaSignupCompleteRequest, MetaSignupConfigResponse
 from app.services import instance_auth
 from app.services.audit import audit_event
 from app.services.connection_metadata import set_connection_metadata
-from app.services.credential_manager import get_credential_manager
 from app.services.instances_contract import normalize_instance
-from app.services.meta_signup import MetaSignupError, get_meta_signup_service
+from app.services.meta import get_meta_onboarding_orchestrator
+from app.platforms.meta import MetaPlatformError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/meta/signup", tags=["meta-signup"])
@@ -17,21 +17,21 @@ router = APIRouter(prefix="/meta/signup", tags=["meta-signup"])
 
 @router.get("/config", response_model=MetaSignupConfigResponse)
 async def get_signup_config():
-    return get_meta_signup_service().public_config()
+    return get_meta_onboarding_orchestrator().public_config()
 
 
 @router.post("/complete", status_code=status.HTTP_201_CREATED)
 async def complete_signup(body: MetaSignupCompleteRequest):
-    service = get_meta_signup_service()
+    orchestrator = get_meta_onboarding_orchestrator()
     try:
-        completion = await service.complete_onboarding(
+        completion = await orchestrator.run(
             instance_name=body.instance_name,
             code=body.code,
             phone_number_id=body.phone_number_id,
             business_account_id=body.business_account_id,
             session_info=body.session_info,
         )
-    except MetaSignupError as exc:
+    except MetaPlatformError as exc:
         logger.warning(
             "meta_signup_complete_failed",
             instance=body.instance_name,
@@ -46,35 +46,24 @@ async def complete_signup(body: MetaSignupCompleteRequest):
         status_code = getattr(exc, "status_code", 502)
         raise HTTPException(status_code=status_code if isinstance(status_code, int) else 502, detail=str(exc))
 
-    credentials = completion.credentials
     result = completion.instance
     instance_auth.ensure_instance_key(body.instance_name, instance_id=body.instance_name)
-    get_credential_manager().upsert_official_credentials(
-        instance_name=body.instance_name,
-        access_token=credentials.access_token,
-        phone_number_id=credentials.phone_number_id,
-        business_account_id=credentials.business_account_id,
-        source="embedded_signup",
-        metadata={
-            "onboarding": "embedded_signup",
-        },
-    )
     audit_event(
         "embedded_signup_completed",
         instance=body.instance_name,
-        phoneNumberId=credentials.phone_number_id,
-        businessAccountId=credentials.business_account_id,
+        phoneNumberId=completion.credentials.phone_number_id,
+        businessAccountId=completion.credentials.business_account_id,
     )
 
     if isinstance(result, dict):
         result.setdefault("metadata", {})
         if isinstance(result["metadata"], dict):
-            result["metadata"]["embeddedSignup"] = credentials.public_dict()
+            result["metadata"]["embeddedSignup"] = completion.credentials.public_dict()
         set_connection_metadata(
             body.instance_name,
             {
                 "metadata": {
-                    "embeddedSignup": credentials.public_dict(),
+                    "embeddedSignup": completion.credentials.public_dict(),
                 },
             },
         )
@@ -89,3 +78,11 @@ async def complete_signup(body: MetaSignupCompleteRequest):
         "connectionType": "cloud",
         "integration": "WHATSAPP-BUSINESS",
     }
+
+
+@router.get("/onboarding/{instance_name}")
+async def onboarding_status(instance_name: str):
+    result = get_meta_onboarding_orchestrator().status(instance_name)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No existe estado de onboarding para esta instancia")
+    return result

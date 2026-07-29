@@ -50,6 +50,28 @@ export interface MetaSignupConfig {
   missing: string[]
 }
 
+export type MetaOnboardingStepName = 'oauth' | 'token' | 'discovery' | 'subscription' | 'phone' | 'webhook' | 'evolution' | 'credentials'
+
+export interface MetaOnboardingError {
+  code: string
+  message: string
+  stage?: string
+  resource?: string | null
+  action?: string
+}
+
+export interface MetaOnboardingStatus {
+  status: 'READY' | 'INCOMPLETE'
+  onboardingType?: string
+  steps: Partial<Record<MetaOnboardingStepName, boolean>>
+  completedStates?: Record<string, string>
+  warnings?: string[]
+  errors?: MetaOnboardingError[]
+  details?: Record<string, unknown>
+  blockingStage?: string
+  updatedAt?: string | null
+}
+
 export interface ChannelMethod {
   id: MethodId
   name: string

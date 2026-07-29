@@ -283,7 +283,9 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
             return {"status": "throttled", "normalized": normalized, "trace": trace, "classification": classification}
 
     try:
-        save_event(normalized)
+        persisted = save_event(normalized)
+        if not persisted:
+            raise RuntimeError("No se pudo persistir el evento de negocio en el almacenamiento del Gateway")
         logger.info("[MESSAGE][UPSERT] persisted", request_id=request_id, instance=instance, message_id=msg_id or None, direction=normalized.get("direction"), subtype=normalized.get("subtype"))
         trace["persist"] = {"status": "ok"}
         _inc("persist_ok_total")

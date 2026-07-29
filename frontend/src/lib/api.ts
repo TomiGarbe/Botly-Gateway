@@ -1,5 +1,5 @@
 import type { GatewayConfig } from './config'
-import type { ChannelCatalogItem, ChannelCatalogResponse, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
+import type { ChannelCatalogItem, ChannelCatalogResponse, CoexistenceState, ConnectionDiagnosticsResponse, CreateConnectionPayload, Instance, InstanceApiKey, InstanceCreationResult, InstanceState, MetaOnboardingStatus, MetaSignupConfig, QRResponse, InstanceWebhook, WebhookAuthType, WebhookDeliveryMetrics, WebhookDispatchLog } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10000
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
@@ -327,6 +327,10 @@ export const api = {
       const parsed = normalizeInstance(raw)
       if (!parsed) throw new ApiError(502, 'Respuesta invalida al completar la conexion oficial')
       return parsed
+    },
+    status: (cfg: GatewayConfig, instanceName: string) => {
+      assertInstanceName(instanceName)
+      return request<MetaOnboardingStatus>(cfg, 'GET', `/meta/signup/onboarding/${instanceName}`, undefined, { retries: 0, timeoutMs: 5000 })
     },
   },
 

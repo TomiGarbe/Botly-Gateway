@@ -67,6 +67,54 @@ _business_event_keys_max = max(1000, _settings.webhook_event_retention * 3)
 _media_index_dir = Path(_settings.media_cache_dir) / "media_index"
 _media_index_dir.mkdir(parents=True, exist_ok=True)
 
+
+def _business_events_path() -> Path:
+    return Path(str(getattr(get_settings(), "webhook_events_path", "/tmp/botly_webhook_events.json")))
+
+
+def _restore_business_events() -> None:
+    """Restore the bounded timeline without making a corrupt file fatal."""
+    path = _business_events_path()
+    if not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return
+        for event in reversed(items[-_settings.webhook_event_retention :]):
+            if isinstance(event, dict) and event.get("layer") == "business":
+                _business_events.appendleft(event)
+                key = _event_dedupe_key(event)
+                if key:
+                    _business_event_keys_order.append(key)
+                    _business_event_keys.add(key)
+    except Exception as exc:
+        logger.warning("business_event_store_restore_failed", path=str(path), error=str(exc))
+
+
+def _persist_business_events() -> bool:
+    path = _business_events_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"items": list(_business_events)}
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), default=str), encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+        return True
+    except Exception as exc:
+        logger.error(
+            "business_event_store_persist_failed",
+            path=str(path),
+            error=str(exc),
+            action="Verificar permisos y espacio del volumen persistente del Gateway.",
+        )
+        return False
+
 STATUS_ALIASES = {
     "pending": "sent",
     "server_ack": "sent",
@@ -886,10 +934,11 @@ def normalize_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def save_business_event(event: dict[str, Any]) -> None:
+def save_business_event(event: dict[str, Any]) -> bool:
     if event.get("layer") != "business":
-        return
+        return True
     _business_events.appendleft(event)
+    return _persist_business_events()
 
 
 def save_raw_event(event: dict[str, Any]) -> None:
@@ -898,12 +947,12 @@ def save_raw_event(event: dict[str, Any]) -> None:
     _raw_events.appendleft(event)
 
 
-def save_event(normalized: dict[str, Any]) -> None:
+def save_event(normalized: dict[str, Any]) -> bool:
     if normalized.get("layer") != "business":
-        return
+        return True
     dedupe_key = _event_dedupe_key(normalized)
     if dedupe_key and dedupe_key in _business_event_keys:
-        return
+        return True
     if dedupe_key:
         _business_event_keys_order.append(dedupe_key)
         _business_event_keys.add(dedupe_key)
@@ -911,6 +960,7 @@ def save_event(normalized: dict[str, Any]) -> None:
             old = _business_event_keys_order.popleft()
             _business_event_keys.discard(old)
     _business_events.appendleft(normalized)
+    persisted = _persist_business_events()
     media = normalized.get("media")
     message = normalized.get("message") or {}
     if isinstance(media, dict):
@@ -954,6 +1004,7 @@ def save_event(normalized: dict[str, Any]) -> None:
             direct_path=media.get("directPath"),
             has_media_key=bool(media.get("mediaKey")),
         )
+    return persisted
 
 
 def _event_dedupe_key(normalized: dict[str, Any]) -> str | None:
@@ -966,6 +1017,11 @@ def _event_dedupe_key(normalized: dict[str, Any]) -> str | None:
     direction = str(normalized.get("direction") or "").strip()
     subtype = str(normalized.get("subtype") or normalized.get("messageType") or "").strip()
     return "|".join([instance, event, msg_id, direction, subtype])
+
+
+# The helper is deliberately invoked after _event_dedupe_key is defined.  The
+# file is bounded by WEBHOOK_EVENT_RETENTION, so startup work stays bounded too.
+_restore_business_events()
 
 
 def save_pipeline_event(

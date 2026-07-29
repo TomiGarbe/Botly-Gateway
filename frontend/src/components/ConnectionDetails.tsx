@@ -1,10 +1,18 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { ArrowLeft, BadgeCheck, CheckCircle2, Clipboard, Copy, Eye, EyeOff, KeyRound, ListChecks, Loader2, QrCode, RefreshCcw, ShieldCheck, Smartphone, TerminalSquare, Trash2, Wifi } from 'lucide-react'
+import {
+  Activity, AlertTriangle, ArrowLeft, BadgeCheck, Check, CheckCircle2, Clipboard,
+  Cloud, Copy, ExternalLink, Eye, EyeOff, HeartPulse, KeyRound, ListChecks,
+  Loader2, Radio, RefreshCcw, Send, Settings2, ShieldCheck,
+  Smartphone, TerminalSquare, Unplug,
+} from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { GatewayConfig } from '../lib/config'
-import type { ConnectionDiagnostic, Instance, PipelineEvent, Toast } from '../types'
-import { connectionIconTone, connectionTypeLabel, diagnosticText, eventDescription, eventTitle, formatActivity, healthLabel, isOfficialConnection, recommendation, statusLabel, statusTone } from '../lib/connectionUx'
+import type { ConnectionDiagnostic, HealthCheck, Instance, MetaOnboardingStatus, PipelineEvent, Toast } from '../types'
+import { connectionIconTone, connectionTypeLabel, diagnosticText, eventDescription, eventTitle, formatActivity, healthLabel, isOfficialConnection, statusLabel, statusTone } from '../lib/connectionUx'
+
+type WorkspaceTab = 'summary' | 'activity' | 'tests' | 'webhooks' | 'diagnostics' | 'settings'
+type ComponentState = 'healthy' | 'attention' | 'pending'
 
 interface Props {
   config: GatewayConfig
@@ -16,31 +24,85 @@ interface Props {
   onReconnect: (name: string) => void
   onApiKey: (name: string) => void
   onDelete: (name: string) => void
+  onOpenMessages: () => void
+  onOpenWebhooks: () => void
   qrEnabled: boolean
 }
+
+const TABS: Array<{ id: WorkspaceTab; label: string }> = [
+  { id: 'summary', label: 'Resumen' },
+  { id: 'activity', label: 'Actividad' },
+  { id: 'tests', label: 'Pruebas' },
+  { id: 'webhooks', label: 'Webhooks' },
+  { id: 'diagnostics', label: 'Diagnóstico' },
+  { id: 'settings', label: 'Configuración' },
+]
+
+const PROVISIONING_STEPS: Array<{ key: string; label: string; backendKey?: keyof NonNullable<MetaOnboardingStatus['steps']> }> = [
+  { key: 'oauth', label: 'OAuth', backendKey: 'oauth' },
+  { key: 'token', label: 'Token', backendKey: 'token' },
+  { key: 'discovery', label: 'Discovery', backendKey: 'discovery' },
+  { key: 'subscription', label: 'Subscription', backendKey: 'subscription' },
+  { key: 'phone_registration', label: 'Phone Registration', backendKey: 'phone' },
+  { key: 'phone_verification', label: 'Phone Verification', backendKey: 'phone' },
+  { key: 'webhook', label: 'Webhook', backendKey: 'webhook' },
+  { key: 'evolution', label: 'Evolution', backendKey: 'evolution' },
+  { key: 'credentials', label: 'Credentials', backendKey: 'credentials' },
+  { key: 'ready', label: 'Ready' },
+]
 
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '')
 }
 
-function CheckRow({ ok, label, detail }: { ok: boolean; label: string; detail?: string }) {
+function relativeTime(value?: string | number | null): string {
+  if (!value) return 'Sin registro'
+  const timestamp = typeof value === 'number' ? value : new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return 'Sin registro'
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return 'hace menos de un minuto'
+  if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`
+  if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`
+  return `hace ${Math.floor(seconds / 86400)} d`
+}
+
+function componentTone(state: ComponentState): string {
+  if (state === 'healthy') return 'border-emerald-900/70 bg-emerald-950/20 text-emerald-300'
+  if (state === 'attention') return 'border-amber-900/70 bg-amber-950/20 text-amber-300'
+  return 'border-zinc-700 bg-zinc-950/50 text-zinc-400'
+}
+
+function componentLabel(state: ComponentState): string {
+  return state === 'healthy' ? 'Operativo' : state === 'attention' ? 'Revisar' : 'Sin confirmar'
+}
+
+function Section({ title, description, icon: Icon, children, action }: { title: string; description?: string; icon: typeof Activity; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2.5">
-      <CheckCircle2 size={15} className={ok ? 'mt-0.5 shrink-0 text-emerald-400' : 'mt-0.5 shrink-0 text-zinc-600'} />
-      <div className="min-w-0">
-        <p className={ok ? 'text-sm text-zinc-100' : 'text-sm text-zinc-400'}>{label}</p>
-        {detail ? <p className="mt-0.5 text-xs text-zinc-500">{detail}</p> : null}
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-zinc-400"><Icon size={16} /></div>
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
+            {description ? <p className="mt-0.5 text-xs text-zinc-500">{description}</p> : null}
+          </div>
+        </div>
+        {action}
       </div>
-    </div>
+      {children}
+    </section>
   )
 }
 
-function ProblemRow({ item }: { item: ConnectionDiagnostic }) {
-  const text = diagnosticText(item)
+function HealthItem({ label, state, lastChange, detail }: { label: string; state: ComponentState; lastChange?: string | number | null; detail: string }) {
   return (
-    <div className={`rounded-md border px-3 py-2.5 text-sm ${text.tone}`}>
-      <p className="font-medium">{text.title}</p>
-      <p className="mt-1 text-xs text-zinc-300">{text.action}</p>
+    <div className={`rounded-lg border p-3 ${componentTone(state)}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-zinc-100">{label}</p>
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><span className="h-1.5 w-1.5 rounded-full bg-current" />{componentLabel(state)}</span>
+      </div>
+      <p className="mt-2 text-xs text-zinc-400">{detail}</p>
+      <p className="mt-2 text-[11px] text-zinc-500">Último cambio: {relativeTime(lastChange)}</p>
     </div>
   )
 }
@@ -48,9 +110,9 @@ function ProblemRow({ item }: { item: ConnectionDiagnostic }) {
 function ActivityRow({ event }: { event: PipelineEvent }) {
   return (
     <div className="flex gap-3 border-b border-zinc-800 py-3 last:border-b-0">
-      <div className="mt-1 h-2 w-2 rounded-full bg-zinc-600" />
+      <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-zinc-500" />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="text-sm font-medium text-zinc-200">{eventTitle(event)}</p>
           <span className="text-xs text-zinc-600">{formatActivity(event.timestamp)}</span>
         </div>
@@ -60,14 +122,31 @@ function ActivityRow({ event }: { event: PipelineEvent }) {
   )
 }
 
-export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete, qrEnabled }: Props) {
+function ProblemRow({ item }: { item: ConnectionDiagnostic }) {
+  const text = diagnosticText(item)
+  return (
+    <div className={`rounded-lg border px-3 py-3 text-sm ${text.tone}`}>
+      <p className="font-medium">{text.title}</p>
+      <p className="mt-1 text-xs text-zinc-300">{text.action}</p>
+    </div>
+  )
+}
+
+function StepState({ state }: { state: 'complete' | 'current' | 'pending' | 'error' }) {
+  if (state === 'complete') return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-zinc-950" aria-label="Completada"><Check size={13} strokeWidth={3} /></span>
+  if (state === 'error') return <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white" aria-label="Error"><AlertTriangle size={12} /></span>
+  if (state === 'current') return <span className="h-5 w-5 animate-pulse rounded-full border-2 border-blue-400" aria-label="En curso" />
+  return <span className="h-5 w-5 rounded-full border border-zinc-600" aria-label="Pendiente" />
+}
+
+export default function ConnectionDetails({ config, instance, onBack, onToast, onRefresh, onQR, onReconnect, onApiKey, onDelete, onOpenMessages, onOpenWebhooks, qrEnabled }: Props) {
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary')
   const [adminMode, setAdminMode] = useState(false)
   const [copyKey, setCopyKey] = useState('')
-  const activityRef = useRef<HTMLDivElement>(null)
   const official = isOfficialConnection(instance)
   const tone = statusTone(instance)
   const publicBaseUrl = normalizeBaseUrl(config.publicBaseUrl || config.url)
-  const receiveUrl = `${publicBaseUrl}/webhooks/evolution`
+  const callbackUrl = `${publicBaseUrl}/webhooks/${official ? 'meta' : 'evolution'}`
   const sendUrl = `${publicBaseUrl}/messages/${instance.name}`
 
   const { data: diagnosticsData, isLoading: diagnosticsLoading } = useSWR(
@@ -75,7 +154,7 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
     () => api.instances.diagnostics(config, instance.name),
     { refreshInterval: 20000, revalidateOnFocus: true }
   )
-  const { data: activityData, isLoading: activityLoading } = useSWR(
+  const { data: activityData } = useSWR(
     config.apiKey ? ['connection-activity', config.url, instance.name] : null,
     () => api.webhooks.events<PipelineEvent>(config, instance.name, 80),
     { refreshInterval: 20000, revalidateOnFocus: true }
@@ -85,22 +164,28 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
     () => api.instances.getApiKey(config, instance.name),
     { refreshInterval: 30000, revalidateOnFocus: false }
   )
+  const { data: onboarding, error: onboardingError, isLoading: onboardingLoading } = useSWR(
+    official && config.apiKey ? ['connection-onboarding', config.url, instance.name] : null,
+    () => api.metaSignup.status(config, instance.name),
+    { refreshInterval: 20000, revalidateOnFocus: true, shouldRetryOnError: false }
+  )
 
   const activity = useMemo(() => {
     const items = Array.isArray(activityData?.items) ? activityData.items : []
-    return [...items].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)).slice(0, 20)
+    return [...items].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
   }, [activityData])
-
   const supportDiagnostics = diagnosticsData?.supportDiagnostics || []
-  const visibleDiagnostics = [
-    ...(diagnosticsData?.diagnostics || instance.diagnostics || []),
-    ...supportDiagnostics,
-  ].filter(item => item.severity !== 'info')
+  const visibleDiagnostics = [...(diagnosticsData?.diagnostics || instance.diagnostics || []), ...supportDiagnostics].filter(item => item.severity !== 'info')
   const healthChecks = diagnosticsData?.healthChecks || instance.healthChecks || []
-  const webhookOk = healthChecks.some(item => item.code === 'webhook_configured' && item.status === 'passed')
-  const configOk = healthChecks.every(item => !item.required || item.status === 'passed') && visibleDiagnostics.length === 0
-  const botlyOk = apiKeyInfo?.enabled === true || apiKeyInfo?.hasApiKey === true
-  const mobileOk = official ? instance.coexistence?.whatsappBusinessAppAvailable === true : false
+  const hasInbound = activity.some(item => item.direction === 'inbound')
+  const hasOutbound = activity.some(item => item.direction === 'outbound' || item.fromMe)
+  const latestEvent = activity[0]
+  const latestInbound = activity.find(item => item.direction === 'inbound')
+  const latestOutbound = activity.find(item => item.direction === 'outbound' || item.fromMe)
+  const webhookCheck = healthChecks.find(item => item.code.includes('webhook'))
+  const credentialsCheck = healthChecks.find(item => item.code.includes('token') || item.code.includes('credential'))
+  const hasErrors = visibleDiagnostics.some(item => item.severity === 'error')
+  const environment = /localhost|127\.0\.0\.1/i.test(publicBaseUrl) ? 'Desarrollo' : 'Producción'
 
   const copyText = async (value: string, key: string, label: string) => {
     try {
@@ -113,7 +198,7 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
     }
   }
 
-  const runReconnect = async () => {
+  const runReconnect = () => {
     try {
       onReconnect(instance.name)
       onRefresh()
@@ -122,179 +207,129 @@ export default function ConnectionDetails({ config, instance, onBack, onToast, o
     }
   }
 
+  const healthItems = [
+    { label: 'Meta', state: official ? (onboarding?.status === 'READY' ? 'healthy' : onboardingError ? 'attention' : 'pending') : 'pending', lastChange: onboarding?.updatedAt, detail: official ? (onboarding?.status === 'READY' ? 'Onboarding oficial confirmado.' : onboarding?.blockingStage ? `Bloqueado en ${onboarding.blockingStage}.` : 'Esperando confirmación del onboarding.') : 'No aplica a esta conexión.' },
+    { label: 'Gateway', state: instance.status === 'open' ? 'healthy' : 'attention', lastChange: latestEvent?.timestamp || instance.lastSeen, detail: instance.status === 'open' ? 'La conexión está disponible en Gateway.' : 'Gateway informa que la conexión no está abierta.' },
+    { label: 'Evolution', state: instance.status === 'open' ? 'healthy' : 'pending', lastChange: latestEvent?.timestamp, detail: official ? 'Instancia Cloud aprovisionada por Evolution.' : 'Transporte Evolution para WhatsApp Web.' },
+    { label: 'Webhook', state: onboarding?.steps?.webhook ? 'healthy' : webhookCheck?.status === 'failed' ? 'attention' : 'pending', lastChange: onboarding?.updatedAt || latestInbound?.timestamp, detail: onboarding?.steps?.webhook ? 'Callback confirmado para esta WABA.' : webhookCheck?.details || 'Sin confirmación reciente de recepción.' },
+    { label: 'Credenciales', state: onboarding?.steps?.credentials || credentialsCheck?.status === 'passed' ? 'healthy' : credentialsCheck?.status === 'failed' ? 'attention' : 'pending', lastChange: onboarding?.updatedAt || apiKeyInfo?.createdAt, detail: onboarding?.steps?.credentials ? 'Credenciales oficiales persistidas.' : credentialsCheck?.details || 'Sin confirmación de credenciales.' },
+    { label: 'Recepción', state: hasInbound ? 'healthy' : instance.status === 'open' ? 'pending' : 'attention', lastChange: latestInbound?.timestamp, detail: hasInbound ? 'Hay mensajes entrantes procesados.' : 'No hay eventos entrantes registrados.' },
+    { label: 'Envío', state: hasOutbound ? 'healthy' : instance.status === 'open' ? 'pending' : 'attention', lastChange: latestOutbound?.timestamp, detail: hasOutbound ? 'Hay mensajes salientes registrados.' : 'Todavía no se registró un envío.' },
+    { label: 'Sincronización', state: latestEvent ? (hasErrors ? 'attention' : 'healthy') : 'pending', lastChange: latestEvent?.timestamp, detail: latestEvent ? 'Actividad reciente disponible en la línea de tiempo.' : 'No hay actividad para sincronizar.' },
+  ] as Array<{ label: string; state: ComponentState; lastChange?: string | number | null; detail: string }>
+
+  const insights = useMemo(() => {
+    const entries: Array<{ title: string; detail: string; tone: ComponentState }> = []
+    const latest = Number(latestEvent?.timestamp || 0)
+    if (!latest || Date.now() - latest > 7 * 86400000) entries.push({ title: 'Sin actividad reciente', detail: 'No hay eventos en los últimos siete días.', tone: 'attention' })
+    if (!activity.some(event => Boolean(event.media))) entries.push({ title: 'Sin multimedia', detail: 'Todavía no se registraron mensajes con archivos o imágenes.', tone: 'pending' })
+    if (!hasInbound) entries.push({ title: 'Recepción sin eventos', detail: 'Conviene confirmar el callback con un mensaje entrante.', tone: 'pending' })
+    const retries = activity.filter(event => Number(event.details?.retriesUsed || event.details?.retryCount || 0) > 0).length
+    if (retries > 0) entries.push({ title: 'Reintentos detectados', detail: `${retries} eventos recientes registran reintentos de entrega.`, tone: 'attention' })
+    if (hasErrors) entries.push({ title: 'Diagnóstico pendiente', detail: 'Hay advertencias o errores que requieren revisión.', tone: 'attention' })
+    if (entries.length === 0) entries.push({ title: 'Operación estable', detail: 'No se detectaron recomendaciones automáticas con la actividad disponible.', tone: 'healthy' })
+    return entries.slice(0, 4)
+  }, [activity, hasErrors, hasInbound, latestEvent])
+
+  const provisioningState = (step: typeof PROVISIONING_STEPS[number], index: number): 'complete' | 'current' | 'pending' | 'error' => {
+    const hasError = Boolean(onboarding?.errors?.length)
+    const complete = step.key === 'ready' ? onboarding?.status === 'READY' : Boolean(step.backendKey && onboarding?.steps?.[step.backendKey])
+    if (complete) return 'complete'
+    const completedCount = PROVISIONING_STEPS.filter(candidate => candidate.key === 'ready' ? onboarding?.status === 'READY' : Boolean(candidate.backendKey && onboarding?.steps?.[candidate.backendKey])).length
+    if (hasError && index === completedCount) return 'error'
+    if (!hasError && onboarding && index === completedCount) return 'current'
+    return 'pending'
+  }
+
+  const renderHealth = () => (
+    <Section title="Health" description="Estado operativo por componente; cada indicador incluye su última señal." icon={HeartPulse}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {healthItems.map(item => <HealthItem key={item.label} {...item} />)}
+      </div>
+    </Section>
+  )
+
+  const renderProvisioning = () => (
+    <Section title="Provisioning" description={official ? 'Estado real informado por el Meta Onboarding Engine.' : 'La conexión Web no utiliza el onboarding oficial de Meta.'} icon={ListChecks} action={onboardingLoading ? <Loader2 size={15} className="animate-spin text-zinc-500" /> : null}>
+      {!official ? (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">Esta conexión se aprovisiona mediante QR/Evolution. No tiene etapas de Embedded Signup.</p>
+      ) : onboardingError ? (
+        <div className="rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-3 text-sm text-amber-300">No hay estado de onboarding disponible todavía. Completa Embedded Signup o vuelve a actualizar la conexión.</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            {PROVISIONING_STEPS.map((step, index) => {
+              const state = provisioningState(step, index)
+              return <div key={step.key} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2.5"><StepState state={state} /><span className="text-sm text-zinc-200">{step.label}</span></div>
+            })}
+          </div>
+          {onboarding?.errors?.length ? <div className="mt-3 rounded-lg border border-red-900/70 bg-red-950/20 px-3 py-3 text-sm text-red-200"><p className="font-medium">{onboarding.errors[onboarding.errors.length - 1].message}</p><p className="mt-1 text-xs text-zinc-300">{onboarding.errors[onboarding.errors.length - 1].action || 'Revisa la etapa indicada y vuelve a intentar.'}</p></div> : null}
+        </>
+      )}
+    </Section>
+  )
+
+  const renderTimeline = (limit = 6) => (
+    <Section title="Timeline" description="Eventos importantes ordenados del más reciente al más antiguo." icon={Activity} action={<button onClick={() => setActiveTab('activity')} className="text-xs text-blue-300 hover:text-blue-200">Ver todos</button>}>
+      {activity.length === 0 ? <p className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">No se registraron eventos para esta conexión.</p> : <div>{activity.slice(0, limit).map(event => <ActivityRow key={`${event.id || event.timestamp}-${event.event}`} event={event} />)}</div>}
+    </Section>
+  )
+
+  const renderInsights = () => (
+    <Section title="Insights" description="Recomendaciones automáticas basadas en reglas simples y actividad disponible." icon={Radio}>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {insights.map(item => <div key={item.title} className={`rounded-lg border px-3 py-3 ${componentTone(item.tone)}`}><p className="text-sm font-medium text-zinc-100">{item.title}</p><p className="mt-1 text-xs text-zinc-400">{item.detail}</p></div>)}
+      </div>
+    </Section>
+  )
+
+  const renderQuickActions = () => (
+    <div className="flex flex-wrap gap-2">
+      <button onClick={onOpenMessages} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Enviar prueba</button>
+      <button onClick={runReconnect} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><RefreshCcw size={13} />Reconectar</button>
+      <button onClick={() => window.open('https://business.facebook.com/latest/whatsapp_manager', '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><ExternalLink size={13} />Abrir Meta</button>
+      <button onClick={() => void copyText(callbackUrl, 'callback', 'Callback copiado')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600">{copyKey === 'callback' ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}Copiar callback</button>
+      <button onClick={() => setActiveTab('diagnostics')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><TerminalSquare size={13} />Ver logs</button>
+      <button onClick={() => setActiveTab('activity')} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><Activity size={13} />Ver eventos</button>
+    </div>
+  )
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <button onClick={onBack} className="rounded-md border border-zinc-800 p-2 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200" title="Volver">
-            <ArrowLeft size={16} />
-          </button>
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-zinc-100">{instance.name}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${connectionIconTone(instance)}`}>
-                {official ? <BadgeCheck size={13} /> : <QrCode size={13} />}
-                {connectionTypeLabel(instance)}
-              </span>
-              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${tone.text} ${tone.border}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-                {statusLabel(instance)}
-              </span>
+    <div className="mx-auto flex max-w-7xl flex-col gap-5">
+      <header className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <button onClick={onBack} className="mt-0.5 rounded-md border border-zinc-800 p-2 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200" title="Volver"><ArrowLeft size={16} /></button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-xl font-semibold text-zinc-100">{instance.profileName || instance.name}</h2>
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${tone.text} ${tone.border}`}><span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />{statusLabel(instance)}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                <span>{instance.phone || 'Número pendiente'}</span><span className="text-zinc-700">•</span>
+                <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 ${connectionIconTone(instance)}`}>{official ? <BadgeCheck size={13} /> : <Cloud size={13} />}{connectionTypeLabel(instance)}</span>
+                <span className="rounded-md border border-zinc-800 px-2 py-1">{environment}</span>
+                <span>Estado desde {relativeTime(instance.createdAt || instance.lastSeen)}</span>
+              </div>
             </div>
           </div>
+          <div className="flex items-center gap-2"><button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><RefreshCcw size={13} />Actualizar</button>{qrEnabled && !official && instance.status !== 'open' ? <button onClick={() => onQR(instance.name)} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Smartphone size={13} />Escanear QR</button> : null}</div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600">
-            <RefreshCcw size={13} />
-            Actualizar
-          </button>
-          <button onClick={() => void runReconnect()} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600">
-            <RefreshCcw size={13} />
-            Reconectar
-          </button>
-          {qrEnabled && !official && instance.status !== 'open' ? (
-            <button onClick={() => onQR(instance.name)} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500">
-              <QrCode size={13} />
-              Escanear QR
-            </button>
-          ) : null}
+        <div className="mt-4 border-t border-zinc-800 pt-4">{renderQuickActions()}</div>
+      </header>
+
+      <div className="overflow-x-auto border-b border-zinc-800">
+        <div className="flex min-w-max gap-1">
+          {TABS.map(tab => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`border-b-2 px-3 py-2.5 text-sm transition-colors ${activeTab === tab.id ? 'border-blue-400 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>{tab.label}</button>)}
         </div>
       </div>
 
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <p className="text-xs text-zinc-500">Estado</p>
-          <p className={`mt-2 text-sm font-semibold ${tone.text}`}>{statusLabel(instance)}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <p className="text-xs text-zinc-500">Salud</p>
-          <p className="mt-2 text-sm font-semibold text-zinc-100">{healthLabel(instance)}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <p className="text-xs text-zinc-500">Ultima actividad</p>
-          <p className="mt-2 text-sm font-semibold text-zinc-100">{formatActivity(activity[0]?.timestamp || instance.lastSeen)}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <p className="text-xs text-zinc-500">Recomendacion</p>
-          <p className="mt-2 text-sm font-semibold text-zinc-100">{recommendation(instance, activity)}</p>
-        </div>
-      </section>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="flex flex-col gap-5">
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <ListChecks size={16} className="text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-100">Informacion</h3>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <CheckRow ok={instance.status === 'open'} label="Conectado" detail={instance.status === 'open' ? 'La conexion puede enviar y recibir mensajes.' : 'La conexion no esta disponible ahora.'} />
-              <CheckRow ok={official ? mobileOk : true} label="Aplicacion movil disponible" detail={official ? 'Disponible cuando el numero conserva la aplicacion movil.' : 'No aplica para WhatsApp Web.'} />
-              <CheckRow ok={webhookOk} label="Recepcion de mensajes configurada" detail={webhookOk ? 'Los mensajes entrantes llegan al sistema.' : 'Conviene actualizar la conexion.'} />
-              <CheckRow ok={configOk} label="Configuracion completa" detail={configOk ? 'No hay pasos pendientes.' : 'Hay advertencias para revisar.'} />
-              <CheckRow ok={botlyOk} label="Botly conectado" detail={botlyOk ? 'La conexion esta lista para operar con Botly.' : 'Revisa el acceso interno desde modo administrador.'} />
-              <CheckRow ok label="Acciones disponibles" detail="Puedes reconectar, actualizar, ver actividad o eliminar la conexion." />
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <ShieldCheck size={16} className="text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-100">Diagnostico</h3>
-              {diagnosticsLoading ? <Loader2 size={13} className="animate-spin text-zinc-500" /> : null}
-            </div>
-            {visibleDiagnostics.length === 0 ? (
-              <div className="rounded-md border border-emerald-900/60 bg-emerald-950/20 px-3 py-3 text-sm text-emerald-300">
-                Todo funciona correctamente.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2">
-                {visibleDiagnostics.map(item => <ProblemRow key={`${item.code}-${item.message}`} item={item} />)}
-              </div>
-            )}
-          </section>
-
-          <section ref={activityRef} className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-zinc-100">Actividad reciente</h3>
-              {activityLoading ? <Loader2 size={13} className="animate-spin text-zinc-500" /> : null}
-            </div>
-            {activity.length === 0 ? (
-              <p className="rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-sm text-zinc-500">No se detecto actividad reciente.</p>
-            ) : (
-              <div>{activity.map(event => <ActivityRow key={`${event.id || event.timestamp}-${event.event}`} event={event} />)}</div>
-            )}
-          </section>
-        </div>
-
-        <aside className="flex flex-col gap-5">
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <h3 className="text-sm font-semibold text-zinc-100">Acciones rapidas</h3>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              <button onClick={() => void runReconnect()} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-sm text-zinc-300 hover:border-zinc-700">
-                <RefreshCcw size={14} />
-                Reconectar
-              </button>
-              <button onClick={onRefresh} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-sm text-zinc-300 hover:border-zinc-700">
-                <RefreshCcw size={14} />
-                Actualizar
-              </button>
-              <button onClick={() => activityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-sm text-zinc-300 hover:border-zinc-700">
-                <TerminalSquare size={14} />
-                Ver actividad
-              </button>
-              {qrEnabled && !official && instance.status !== 'open' ? (
-                <button onClick={() => onQR(instance.name)} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-sm text-zinc-300 hover:border-zinc-700">
-                  <QrCode size={14} />
-                  Escanear QR
-                </button>
-              ) : null}
-              <button onClick={() => onDelete(instance.name)} className="flex items-center gap-2 rounded-md border border-red-900/70 px-3 py-2 text-left text-sm text-red-300 hover:border-red-800">
-                <Trash2 size={14} />
-                Eliminar conexion
-              </button>
-            </div>
-          </section>
-
-          {official && instance.coexistence?.state === 'enabled' ? (
-            <section className="rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-4 text-sm text-emerald-300">
-              <p className="flex items-center gap-2 font-medium"><Smartphone size={15} /> Aplicacion movil disponible</p>
-              <p className="mt-2 text-xs text-zinc-300">Puedes seguir usando la aplicacion movil mientras Botly opera con WhatsApp Oficial.</p>
-            </section>
-          ) : null}
-
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <button onClick={() => setAdminMode(v => !v)} className="flex w-full items-center justify-between text-sm font-semibold text-zinc-100">
-              <span className="flex items-center gap-2">{adminMode ? <EyeOff size={14} /> : <Eye size={14} />} Modo administrador</span>
-            </button>
-            {adminMode ? (
-              <div className="mt-3 space-y-2 text-xs text-zinc-500">
-                <p>Nombre interno: <span className="font-mono text-zinc-300">{instance.name}</span></p>
-                <p>ID interno: <span className="font-mono text-zinc-300">{instance.id}</span></p>
-                <p>Tipo interno: <span className="font-mono text-zinc-300">{instance.connectionType || '-'}</span></p>
-                <p>Estado interno: <span className="font-mono text-zinc-300">{instance.lifecycleState || '-'}</span></p>
-                <p>Credenciales: <span className="font-mono text-zinc-300">{apiKeyInfo?.hasApiKey ? apiKeyInfo.maskedApiKey || 'generadas' : 'sin generar'}</span></p>
-                <div className="grid grid-cols-1 gap-2 pt-2">
-                  <button onClick={() => copyText(receiveUrl, 'receive', 'URL de recepcion copiada')} className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-700">
-                    <span className="flex items-center gap-2"><Clipboard size={13} /> Copiar URL de recepcion</span>
-                    {copyKey === 'receive' ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                  </button>
-                  <button onClick={() => copyText(sendUrl, 'send', 'URL para enviar mensajes copiada')} className="flex items-center justify-between gap-3 rounded-md border border-zinc-800 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-700">
-                    <span className="flex items-center gap-2"><Wifi size={13} /> Copiar URL de envio</span>
-                    {copyKey === 'send' ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                  </button>
-                  <button onClick={() => onApiKey(instance.name)} className="flex items-center gap-2 rounded-md border border-zinc-800 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-700">
-                    <KeyRound size={13} />
-                    Administrar acceso interno
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-zinc-500">Los identificadores internos estan ocultos para evitar errores operativos.</p>
-            )}
-          </section>
-        </aside>
-      </div>
+      {activeTab === 'summary' ? <div className="flex flex-col gap-5">{renderHealth()}{renderProvisioning()}{renderInsights()}{renderTimeline()}</div> : null}
+      {activeTab === 'activity' ? renderTimeline(80) : null}
+      {activeTab === 'tests' ? <Section title="Pruebas" description="Esta fase centraliza el acceso a la prueba existente sin crear un centro de pruebas nuevo." icon={Send}><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-sm text-zinc-200">Envía un mensaje de prueba desde la herramienta de Mensajes ya disponible.</p><p className="mt-1 text-xs text-zinc-500">El resultado aparecerá luego en Actividad y Health.</p><button onClick={onOpenMessages} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500"><Send size={13} />Ir a enviar prueba</button></div></Section> : null}
+      {activeTab === 'webhooks' ? <Section title="Webhooks" description="La administración detallada se mantiene en el módulo existente de webhooks." icon={Radio}><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-sm text-zinc-200">Callback actual: <span className="font-mono text-xs text-zinc-400">{callbackUrl}</span></p><p className="mt-1 text-xs text-zinc-500">Última recepción: {relativeTime(latestInbound?.timestamp)}.</p><button onClick={onOpenWebhooks} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-600"><Radio size={13} />Administrar webhooks</button></div></Section> : null}
+      {activeTab === 'diagnostics' ? <Section title="Diagnóstico" description="Problemas detectados y controles técnicos existentes." icon={ShieldCheck} action={diagnosticsLoading ? <Loader2 size={15} className="animate-spin text-zinc-500" /> : null}>{visibleDiagnostics.length === 0 ? <div className="rounded-lg border border-emerald-900/70 bg-emerald-950/20 px-3 py-3 text-sm text-emerald-300">No hay problemas detectados. {healthLabel(instance)}</div> : <div className="grid grid-cols-1 gap-2">{visibleDiagnostics.map(item => <ProblemRow key={`${item.code}-${item.message}`} item={item} />)}</div>}<div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">{healthChecks.map((check: HealthCheck) => <div key={check.code} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3"><p className="text-sm text-zinc-200">{check.label}</p><p className="mt-1 text-xs text-zinc-500">{check.status === 'passed' ? 'Correcto' : check.details || 'Sin detalle adicional'}</p></div>)}</div></Section> : null}
+      {activeTab === 'settings' ? <Section title="Configuración" description="Datos operativos y accesos técnicos por niveles." icon={Settings2}><div className="grid grid-cols-1 gap-3 lg:grid-cols-2"><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-xs text-zinc-500">Callback de recepción</p><p className="mt-1 break-all font-mono text-xs text-zinc-300">{callbackUrl}</p><button onClick={() => void copyText(callbackUrl, 'settings-callback', 'Callback copiado')} className="mt-3 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><Clipboard size={13} />Copiar callback</button></div><div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><p className="text-xs text-zinc-500">Endpoint de envío</p><p className="mt-1 break-all font-mono text-xs text-zinc-300">{sendUrl}</p><button onClick={() => void copyText(sendUrl, 'send', 'Endpoint de envío copiado')} className="mt-3 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><Copy size={13} />Copiar endpoint</button></div></div><div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4"><button onClick={() => setAdminMode(value => !value)} className="flex w-full items-center justify-between text-sm font-medium text-zinc-100"><span className="flex items-center gap-2">{adminMode ? <EyeOff size={14} /> : <Eye size={14} />}Detalles técnicos</span></button>{adminMode ? <div className="mt-3 space-y-1.5 text-xs text-zinc-500"><p>Nombre interno: <span className="font-mono text-zinc-300">{instance.name}</span></p><p>ID: <span className="font-mono text-zinc-300">{instance.id}</span></p><p>Estado de ciclo: <span className="font-mono text-zinc-300">{instance.lifecycleState || '-'}</span></p><p>API key: <span className="font-mono text-zinc-300">{apiKeyInfo?.hasApiKey ? apiKeyInfo.maskedApiKey || 'generada' : 'sin generar'}</span></p><button onClick={() => onApiKey(instance.name)} className="mt-2 inline-flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"><KeyRound size={13} />Administrar acceso interno</button></div> : <p className="mt-2 text-xs text-zinc-500">Los identificadores internos permanecen ocultos por defecto.</p>}</div><button onClick={() => onDelete(instance.name)} className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-red-900/70 px-3 py-2 text-xs text-red-300 hover:border-red-800"><Unplug size={13} />Eliminar conexión</button></Section> : null}
     </div>
   )
 }

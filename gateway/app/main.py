@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
         instance_webhooks_path=settings.instance_webhooks_path,
         connection_metadata_path=settings.connection_metadata_path,
         official_credentials_path=settings.official_credentials_path,
+        webhook_events_path=settings.webhook_events_path,
         media_cache_dir=settings.media_cache_dir,
     )
     logger.info("[BOOT][MIGRATIONS] gateway has no DB migrations at startup")

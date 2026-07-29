@@ -271,6 +271,8 @@ export default function App() {
               onReconnect={handleReconnect}
               onApiKey={setApiKeyTarget}
               onDelete={handleDelete}
+              onOpenMessages={() => setView('messages')}
+              onOpenWebhooks={() => setView('webhooks')}
               qrEnabled={qrEnabled}
             />
           ) : list.length === 0 ? (
