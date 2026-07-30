@@ -11,15 +11,26 @@ class MetaPhoneRegistrationService:
     def __init__(self, platform: MetaPlatform) -> None:
         self._platform = platform
 
-    async def ensure_registered(self, phone_number_id: str, onboarding_type: OnboardingType, access_token: str) -> dict[str, Any]:
+    async def ensure_registered(
+        self,
+        phone_number_id: str,
+        onboarding_type: OnboardingType,
+        access_token: str,
+        registration_pin: str | None = None,
+    ) -> dict[str, Any]:
         if onboarding_type == OnboardingType.COEXISTENCE:
             return {"skipped": True, "reason": "coexistence_number_already_registered"}
+        if not isinstance(registration_pin, str) or len(registration_pin) != 6 or not registration_pin.isascii() or not registration_pin.isdigit():
+            raise MetaOnboardingError("phone_registration_failed", "El PIN de registro debe contener exactamente seis digitos.")
         try:
             response = await self._platform.request(
                 "POST",
                 f"/{phone_number_id}/register",
                 headers={"Authorization": f"Bearer {access_token}"},
-                json={"messaging_product": "whatsapp"},
+                # WhatsApp Business Phone Number > Register requires these
+                # exact fields.  Do not add optional migration fields here:
+                # standard and test Cloud numbers need only this payload.
+                json={"messaging_product": "whatsapp", "pin": registration_pin},
             )
         except Exception as exc:
             raise MetaOnboardingError("phone_registration_failed", "Meta no pudo registrar el numero para Cloud API.", detail={"error": str(exc)}) from exc

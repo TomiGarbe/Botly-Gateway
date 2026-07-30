@@ -132,7 +132,27 @@ class MetaOnboardingOrchestrator:
             save_pipeline_event(stage="webhook", status="verified", instance=instance_name, event="WEBHOOK_VERIFIED", component="Meta")
 
             if not record.completed(MetaOnboardingState.PHONE_REGISTERED):
-                registration = await self._registration.ensure_registered(discovery.phone_number_id, onboarding_type, credentials.access_token)
+                registration_pin = None
+                if onboarding_type != OnboardingType.COEXISTENCE:
+                    # Store token and the generated 2FA PIN before the first
+                    # Graph call. If Meta times out after accepting the request,
+                    # a resumed onboarding uses the same PIN rather than silently
+                    # changing the number's two-step-verification secret.
+                    self._credentials_store.upsert_official_credentials(
+                        instance_name=instance_name,
+                        access_token=credentials.access_token,
+                        phone_number_id=credentials.phone_number_id,
+                        business_account_id=credentials.business_account_id,
+                        source="embedded_signup",
+                        metadata={"onboarding": "embedded_signup", "onboardingType": onboarding_type.value},
+                    )
+                    registration_pin = self._credentials_store.get_or_create_registration_pin(instance_name)
+                registration = await self._registration.ensure_registered(
+                    discovery.phone_number_id,
+                    onboarding_type,
+                    credentials.access_token,
+                    registration_pin,
+                )
                 self._store.advance(record, MetaOnboardingState.PHONE_REGISTERED, details={"registration": registration})
                 logger.info("phone_registered", instance=instance_name, skipped=registration.get("skipped", False))
                 save_pipeline_event(stage="phone_registration", status="completed", instance=instance_name, event="PHONE_REGISTERED", component="Meta", details={"skipped": registration.get("skipped", False)})

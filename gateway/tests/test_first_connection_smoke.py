@@ -96,6 +96,8 @@ def test_first_connection_onboarding_send_receive_and_persistence(monkeypatch, t
         if path.endswith("/waba_456"):
             return httpx.Response(200, json={"id": "waba_456", "name": "Smoke WABA"})
         if path.endswith("/phone_123/register"):
+            assert json.loads(request.content).keys() == {"messaging_product", "pin"}
+            assert len(json.loads(request.content)["pin"]) == 6
             return httpx.Response(200, json={"success": True})
         if path.endswith("/phone_123"):
             return httpx.Response(200, json={"id": "phone_123", "platform_type": "CLOUD_API"})

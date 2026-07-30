@@ -35,6 +35,41 @@ def test_credential_manager_does_not_persist_plaintext_access_token(monkeypatch,
     assert CredentialManager().get_official_access_token("cloud_instance") == "secret-access-token"
 
 
+def test_registration_pin_is_encrypted_and_reused_when_credentials_are_updated(monkeypatch, tmp_path) -> None:
+    store_path = tmp_path / "official_credentials.json"
+    monkeypatch.setattr(
+        "app.services.credential_manager.get_settings",
+        lambda: SimpleNamespace(
+            official_credentials_path=str(store_path),
+            official_credentials_encryption_key="test-encryption-key",
+        ),
+    )
+    credentials = CredentialManager()
+    credentials.upsert_official_credentials(
+        instance_name="cloud_instance",
+        access_token="first-token",
+        phone_number_id="phone_123",
+        business_account_id="waba_456",
+        source="embedded_signup",
+    )
+    pin = credentials.get_or_create_registration_pin("cloud_instance")
+    credentials.upsert_official_credentials(
+        instance_name="cloud_instance",
+        access_token="refreshed-token",
+        phone_number_id="phone_123",
+        business_account_id="waba_456",
+        source="embedded_signup",
+    )
+
+    stored = store_path.read_text(encoding="utf-8")
+    public = credentials.get_official_credentials_info("cloud_instance").public_dict()
+    assert len(pin) == 6 and pin.isdigit()
+    assert credentials.get_or_create_registration_pin("cloud_instance") == pin
+    assert pin not in stored
+    assert public["hasRegistrationPin"] is True
+    assert "registrationPinCiphertext" not in str(public)
+
+
 def test_connection_diagnostics_reports_missing_official_credentials(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.credential_manager.get_settings",

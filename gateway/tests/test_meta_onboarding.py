@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -32,6 +33,10 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         if path.endswith("/waba_456"):
             return httpx.Response(200, json={"id": "waba_456", "name": "Acme WABA"})
         if path.endswith("/phone_123/register"):
+            payload = json.loads(request.content)
+            assert set(payload) == {"messaging_product", "pin"}
+            assert payload["messaging_product"] == "whatsapp"
+            assert isinstance(payload["pin"], str) and payload["pin"].isdigit() and len(payload["pin"]) == 6
             return httpx.Response(200, json={"success": True})
         if path.endswith("/phone_123"):
             return httpx.Response(200, json={"id": "phone_123", "verified_name": "Acme", "platform_type": "CLOUD_API"})
@@ -103,6 +108,9 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         assert calls.count(("POST", "/v23.0/waba_456/subscribed_apps")) == 1
         assert calls.count(("POST", "/v23.0/phone_123/register")) == 1
         assert len(manager.calls) == 1
-        assert "secret-token" not in (tmp_path / "credentials.json").read_text(encoding="utf-8")
+        stored_credentials = (tmp_path / "credentials.json").read_text(encoding="utf-8")
+        assert "secret-token" not in stored_credentials
+        assert '"registrationPinCiphertext"' in stored_credentials
+        assert '"pin"' not in stored_credentials
 
     asyncio.run(run())

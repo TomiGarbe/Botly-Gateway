@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import time
 from base64 import urlsafe_b64encode
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ class OfficialCredentialRecord:
     business_account_id: str
     access_token_ref: str
     access_token_hash: str | None = None
+    has_registration_pin: bool = False
     source: str = "unknown"
     created_at: str | None = None
     updated_at: str | None = None
@@ -69,6 +71,10 @@ class OfficialCredentialRecord:
             "businessAccountId": self.business_account_id,
             "accessTokenRef": self.access_token_ref,
             "hasAccessTokenHash": bool(self.access_token_hash),
+            # Never expose the WhatsApp two-step-verification PIN through the
+            # connection or diagnostics APIs.  This boolean is enough for
+            # support to know that a reusable PIN was safely persisted.
+            "hasRegistrationPin": self.has_registration_pin,
             "source": self.source,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
@@ -118,14 +124,20 @@ class CredentialManager:
             raise RuntimeError("No hay clave configurada para cifrar credenciales oficiales")
         return Fernet(urlsafe_b64encode(hashlib.sha256(material.encode("utf-8")).digest()))
 
-    def _encrypt_access_token(self, access_token: str) -> str:
-        return self._cipher().encrypt(access_token.encode("utf-8")).decode("ascii")
+    def _encrypt_secret(self, secret: str) -> str:
+        return self._cipher().encrypt(secret.encode("utf-8")).decode("ascii")
 
-    def _decrypt_access_token(self, ciphertext: str) -> str:
+    def _decrypt_secret(self, ciphertext: str, *, secret_name: str) -> str:
         try:
             return self._cipher().decrypt(ciphertext.encode("ascii")).decode("utf-8")
         except (InvalidToken, UnicodeDecodeError) as exc:
-            raise RuntimeError("No se pudo descifrar la credencial oficial; reconecta WhatsApp Oficial") from exc
+            raise RuntimeError(f"No se pudo descifrar {secret_name}; reconecta WhatsApp Oficial") from exc
+
+    def _encrypt_access_token(self, access_token: str) -> str:
+        return self._encrypt_secret(access_token)
+
+    def _decrypt_access_token(self, ciphertext: str) -> str:
+        return self._decrypt_secret(ciphertext, secret_name="la credencial oficial")
 
     def upsert_official_credentials(
         self,
@@ -142,6 +154,7 @@ class CredentialManager:
         official = payload["official"]
         previous = official.get(instance_name) if isinstance(official.get(instance_name), dict) else {}
         access_token_ref = f"meta://waba/{business_account_id}/phones/{phone_number_id}/token"
+        is_same_phone = str(previous.get("phoneNumberId") or "") == phone_number_id
         record = {
             "instanceName": instance_name,
             "phoneNumberId": phone_number_id,
@@ -149,6 +162,11 @@ class CredentialManager:
             "accessTokenRef": access_token_ref,
             "accessTokenHash": _hash_secret(access_token),
             "accessTokenCiphertext": self._encrypt_access_token(access_token),
+            # Credential updates (for example, a fresh OAuth token during a
+            # resumed onboarding) must not rotate the PIN that Meta already
+            # associates with this phone number. A different phone number is
+            # a new Cloud registration and therefore gets a new PIN.
+            "registrationPinCiphertext": previous.get("registrationPinCiphertext") if is_same_phone else None,
             "source": source,
             "createdAt": previous.get("createdAt") or now,
             "updatedAt": now,
@@ -175,6 +193,36 @@ class CredentialManager:
             return None
         return self._decrypt_access_token(ciphertext)
 
+    def get_or_create_registration_pin(self, instance_name: str) -> str:
+        """Return the encrypted-at-rest 2FA PIN for a Cloud phone registration.
+
+        The number is generated only after its credential record exists, so an
+        interrupted first registration can retry with exactly the same PIN.
+        PIN values intentionally never leave this method except for the
+        immediate outbound Graph API request.
+        """
+        payload = self._load()
+        record = payload["official"].get(instance_name)
+        if not isinstance(record, dict):
+            raise RuntimeError("No hay credenciales oficiales para guardar el PIN de registro")
+
+        ciphertext = record.get("registrationPinCiphertext")
+        if isinstance(ciphertext, str) and ciphertext.strip():
+            pin = self._decrypt_secret(ciphertext, secret_name="el PIN de registro")
+            if len(pin) == 6 and pin.isascii() and pin.isdigit():
+                return pin
+            raise RuntimeError("El PIN de registro almacenado no tiene seis digitos; reconecta WhatsApp Oficial")
+
+        # A six-digit 2FA PIN has a deliberately small domain by Meta's API
+        # contract.  `secrets` provides cryptographic randomness; the range
+        # keeps its serialized representation at exactly six digits.
+        pin = str(secrets.randbelow(900_000) + 100_000)
+        record["registrationPinCiphertext"] = self._encrypt_secret(pin)
+        record["updatedAt"] = _now_iso()
+        self._save(payload)
+        audit_event("official_registration_pin_created", instance=instance_name)
+        return pin
+
     def find_instance_by_phone_number_id(self, phone_number_id: str) -> str | None:
         """Resolve the Cloud API phone id supplied by Meta to a Gateway instance."""
         target = str(phone_number_id or "").strip()
@@ -200,6 +248,7 @@ class CredentialManager:
             business_account_id=str(record.get("businessAccountId") or ""),
             access_token_ref=str(record.get("accessTokenRef") or ""),
             access_token_hash=str(record.get("accessTokenHash") or "") or None,
+            has_registration_pin=bool(str(record.get("registrationPinCiphertext") or "").strip()),
             source=str(record.get("source") or "unknown"),
             created_at=record.get("createdAt"),
             updated_at=record.get("updatedAt"),
