@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import time
 import uuid
 from typing import Any
 
@@ -26,6 +27,42 @@ from app.services.normalization import save_pipeline_event
 
 router = APIRouter(prefix="/webhooks", tags=["meta-webhook"])
 logger = get_logger(__name__)
+
+
+def _trace(
+    stage: str,
+    *,
+    request_id: str,
+    started_at: float,
+    instance_name: str | None = None,
+    phone_number_id: str | None = None,
+    waba_id: str | None = None,
+    message: dict[str, Any] | None = None,
+    result: str | None = None,
+    **extra: Any,
+) -> None:
+    """Temporary, secret-safe Cloud API reception trace.
+
+    Full payload capture is deliberately handled separately and only when
+    WEBHOOK_DEBUG is enabled.  This event is safe to keep at info level: it
+    records routing identifiers and never request headers or credentials.
+    """
+    item = message if isinstance(message, dict) else {}
+    logger.info(
+        "[META_TRACE] reception stage",
+        stage=stage,
+        result=result,
+        request_id=request_id,
+        instance_name=instance_name,
+        phone_number_id=phone_number_id,
+        waba_id=waba_id,
+        message_id=item.get("id"),
+        sender=item.get("from"),
+        message_type=item.get("type"),
+        source_timestamp=item.get("timestamp"),
+        duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
+        **extra,
+    )
 
 
 def _constant_time_equals(actual: str | None, expected: str) -> bool:
@@ -94,10 +131,46 @@ def _message_data(message: dict[str, Any], contacts: list[dict[str, Any]]) -> di
     return {"key": key, "pushName": push_name or None, "messageTimestamp": message.get("timestamp"), "messageType": normalized_type, "message": message_object}
 
 
-async def _process_cloud_event(*, instance: str, event: dict[str, Any]) -> str:
-    request_id = str(uuid.uuid4())[:12]
+async def _process_cloud_event(
+    *,
+    instance: str,
+    event: dict[str, Any],
+    trace_started_at: float,
+    trace_request_id: str,
+    trace_phone_number_id: str,
+    trace_waba_id: str,
+    trace_message: dict[str, Any],
+) -> str:
+    # Keep the Meta HTTP request correlation stable through parser,
+    # normalizer, persistence and workspace dispatch.
+    request_id = trace_request_id
+    _trace(
+        "pipeline_start",
+        request_id=request_id,
+        started_at=trace_started_at,
+        instance_name=instance,
+        phone_number_id=trace_phone_number_id,
+        waba_id=trace_waba_id,
+        message=trace_message,
+    )
     result = process_incoming_webhook(event, request_id)
     normalized = result.get("normalized") or {}
+    normalized_message = normalized.get("message") if isinstance(normalized.get("message"), dict) else {}
+    _trace(
+        "normalized",
+        request_id=request_id,
+        started_at=trace_started_at,
+        instance_name=instance,
+        phone_number_id=trace_phone_number_id,
+        waba_id=trace_waba_id,
+        message=trace_message,
+        result=str(result.get("status") or "unknown"),
+        normalized_message_id=normalized_message.get("id"),
+        normalized_from=normalized_message.get("from"),
+        normalized_type=normalized.get("subtype"),
+        conversation_id=(normalized.get("meta") or {}).get("conversationId"),
+        persistence=(result.get("trace") or {}).get("persist", {}).get("status"),
+    )
     if result.get("status") != "ok":
         outcome = str(result.get("status") or "ignored")
         logger.warning(
@@ -106,6 +179,16 @@ async def _process_cloud_event(*, instance: str, event: dict[str, Any]) -> str:
             instance=instance,
             outcome=outcome,
             trace=result.get("trace"),
+        )
+        _trace(
+            "pipeline_stopped",
+            request_id=request_id,
+            started_at=trace_started_at,
+            instance_name=instance,
+            phone_number_id=trace_phone_number_id,
+            waba_id=trace_waba_id,
+            message=trace_message,
+            result=outcome,
         )
         return outcome
 
@@ -138,6 +221,16 @@ async def _process_cloud_event(*, instance: str, event: dict[str, Any]) -> str:
             instance=instance,
             layer=normalized.get("layer"),
             event_type=normalized.get("type"),
+        )
+        _trace(
+            "workspace_dispatch_skipped",
+            request_id=request_id,
+            started_at=trace_started_at,
+            instance_name=instance,
+            phone_number_id=trace_phone_number_id,
+            waba_id=trace_waba_id,
+            message=trace_message,
+            result="not_forwarded",
         )
         return "not_forwarded"
     if len(_forward_tasks) >= get_settings().bot_webhook_max_queue:
@@ -176,6 +269,18 @@ async def _process_cloud_event(*, instance: str, event: dict[str, Any]) -> str:
             conversation_id=conversation_id,
             error=persist.get("error") or "missing_persistence_confirmation",
         )
+    _trace(
+        "timeline_persisted_and_workspace_queued",
+        request_id=request_id,
+        started_at=trace_started_at,
+        instance_name=instance,
+        phone_number_id=trace_phone_number_id,
+        waba_id=trace_waba_id,
+        message=trace_message,
+        result="queued",
+        conversation_id=conversation_id,
+        persistence=persist.get("status"),
+    )
     return "queued"
 
 
@@ -185,6 +290,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
     settings = get_settings()
     body = await request.body()
     request_id = str(uuid.uuid4())[:12]
+    started_at = time.perf_counter()
     source_ip = request.client.host if request.client else "unknown"
     signature = request.headers.get("X-Hub-Signature-256")
     logger.info(
@@ -195,6 +301,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         signature_required=bool(settings.meta_webhook_require_signature),
         has_signature=bool(signature),
     )
+    _trace("gateway_received", request_id=request_id, started_at=started_at)
     if settings.meta_webhook_require_signature and not _signature_is_valid(body, signature, settings.meta_app_secret):
         logger.warning(
             "[META_INBOUND][SIGNATURE][FAILED] invalid Meta webhook signature",
@@ -204,12 +311,14 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
             reason="missing_or_invalid_x_hub_signature_256",
         )
         audit_event("meta_webhook_signature_invalid")
+        _trace("signature", request_id=request_id, started_at=started_at, result="invalid")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Meta webhook signature")
     logger.info(
         "[META_INBOUND][SIGNATURE][OK] Meta webhook signature accepted",
         request_id=request_id,
         validation="required" if settings.meta_webhook_require_signature else "disabled_by_configuration",
     )
+    _trace("signature", request_id=request_id, started_at=started_at, result="valid")
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -218,6 +327,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
             request_id=request_id,
             error=str(exc),
         )
+        _trace("payload_parse", request_id=request_id, started_at=started_at, result="invalid_json")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Meta webhook JSON") from exc
     if not isinstance(payload, dict) or payload.get("object") != "whatsapp_business_account":
         logger.warning(
@@ -226,6 +336,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
             object=payload.get("object") if isinstance(payload, dict) else None,
             payload_type=type(payload).__name__,
         )
+        _trace("payload_parse", request_id=request_id, started_at=started_at, result="unsupported_object")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported Meta webhook object")
 
     logger.info(
@@ -233,17 +344,32 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         request_id=request_id,
         entries=len(payload.get("entry") or []),
     )
+    _trace("payload_parse", request_id=request_id, started_at=started_at, result="ok")
+    if bool(getattr(settings, "webhook_debug", False)):
+        # Meta webhook payloads do not include the app secret or bearer token.
+        # This is intentionally opt-in because it can contain customer content.
+        logger.info("[META_TRACE][RAW_PAYLOAD]", request_id=request_id, payload=payload)
 
     received = {"messages": 0, "statuses": 0, "changes": 0, "errors": 0, "unmapped": 0}
     for entry in payload.get("entry") or []:
         if not isinstance(entry, dict):
             continue
+        waba_id = str(entry.get("id") or "").strip()
         for change in entry.get("changes") or []:
             if not isinstance(change, dict):
                 continue
             received["changes"] += 1
             value = change.get("value") if isinstance(change.get("value"), dict) else {}
             phone_id = _phone_number_id(value)
+            _trace(
+                "change_parsed",
+                request_id=request_id,
+                started_at=started_at,
+                phone_number_id=phone_id or None,
+                waba_id=waba_id or None,
+                result="ok",
+                field=change.get("field"),
+            )
             logger.info(
                 "[META_INBOUND][CHANGE] Meta change detected",
                 request_id=request_id,
@@ -264,12 +390,31 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                     reason="phone_number_id_not_found_in_official_credentials",
                 )
                 audit_event("meta_webhook_instance_unmapped", phoneNumberId=phone_id or None, field=change.get("field"))
+                _trace(
+                    "instance_resolution",
+                    request_id=request_id,
+                    started_at=started_at,
+                    phone_number_id=phone_id or None,
+                    waba_id=waba_id or None,
+                    result="unmapped",
+                    field=change.get("field"),
+                )
                 continue
             logger.info(
                 "[META_INBOUND][INSTANCE][OK] Gateway instance resolved",
                 request_id=request_id,
                 instance=instance,
                 phone_number_id=phone_id or None,
+            )
+            _trace(
+                "instance_resolution",
+                request_id=request_id,
+                started_at=started_at,
+                instance_name=instance,
+                phone_number_id=phone_id or None,
+                waba_id=waba_id or None,
+                result="resolved",
+                field=change.get("field"),
             )
             save_pipeline_event(
                 stage="meta_webhook_change",
@@ -297,7 +442,25 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                     message_type=message.get("type") or None,
                 )
                 try:
-                    outcome = await _process_cloud_event(instance=instance, event={"event": "MESSAGES_UPSERT", "instance": instance, "data": _message_data(message, contacts), "metaCloud": payload})
+                    _trace(
+                        "message_parsed",
+                        request_id=request_id,
+                        started_at=started_at,
+                        instance_name=instance,
+                        phone_number_id=phone_id or None,
+                        waba_id=waba_id or None,
+                        message=message,
+                        result="ok",
+                    )
+                    outcome = await _process_cloud_event(
+                        instance=instance,
+                        event={"event": "MESSAGES_UPSERT", "instance": instance, "data": _message_data(message, contacts), "metaCloud": payload},
+                        trace_started_at=started_at,
+                        trace_request_id=request_id,
+                        trace_phone_number_id=phone_id,
+                        trace_waba_id=waba_id,
+                        trace_message=message,
+                    )
                     logger.info(
                         "[META_INBOUND][MESSAGE][RESULT] message pipeline finished",
                         request_id=request_id,
@@ -318,11 +481,20 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                 if not isinstance(item, dict):
                     continue
                 received["statuses"] += 1
-                await _process_cloud_event(instance=instance, event={"event": "MESSAGES_UPDATE", "instance": instance, "data": {"key": {"id": str(item.get("id") or ""), "remoteJid": str(item.get("recipient_id") or ""), "fromMe": True}, "status": item.get("status"), "timestamp": item.get("timestamp")}, "metaCloud": payload})
+                await _process_cloud_event(
+                    instance=instance,
+                    event={"event": "MESSAGES_UPDATE", "instance": instance, "data": {"key": {"id": str(item.get("id") or ""), "remoteJid": str(item.get("recipient_id") or ""), "fromMe": True}, "status": item.get("status"), "timestamp": item.get("timestamp")}, "metaCloud": payload},
+                    trace_started_at=started_at,
+                    trace_request_id=request_id,
+                    trace_phone_number_id=phone_id,
+                    trace_waba_id=waba_id,
+                    trace_message=item,
+                )
             for error in value.get("errors") or []:
                 received["errors"] += 1
                 logger.error("meta_webhook_provider_error", instance=instance, error_code=error.get("code") if isinstance(error, dict) else None)
                 save_pipeline_event(stage="meta_webhook_error", status="received", instance=instance, details={"error": error})
     logger.info("[META_INBOUND][RESPONSE][OK] responding HTTP 200 to Meta", request_id=request_id, **received)
+    _trace("http_response", request_id=request_id, started_at=started_at, result="200", **received)
     audit_event("meta_webhook_received", **received)
     return {"status": "ok", **received}

@@ -167,6 +167,9 @@ services:
       META_SIGNUP_TIMEOUT_SECONDS: ${META_SIGNUP_TIMEOUT_SECONDS:-30}
       META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
       META_WEBHOOK_REQUIRE_SIGNATURE: ${META_WEBHOOK_REQUIRE_SIGNATURE:-true}
+      # Trazabilidad temporal de payloads Meta; contiene contenido de clientes.
+      # Activar solamente durante el diagnóstico y volver a false al terminar.
+      WEBHOOK_DEBUG: ${WEBHOOK_DEBUG:-false}
     volumes:
       - gateway_data:/var/lib/botly
     depends_on:
