@@ -112,6 +112,16 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
         return {"status": "normalize_error", "normalized": {}, "trace": trace, "classification": {}}
     classification = _classify(payload, normalized)
     trace["classify"] = {"status": "ok", **classification}
+    logger.info(
+        "[INBOUND][NORMALIZE][OK] payload normalized",
+        request_id=request_id,
+        instance=instance,
+        source_event=normalized.get("event"),
+        normalized_type=normalized.get("type"),
+        subtype=normalized.get("subtype"),
+        direction=normalized.get("direction"),
+        layer=normalized.get("layer"),
+    )
 
     if classification.get("fallbackUsed"):
         _inc("normalization_fallback_total")
@@ -168,6 +178,25 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
     conv_id = conversation_id(instance, message.get("from"))
     normalized = _enrich_contract(normalized, request_id=request_id, conv_id=conv_id, trace=trace, classification=classification)
     trace["enrich"] = {"status": "ok", "conversationId": conv_id}
+
+    # Contact and conversation are transport context in this Gateway.  There
+    # are no entity repositories to create/update; the timeline is keyed by
+    # this deterministic conversation identifier.
+    logger.info(
+        "[INBOUND][CONTACT] contact context available",
+        request_id=request_id,
+        instance=instance,
+        sender=message.get("from") or None,
+        contact_name=message.get("pushName") or None,
+        entity_operation="not_applicable_no_contact_store",
+    )
+    logger.info(
+        "[INBOUND][CONVERSATION] conversation context resolved",
+        request_id=request_id,
+        instance=instance,
+        conversation_id=conv_id,
+        entity_operation="not_applicable_no_conversation_store",
+    )
 
     event = str(normalized.get("event") or payload.get("event") or "UNKNOWN")
     save_pipeline_event(stage="ingest", status="ok", instance=instance, request_id=request_id, event=event)
@@ -286,13 +315,39 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
         persisted = save_event(normalized)
         if not persisted:
             raise RuntimeError("No se pudo persistir el evento de negocio en el almacenamiento del Gateway")
-        logger.info("[MESSAGE][UPSERT] persisted", request_id=request_id, instance=instance, message_id=msg_id or None, direction=normalized.get("direction"), subtype=normalized.get("subtype"))
+        logger.info(
+            "[INBOUND][PERSIST][OK] message persisted in Gateway activity timeline",
+            request_id=request_id,
+            instance=instance,
+            message_id=msg_id or None,
+            conversation_id=conv_id,
+            direction=normalized.get("direction"),
+            subtype=normalized.get("subtype"),
+        )
         trace["persist"] = {"status": "ok"}
         _inc("persist_ok_total")
     except Exception as exc:
         trace["persist"] = {"status": "error", "error": str(exc)}
         _inc("persist_error_total")
-        logger.error("pipeline_persist_fail", request_id=request_id, instance=instance, error=str(exc))
+        logger.error(
+            "[INBOUND][PERSIST][FAILED] message was not persisted in Gateway activity timeline",
+            request_id=request_id,
+            instance=instance,
+            message_id=msg_id or None,
+            conversation_id=conv_id,
+            error=str(exc),
+            reason="business_event_store_persist_failed",
+        )
+        save_pipeline_event(
+            stage="persist",
+            status="error",
+            instance=instance,
+            message_id=msg_id or None,
+            conversation_id=conv_id,
+            request_id=request_id,
+            event=event,
+            details={"error": str(exc)[:220]},
+        )
 
     save_pipeline_event(
         stage="normalized",
@@ -309,4 +364,21 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
         "toBotCandidate": bool(normalized.get("layer") == "business"),
     }
     _inc("business_processed_total")
+    if trace.get("persist", {}).get("status") == "ok":
+        logger.info(
+            "[INBOUND][COMPLETE][OK] incoming message pipeline completed",
+            request_id=request_id,
+            instance=instance,
+            message_id=msg_id or None,
+            conversation_id=conv_id,
+        )
+    else:
+        logger.error(
+            "[INBOUND][COMPLETE][FAILED] pipeline completed with persistence failure",
+            request_id=request_id,
+            instance=instance,
+            message_id=msg_id or None,
+            conversation_id=conv_id,
+            error=trace.get("persist", {}).get("error"),
+        )
     return {"status": "ok", "normalized": normalized, "trace": trace, "classification": classification}
