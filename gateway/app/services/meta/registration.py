@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.platforms.meta import MetaPlatform
+from app.platforms.meta import MetaPlatform, MetaPlatformError
 from app.services.meta.exceptions import MetaOnboardingError
 from app.services.meta.models import OnboardingType
+
+# (#133005) "Two step verification PIN Mismatch" solo puede ocurrir cuando el
+# numero YA tiene un PIN de dos pasos configurado, es decir ya esta registrado
+# en Cloud API. Re-registrarlo con un PIN nuevo es innecesario y ademas
+# imposible sin el PIN original; el numero ya esta operativo.
+_ALREADY_REGISTERED_CODE = 133005
 
 
 class MetaPhoneRegistrationService:
@@ -32,6 +38,11 @@ class MetaPhoneRegistrationService:
                 # standard and test Cloud numbers need only this payload.
                 json={"messaging_product": "whatsapp", "pin": registration_pin},
             )
+        except MetaPlatformError as exc:
+            code = exc.detail.get("code") if isinstance(exc.detail, dict) else None
+            if code == _ALREADY_REGISTERED_CODE:
+                return {"skipped": True, "reason": "already_registered", "detail": {"code": code}}
+            raise MetaOnboardingError("phone_registration_failed", "Meta no pudo registrar el numero para Cloud API.", detail={"error": str(exc), "code": code}) from exc
         except Exception as exc:
             raise MetaOnboardingError("phone_registration_failed", "Meta no pudo registrar el numero para Cloud API.", detail={"error": str(exc)}) from exc
         if isinstance(response, dict) and response.get("success") is False:
