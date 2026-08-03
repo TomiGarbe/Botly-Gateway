@@ -1,31 +1,58 @@
-import { Activity, BellRing, FlaskConical, Inbox, LayoutDashboard, LayoutGrid, MessageSquare, Settings, ServerCog, Workflow, X } from 'lucide-react'
+import { useState } from 'react'
+import { Activity, BellRing, ChevronDown, FlaskConical, Inbox, LayoutDashboard, LayoutGrid, MessageSquare, Settings, ServerCog, Workflow, X } from 'lucide-react'
 import Brand from './Brand'
+
+type View = 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations'
 
 interface Props {
   onOpenSettings: () => void
-  view: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations'
-  onChangeView: (view: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations') => void
+  view: View
+  onChangeView: (view: View) => void
   mobileOpen: boolean
   onCloseMobile: () => void
 }
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', view: 'dashboard' as const },
-  { icon: LayoutGrid, label: 'Conexiones', view: 'instances' as const },
-  { icon: FlaskConical, label: 'Centro de Pruebas', view: 'tests' as const },
-  { icon: MessageSquare, label: 'Mensajes', view: 'messages' as const },
-  { icon: Inbox, label: 'Webhooks', view: 'webhooks' as const },
-  { icon: BellRing, label: 'Alertas', view: 'alerts' as const },
-  { icon: Workflow, label: 'Automatizaciones', view: 'automations' as const },
-  { icon: ServerCog, label: 'Operaciones', view: 'operations' as const },
-  { icon: Activity, label: 'Actividad', view: 'activity' as const },
+// Principal = lo que se usa a diario. Avanzado = funciones operativas que no
+// hacen falta para conectar y probar un numero; se esconden para no saturar.
+const PRIMARY: { icon: typeof LayoutGrid; label: string; view: View }[] = [
+  { icon: LayoutGrid, label: 'Conexiones', view: 'instances' },
+  { icon: Activity, label: 'Actividad', view: 'activity' },
+  { icon: MessageSquare, label: 'Mensajes', view: 'messages' },
+  { icon: Inbox, label: 'Webhooks', view: 'webhooks' },
+  { icon: LayoutDashboard, label: 'Dashboard', view: 'dashboard' },
+]
+
+const ADVANCED: { icon: typeof LayoutGrid; label: string; view: View }[] = [
+  { icon: FlaskConical, label: 'Centro de Pruebas', view: 'tests' },
+  { icon: BellRing, label: 'Alertas', view: 'alerts' },
+  { icon: Workflow, label: 'Automatizaciones', view: 'automations' },
+  { icon: ServerCog, label: 'Operaciones', view: 'operations' },
 ]
 
 export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen, onCloseMobile }: Props) {
-  const handleChangeView = (nextView: 'dashboard' | 'instances' | 'messages' | 'tests' | 'webhooks' | 'activity' | 'alerts' | 'automations' | 'operations') => {
+  const advancedHasActive = ADVANCED.some(item => item.view === view)
+  const [advancedOpen, setAdvancedOpen] = useState(advancedHasActive)
+
+  const handleChangeView = (nextView: View) => {
     onChangeView(nextView)
     onCloseMobile()
   }
+
+  const renderItem = ({ icon: Icon, label, view: itemView }: { icon: typeof LayoutGrid; label: string; view: View }) => (
+    <button
+      key={label}
+      onClick={() => handleChangeView(itemView)}
+      className={`
+        w-full flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors
+        ${view === itemView
+          ? 'bg-zinc-800 text-zinc-50 font-medium'
+          : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}
+      `}
+    >
+      <Icon size={15} />
+      <span className="flex-1 text-left">{label}</span>
+    </button>
+  )
 
   const navContent = (
     <>
@@ -42,24 +69,20 @@ export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        <p className="px-2 mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wider">
-          WhatsApp
-        </p>
-        {navItems.map(({ icon: Icon, label, view: itemView }) => (
+        <p className="px-2 mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wider">Principal</p>
+        {PRIMARY.map(renderItem)}
+
+        <div className="pt-3">
           <button
-            key={label}
-            onClick={() => handleChangeView(itemView)}
-            className={`
-              w-full flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors
-              ${view === itemView
-                ? 'bg-zinc-800 text-zinc-50 font-medium'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}
-            `}
+            type="button"
+            onClick={() => setAdvancedOpen(open => !open)}
+            className="w-full flex items-center gap-1.5 px-2 mb-1 text-xs font-medium text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
           >
-            <Icon size={15} />
-            <span className="flex-1 text-left">{label}</span>
+            <ChevronDown size={13} className={`transition-transform ${advancedOpen ? '' : '-rotate-90'}`} />
+            <span className="flex-1 text-left">Avanzado</span>
           </button>
-        ))}
+          {advancedOpen && <div className="space-y-0.5">{ADVANCED.map(renderItem)}</div>}
+        </div>
       </nav>
 
       <div className="px-3 py-4 border-t border-zinc-800">
@@ -71,7 +94,7 @@ export default function Sidebar({ onOpenSettings, view, onChangeView, mobileOpen
           className="w-full flex items-center gap-2.5 px-2 py-2 rounded-md text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
         >
           <Settings size={15} />
-          Configuracion
+          Ajustes
         </button>
       </div>
     </>
