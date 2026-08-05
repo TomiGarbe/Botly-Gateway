@@ -1,10 +1,41 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 from types import SimpleNamespace
 
 from app.services.connection_diagnostics import ConnectionDiagnosticsService
 from app.services.credential_manager import CredentialManager
+
+
+class _DiagnosticsRegistry:
+    def __init__(self) -> None:
+        self.record = {"id": "connection-01", "legacy_name": "cloud_instance", "updated_at": "2026-08-01T00:00:00Z"}
+
+    def connection_record_by_id(self, connection_id: str):
+        return self.record if connection_id == "connection-01" else None
+
+    def update_connection_record(self, _connection_id: str, changes: dict):
+        self.record.update(changes)
+        return self.record
+
+
+class _DiagnosticsRuntime:
+    def __init__(self, state: str) -> None:
+        self.state = state
+
+    async def list_instances(self):
+        return [{"name": "cloud_instance", "status": self.state, "connectionType": "cloud", "integration": "WHATSAPP-BUSINESS"}]
+
+
+class _DiagnosticsCredentials:
+    def __init__(self, present: bool) -> None:
+        self.present = present
+
+    def get_official_credentials_info(self, _instance: str):
+        if not self.present:
+            return None
+        return SimpleNamespace(phone_number_id="phone_123", business_account_id="waba_456", access_token_hash="hash", updated_at="2026-08-02T09:00:00Z")
 
 
 def test_credential_manager_does_not_persist_plaintext_access_token(monkeypatch, tmp_path) -> None:
@@ -92,3 +123,39 @@ def test_connection_diagnostics_reports_missing_official_credentials(monkeypatch
     codes = {item["code"] for item in diagnostics}
     assert "official_credentials_missing" in codes
     assert "webhook_configuration_unverified" not in codes
+
+
+def test_connection_diagnostics_snapshot_for_healthy_connection(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.connection_diagnostics.get_settings", lambda: SimpleNamespace(meta_graph_version="v23.0"))
+    monkeypatch.setattr("app.services.connection_diagnostics.list_instance_webhooks", lambda *_args, **_kwargs: [{"enabled": True, "lastSuccessAt": "2026-08-02T10:00:00Z"}])
+    service = ConnectionDiagnosticsService(
+        connection_manager=_DiagnosticsRuntime("open"),
+        registry=_DiagnosticsRegistry(),
+        credentials=_DiagnosticsCredentials(True),
+        events_reader=lambda **_kwargs: [{"timestamp": 100, "type": "message", "direction": "outbound"}, {"timestamp": 200, "type": "message", "direction": "inbound"}],
+    )
+
+    snapshot = asyncio.run(service.snapshot("connection-01"))
+
+    assert snapshot["summary"]["status"] == "healthy"
+    assert snapshot["summary"]["last_message_sent_at"] == 100
+    assert snapshot["summary"]["last_message_received_at"] == 200
+    assert snapshot["technical"]["phone_number_id"] == "phone_123"
+    assert all(item["status"] == "healthy" for item in snapshot["checks"])
+
+
+def test_connection_diagnostics_snapshot_explains_degraded_connection(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.connection_diagnostics.get_settings", lambda: SimpleNamespace(meta_graph_version="v23.0"))
+    monkeypatch.setattr("app.services.connection_diagnostics.list_instance_webhooks", lambda *_args, **_kwargs: [])
+    service = ConnectionDiagnosticsService(
+        connection_manager=_DiagnosticsRuntime("close"),
+        registry=_DiagnosticsRegistry(),
+        credentials=_DiagnosticsCredentials(False),
+        events_reader=lambda **_kwargs: [],
+    )
+
+    snapshot = asyncio.run(service.snapshot("connection-01"))
+
+    assert snapshot["summary"]["status"] == "unhealthy"
+    token = next(item for item in snapshot["checks"] if item["code"] == "token")
+    assert token["action"]

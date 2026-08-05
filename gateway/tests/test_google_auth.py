@@ -99,3 +99,17 @@ def test_auth_routes_protect_gateway_and_support_logout(monkeypatch, tmp_path) -
     assert http.get("/protected").status_code == 200
     assert http.post("/auth/logout").status_code == 204
     assert http.get("/protected").status_code == 401
+
+
+def test_health_is_exempt_from_operator_auth(monkeypatch, tmp_path) -> None:
+    service, _credential = _service(tmp_path)
+    monkeypatch.setattr(auth_middleware, "get_auth_service", lambda: service)
+
+    api = FastAPI()
+    api.add_middleware(AuthMiddleware)
+
+    @api.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    assert TestClient(api).get("/health").json() == {"status": "ok"}

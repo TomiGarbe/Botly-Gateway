@@ -211,6 +211,73 @@
   .connection-quick-message label span { @apply block text-sm text-zinc-500; }
   .connection-quick-message input, .connection-quick-message textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
   .connection-quick-message textarea { @apply resize-y; }
+  .workspace-messages { @apply max-w-none; }
+  .workspace-feedback { @apply mt-5 flex items-center gap-2 text-sm; }
+  .workspace-feedback-error { @apply text-red-300; }
+  .workspace-feedback-success { @apply text-emerald-300; }
+  .workspace-thread { @apply mt-5 max-h-[38rem] min-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 sm:p-6; }
+  .workspace-empty { @apply flex min-h-60 items-center justify-center gap-2 text-sm text-zinc-500; }
+  .workspace-message { @apply flex max-w-[82%] flex-col gap-2; }
+  .workspace-message-inbound { @apply mr-auto items-start; }
+  .workspace-message-outbound { @apply ml-auto items-end; }
+  .workspace-message-body { @apply rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm leading-6 text-zinc-200; }
+  .workspace-message-outbound .workspace-message-body { @apply border-blue-900/70 bg-blue-950/50; }
+  .workspace-message-body p { @apply m-0 whitespace-pre-wrap break-words; }
+  .workspace-message footer { @apply flex items-center gap-2 px-1 text-[11px] text-zinc-500; }
+  .workspace-message-status { @apply inline-flex items-center gap-1 text-zinc-400; }
+  .workspace-message-type { @apply capitalize; }
+  .workspace-media-summary { @apply flex items-center gap-2 text-zinc-300; }
+  .workspace-composer { @apply mt-5 space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5; }
+  .workspace-composer label { @apply block space-y-2; }
+  .workspace-composer label > span { @apply block text-sm text-zinc-500; }
+  .workspace-composer input, .workspace-composer textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .workspace-composer textarea { @apply resize-y; }
+  .workspace-composer-actions { @apply flex flex-wrap items-center justify-between gap-3; }
+  .workspace-file-types { @apply flex flex-wrap items-center gap-2; }
+  .workspace-file-types > span { @apply text-xs text-zinc-500; }
+  .workspace-file-types button { @apply inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50; }
+  .workspace-attachment { @apply space-y-3 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/50 p-4; }
+  .workspace-attachment-heading { @apply flex items-center justify-between text-sm font-medium text-zinc-300; }
+  .workspace-attachment-heading button { @apply rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200; }
+  .workspace-attachment > p { @apply m-0 break-all text-xs text-zinc-400; }
+  .workspace-attachment img, .workspace-attachment video { @apply max-h-64 max-w-full rounded-lg border border-zinc-800; }
+  .workspace-attachment audio { @apply w-full; }
+  .workspace-progress { @apply space-y-1; }
+  .workspace-progress > span { @apply block h-1.5 rounded-full bg-blue-500 transition-all; }
+  .workspace-progress small { @apply text-xs text-zinc-500; }
+  .diagnostics-feedback { @apply mt-5 text-sm; }
+  .diagnostics-feedback-error { @apply text-red-300; }
+  .diagnostics-feedback-success { @apply text-emerald-300; }
+  .diagnostics-overall { @apply mt-5 flex items-center gap-3 rounded-xl border p-4; }
+  .diagnostics-overall svg { @apply shrink-0; }
+  .diagnostics-overall strong, .diagnostics-overall span { @apply block; }
+  .diagnostics-overall strong { @apply text-sm font-medium; }
+  .diagnostics-overall span { @apply mt-1 text-xs text-zinc-500; }
+  .diagnostics-overall-healthy { @apply border-emerald-900/70 bg-emerald-950/30 text-emerald-300; }
+  .diagnostics-overall-degraded { @apply border-amber-900/70 bg-amber-950/25 text-amber-300; }
+  .diagnostics-overall-unhealthy { @apply border-red-900/70 bg-red-950/25 text-red-300; }
+  .diagnostics-overall-unknown { @apply border-zinc-700 bg-zinc-900/50 text-zinc-300; }
+  .diagnostics-summary-list, .diagnostics-technical-list { @apply mt-5 space-y-3; }
+  .diagnostics-summary-list div, .diagnostics-technical-list div { @apply flex flex-wrap items-center justify-between gap-3 border-b border-zinc-900 pb-3; }
+  .diagnostics-summary-list dt, .diagnostics-technical-list dt { @apply text-sm text-zinc-500; }
+  .diagnostics-summary-list dd, .diagnostics-technical-list dd { @apply m-0 max-w-xl break-all text-right text-sm text-zinc-300; }
+  .diagnostics-checks { @apply mt-5 list-none space-y-3 p-0; }
+  .diagnostics-checks li { @apply flex gap-3 rounded-xl border border-zinc-800 bg-zinc-900/30 p-4; }
+  .diagnostics-checks li > svg { @apply mt-0.5 shrink-0 text-zinc-400; }
+  .diagnostics-checks li > div { @apply min-w-0; }
+  .diagnostics-checks li > div > div { @apply flex flex-wrap items-center gap-2; }
+  .diagnostics-checks strong { @apply text-sm font-medium text-zinc-200; }
+  .diagnostic-check-status { @apply rounded-full px-2 py-0.5 text-[11px]; }
+  .diagnostic-check-status-healthy { @apply bg-emerald-950 text-emerald-300; }
+  .diagnostic-check-status-degraded { @apply bg-amber-950 text-amber-300; }
+  .diagnostic-check-status-unhealthy { @apply bg-red-950 text-red-300; }
+  .diagnostic-check-status-unknown { @apply bg-zinc-800 text-zinc-400; }
+  .diagnostics-checks p { @apply mb-0 mt-2 text-sm leading-6 text-zinc-400; }
+  .diagnostics-checks small { @apply mt-2 block text-xs text-zinc-500; }
+  .diagnostics-checks em { @apply mt-2 block text-xs not-italic text-zinc-300; }
+  .connection-operations-grid { @apply mt-5 grid gap-2 sm:grid-cols-2; }
+  .connection-operation { @apply flex min-h-11 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2.5 text-left text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50; }
+  .connection-operation span { @apply min-w-0; }
   .connection-activity-list { @apply mt-5 list-none space-y-4 p-0; }
   .connection-activity-list li { @apply border-b border-zinc-900 pb-4; }
   .connection-activity-list li button { @apply flex w-full items-start justify-between gap-4 border-0 bg-transparent p-0 text-left; }

@@ -39,6 +39,7 @@ export interface Connection {
   lastActivityAt: string | null
   createdAt: string | null
   updatedAt: string | null
+  runtimeName: string | null
 }
 
 export interface CreateConnectionInput {

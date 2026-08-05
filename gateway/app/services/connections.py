@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -114,6 +115,7 @@ class ConnectionService:
             last_activity_at=str(record["last_activity_at"]) if record.get("last_activity_at") else None,
             created_at=str(record["created_at"]) if record.get("created_at") else None,
             updated_at=str(record["updated_at"]) if record.get("updated_at") else None,
+            technical={"legacy_instance_name": str(record.get("legacy_name") or "") or None},
         )
 
     async def _runtime_connections(self) -> dict[str, dict[str, Any]]:
@@ -135,7 +137,12 @@ class ConnectionService:
             try:
                 if runtime is not None:
                     client = self._client_reference(str(record["client_id"]))
-                    result.append(legacy_instance_to_connection(runtime, record, client.name))
+                    result.append(
+                        replace(
+                            legacy_instance_to_connection(runtime, record, client.name),
+                            technical={"legacy_instance_name": self._runtime_name(record)},
+                        )
+                    )
                 else:
                     result.append(self._stored_connection(record))
             except ConnectionClientNotFoundError:

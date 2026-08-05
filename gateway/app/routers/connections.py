@@ -13,11 +13,13 @@ from app.services.connection_operations import (
     ConnectionOperationUnavailableError,
     get_connection_operations_service,
 )
+from app.services.connection_diagnostics import get_connection_diagnostics_service
 
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 _service = get_connection_service()
 _operations = get_connection_operations_service()
+_diagnostics = get_connection_diagnostics_service()
 
 
 @router.get("")
@@ -123,6 +125,16 @@ async def get_connection_status(connection_id: str):
         return await _operations.status(connection_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found")
+
+
+@router.get("/{connection_id}/diagnostics")
+async def get_connection_diagnostics(connection_id: str):
+    try:
+        return await _diagnostics.snapshot(connection_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/{connection_id}/messages")

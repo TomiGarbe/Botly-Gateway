@@ -26,6 +26,7 @@ interface ApiConnection {
   last_activity_at: string | null
   created_at: string | null
   updated_at: string | null
+  runtime_name: string | null
 }
 
 export function toConnection(payload: ApiConnection): Connection {
@@ -54,6 +55,7 @@ export function toConnection(payload: ApiConnection): Connection {
     lastActivityAt: payload.last_activity_at,
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
+    runtimeName: payload.runtime_name,
   }
 }
 

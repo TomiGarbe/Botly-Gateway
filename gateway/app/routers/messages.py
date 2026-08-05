@@ -244,11 +244,6 @@ async def _send_message_unified(instance_name: str, request: Request):
             if msg_type not in _MEDIA_TYPES:
                 logger.warning("unsupported_media", instance=instance_name, type=msg_type)
                 raise HTTPException(status_code=422, detail="type invalido para media")
-            if _is_official_instance(instance_name):
-                raise HTTPException(
-                    status_code=501,
-                    detail="El envio de archivos para WhatsApp Oficial aun no esta disponible; envia texto o implementa la carga de media de Meta.",
-                )
             if not isinstance(file, UploadFile):
                 logger.warning("invalid_payload", instance=instance_name, reason="missing_file")
                 raise HTTPException(status_code=422, detail="file es obligatorio para multipart media")
@@ -261,14 +256,26 @@ async def _send_message_unified(instance_name: str, request: Request):
                 logger.error("upload_fail", instance=instance_name, error=str(exc))
                 raise HTTPException(status_code=413, detail=str(exc)) from exc
 
-            result = await _connection_manager.send_media(
-                instance_name=instance_name,
-                number=number,
-                media_payload=media_base64,
-                mediatype=normalized_media_type,
-                mimetype=(file.content_type or "application/octet-stream"),
-                file_name=(file.filename or "file.bin"),
-                caption=caption.strip(),
+            result = (
+                await get_official_whatsapp_provider().send_media(
+                    instance_name=instance_name,
+                    number=number,
+                    media_base64=media_base64,
+                    media_type=normalized_media_type,
+                    mime_type=(file.content_type or "application/octet-stream"),
+                    file_name=(file.filename or "file.bin"),
+                    caption=caption.strip(),
+                )
+                if _is_official_instance(instance_name)
+                else await _connection_manager.send_media(
+                    instance_name=instance_name,
+                    number=number,
+                    media_payload=media_base64,
+                    mediatype=normalized_media_type,
+                    mimetype=(file.content_type or "application/octet-stream"),
+                    file_name=(file.filename or "file.bin"),
+                    caption=caption.strip(),
+                )
             )
             _persist_local_outbound_event(
                 instance_name=instance_name,
@@ -345,23 +352,29 @@ async def _send_message_unified(instance_name: str, request: Request):
         if msg_type not in _MEDIA_TYPES:
             logger.warning("unsupported_media", instance=instance_name, type=msg_type)
             raise HTTPException(status_code=422, detail="type invalido para media")
-        if _is_official_instance(instance_name):
-            raise HTTPException(
-                status_code=501,
-                detail="El envio de archivos para WhatsApp Oficial aun no esta disponible; envia texto o implementa la carga de media de Meta.",
-            )
-
         normalized_media_type = _normalize_media_type(msg_type, "application/octet-stream")
         media_payload = (payload.mediaUrl or "").strip() or (payload.base64 or "").strip()
         _log_message_start(instance_name, normalized_media_type, number, payload.metadata)
-        result = await _connection_manager.send_media(
-            instance_name=instance_name,
-            number=number,
-            media_payload=media_payload,
-            mediatype=normalized_media_type,
-            mimetype="application/octet-stream",
-            file_name="file.bin",
-            caption=(payload.caption or "").strip(),
+        result = (
+            await get_official_whatsapp_provider().send_media(
+                instance_name=instance_name,
+                number=number,
+                media_base64=media_payload,
+                media_type=normalized_media_type,
+                mime_type="application/octet-stream",
+                file_name="file.bin",
+                caption=(payload.caption or "").strip(),
+            )
+            if _is_official_instance(instance_name)
+            else await _connection_manager.send_media(
+                instance_name=instance_name,
+                number=number,
+                media_payload=media_payload,
+                mediatype=normalized_media_type,
+                mimetype="application/octet-stream",
+                file_name="file.bin",
+                caption=(payload.caption or "").strip(),
+            )
         )
         _persist_local_outbound_event(
             instance_name=instance_name,

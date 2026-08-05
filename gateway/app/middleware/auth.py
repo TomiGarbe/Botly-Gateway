@@ -5,7 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.services.google_auth import get_auth_service
 
 
-_PUBLIC_PATHS = {"/webhooks/evolution", "/webhooks/meta"}
+_PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta"}
 _PUBLIC_PREFIXES = ("/auth/",)
 _COOKIE = "botly_gateway_session"
 

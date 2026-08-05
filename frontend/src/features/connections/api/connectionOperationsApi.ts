@@ -34,6 +34,37 @@ export interface ConnectionStatusSummary {
   lastHeartbeatAt: string | null
 }
 
+export interface ConnectionDiagnosticCheck {
+  code: string
+  label: string
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  lastVerifiedAt: string | null
+  message: string
+  action: string | null
+}
+
+export interface ConnectionDiagnostics {
+  summary: {
+    status: ConnectionDiagnosticCheck['status']
+    lastVerifiedAt: string | null
+    lastHeartbeatAt: string | null
+    lastMessageSentAt: number | null
+    lastMessageReceivedAt: number | null
+    lastWebhookSuccessAt: string | null
+    lastError: string | null
+  }
+  checks: ConnectionDiagnosticCheck[]
+  technical: {
+    phoneNumberId: string | null
+    businessId: string | null
+    wabaId: string | null
+    provider: string | null
+    channel: string | null
+    apiVersion: string | null
+    lastSynchronizedAt: string | null
+  }
+}
+
 interface ApiConnectionApiKey {
   enabled: boolean
   has_api_key: boolean
@@ -137,6 +168,27 @@ export async function getConnectionStatusSummary(connectionId: string): Promise<
     lastActivityAt: payload.last_activity_at,
     lastHeartbeatAt: payload.last_heartbeat_at,
   }
+}
+
+export async function getConnectionDiagnostics(connectionId: string): Promise<ConnectionDiagnostics> {
+  const payload = await gatewayRequest<{
+    summary: { status: ConnectionDiagnosticCheck['status']; last_verified_at: string | null; last_heartbeat_at: string | null; last_message_sent_at: number | null; last_message_received_at: number | null; last_webhook_success_at: string | null; last_error: string | null }
+    checks: Array<{ code: string; label: string; status: ConnectionDiagnosticCheck['status']; last_verified_at: string | null; message: string; action: string | null }>
+    technical: { phone_number_id: string | null; business_id: string | null; waba_id: string | null; provider: string | null; channel: string | null; api_version: string | null; last_synchronized_at: string | null }
+  }>(`/connections/${encodeURIComponent(connectionId)}/diagnostics`)
+  return {
+    summary: { status: payload.summary.status, lastVerifiedAt: payload.summary.last_verified_at, lastHeartbeatAt: payload.summary.last_heartbeat_at, lastMessageSentAt: payload.summary.last_message_sent_at, lastMessageReceivedAt: payload.summary.last_message_received_at, lastWebhookSuccessAt: payload.summary.last_webhook_success_at, lastError: payload.summary.last_error },
+    checks: payload.checks.map((item) => ({ code: item.code, label: item.label, status: item.status, lastVerifiedAt: item.last_verified_at, message: item.message, action: item.action })),
+    technical: { phoneNumberId: payload.technical.phone_number_id, businessId: payload.technical.business_id, wabaId: payload.technical.waba_id, provider: payload.technical.provider, channel: payload.technical.channel, apiVersion: payload.technical.api_version, lastSynchronizedAt: payload.technical.last_synchronized_at },
+  }
+}
+
+export async function enqueueConnectionOperation(runtimeName: string, type: 'synchronize' | 'health_refresh'): Promise<void> {
+  await gatewayRequest('/operations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, targets: [runtimeName], scope: 'selected' }),
+  })
 }
 
 export async function sendConnectionQuickMessage(connectionId: string, number: string, text: string): Promise<void> {

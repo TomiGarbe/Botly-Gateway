@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Clipboard, Eye, EyeOff, MessageSquare, Pencil, RefreshCw, Send, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, Clipboard, Eye, EyeOff, Pencil, Trash2, X } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Connection } from '@/domain/connection'
@@ -13,11 +13,12 @@ import {
   listConnectionActivity,
   reconnectConnection,
   regenerateConnectionApiKey,
-  sendConnectionQuickMessage,
   testConnectionWebhook,
   updateConnectionWebhook,
 } from '../api/connectionOperationsApi'
 import { deleteConnection, getConnection, updateConnectionName } from '../api/connectionsApi'
+import { MessagesWorkspace } from '../components/MessagesWorkspace'
+import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
 
 function stateLabel(state: Connection['status']['state']): string {
   return { pending: 'Pendiente', connected: 'Conectada', connecting: 'Conectando', disconnected: 'Desconectada' }[state]
@@ -49,14 +50,8 @@ export function ConnectionDetailPage() {
   const [name, setName] = useState('')
   const [isEditingWebhook, setIsEditingWebhook] = useState(false)
   const [webhookUrl, setWebhookUrl] = useState('')
-  const [quickNumber, setQuickNumber] = useState('')
-  const [quickMessage, setQuickMessage] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  const [isSending, setIsSending] = useState(false)
-  const [isTestingWebhook, setIsTestingWebhook] = useState(false)
-  const [isRegeneratingKey, setIsRegeneratingKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
-  const [isReconnecting, setIsReconnecting] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const loadConnection = useCallback(async () => {
@@ -131,39 +126,18 @@ export function ConnectionDetailPage() {
   async function runWebhookTest() {
     if (!connection) return
     setError(null)
-    setIsTestingWebhook(true)
     try {
       const result = await testConnectionWebhook(connection.id)
       setNotice(result.ok ? 'Webhook probado correctamente.' : result.error || 'El webhook respondió con un error.')
       await Promise.all([loadOperations(), loadConnection()])
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo probar el webhook.')
-    } finally {
-      setIsTestingWebhook(false)
-    }
-  }
-
-  async function sendQuickMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!connection) return
-    setError(null)
-    setIsSending(true)
-    try {
-      await sendConnectionQuickMessage(connection.id, quickNumber, quickMessage)
-      setQuickMessage('')
-      setNotice('Mensaje enviado.')
-      await Promise.all([loadOperations(), loadConnection()])
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No se pudo enviar el mensaje.')
-    } finally {
-      setIsSending(false)
     }
   }
 
   async function regenerateKey() {
     if (!connection) return
     setError(null)
-    setIsRegeneratingKey(true)
     try {
       const updated = await regenerateConnectionApiKey(connection.id)
       setApiKey(updated)
@@ -171,8 +145,6 @@ export function ConnectionDetailPage() {
       setNotice('Nueva API Key generada. Copiala ahora: no volverá a mostrarse completa.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo regenerar la API Key.')
-    } finally {
-      setIsRegeneratingKey(false)
     }
   }
 
@@ -190,15 +162,12 @@ export function ConnectionDetailPage() {
   async function reconnect() {
     if (!connection) return
     setError(null)
-    setIsReconnecting(true)
     try {
       await reconnectConnection(connection.id)
       setNotice('Reconexión iniciada.')
       await Promise.all([loadConnection(), loadOperations()])
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo iniciar la reconexión.')
-    } finally {
-      setIsReconnecting(false)
     }
   }
 
@@ -242,28 +211,33 @@ export function ConnectionDetailPage() {
         </dl>
       </section>
 
+      <OperationsDiagnostics
+        connectionId={connection.id}
+        runtimeName={connection.runtimeName}
+        onReconnect={reconnect}
+        onTestWebhook={runWebhookTest}
+        onRegenerateKey={regenerateKey}
+        onRefreshConnection={async () => { await Promise.all([loadConnection(), loadOperations()]) }}
+      />
+
       <section className="connection-section">
         <div className="connection-section-heading"><div><h3>Webhook</h3><p>{webhook?.configured ? (webhook.enabled ? 'Activo' : 'Desactivado') : 'Sin configurar'}</p></div><button type="button" className="client-button-secondary" onClick={() => setIsEditingWebhook((value) => !value)}>Editar</button></div>
         {webhook?.url && !isEditingWebhook ? <p className="connection-section-value">{webhook.url}</p> : null}
         {isEditingWebhook ? <form className="connection-inline-form" onSubmit={saveWebhook}><label><span>URL</span><input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://…" required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setWebhookUrl(webhook?.url || ''); setIsEditingWebhook(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <dl className="connection-webhook-summary"><div><dt>Última entrega</dt><dd>{dateTime(webhook?.lastDeliveryAt, 'Sin entregas')}</dd></div><div><dt>Último error</dt><dd>{webhook?.lastError || 'Sin errores'}</dd></div><div><dt>Entregas exitosas</dt><dd>{webhook?.successfulDeliveries || 0}</dd></div><div><dt>Errores</dt><dd>{webhook?.failedDeliveries || 0}</dd></div></dl>
-        <button type="button" className="connection-text-action" onClick={() => void runWebhookTest()} disabled={!webhook?.configured || isTestingWebhook}>{isTestingWebhook ? 'Probando…' : 'Probar webhook'}</button>
       </section>
 
       <section className="connection-section">
         <div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div>
         {showKey && displayedKey ? <p className="connection-key-value">{displayedKey}</p> : <p className="connection-section-value">La clave completa sólo se muestra cuando se regenera.</p>}
-        <div className="connection-inline-actions"><button type="button" className="client-button-secondary" onClick={() => setShowKey((value) => !value)} disabled={!displayedKey}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button><button type="button" className="client-button-secondary" onClick={() => void regenerateKey()} disabled={isRegeneratingKey}>{isRegeneratingKey ? 'Regenerando…' : 'Regenerar'}</button><button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!displayedKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button></div>
+        <div className="connection-inline-actions"><button type="button" className="client-button-secondary" onClick={() => setShowKey((value) => !value)} disabled={!displayedKey}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button><button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!displayedKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button></div>
       </section>
 
-      <section className="connection-section">
-        <div className="connection-section-heading"><div><h3>Prueba rápida</h3><p>Enviá un mensaje de texto desde esta conexión.</p></div><MessageSquare size={18} aria-hidden="true" /></div>
-        <form className="connection-quick-message" onSubmit={sendQuickMessage}><label><span>Número</span><input inputMode="numeric" value={quickNumber} onChange={(event) => setQuickNumber(event.target.value)} placeholder="549…" required /></label><label><span>Mensaje</span><textarea value={quickMessage} onChange={(event) => setQuickMessage(event.target.value)} rows={3} maxLength={4096} required /></label><button type="submit" className="client-button-primary" disabled={isSending}><Send size={15} aria-hidden="true" /> {isSending ? 'Enviando…' : 'Enviar mensaje'}</button></form>
-      </section>
+      <MessagesWorkspace runtimeName={connection.runtimeName} />
 
       <section className="connection-section">
-        <h3>Acciones rápidas</h3>
-        <div className="connection-inline-actions"><button type="button" className="client-button-secondary" onClick={() => void reconnect()} disabled={isReconnecting}><RefreshCw size={15} aria-hidden="true" /> {isReconnecting ? 'Reconectando…' : 'Reconectar'}</button><button type="button" className="client-button-danger" onClick={() => void removeConnection()} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> {isDeleting ? 'Eliminando…' : 'Eliminar conexión'}</button></div>
+        <h3>Administración</h3>
+        <div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => void removeConnection()} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> {isDeleting ? 'Eliminando…' : 'Eliminar conexión'}</button></div>
       </section>
 
       <section className="connection-section">
