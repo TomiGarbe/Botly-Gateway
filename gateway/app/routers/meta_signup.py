@@ -7,6 +7,7 @@ from app.models.meta import MetaSignupCompleteRequest, MetaSignupConfigResponse
 from app.services import instance_auth
 from app.services.audit import audit_event
 from app.services.connection_metadata import set_connection_metadata
+from app.services.connections import ConnectionNotFoundError, get_connection_service
 from app.services.instances_contract import normalize_instance
 from app.services.meta import get_meta_onboarding_orchestrator
 from app.platforms.meta import MetaPlatformError
@@ -23,9 +24,19 @@ async def get_signup_config():
 @router.post("/complete", status_code=status.HTTP_201_CREATED)
 async def complete_signup(body: MetaSignupCompleteRequest):
     orchestrator = get_meta_onboarding_orchestrator()
+    connection_service = get_connection_service()
+    if body.connection_id:
+        try:
+            instance_name = connection_service.connection_runtime_name(body.connection_id)
+        except ConnectionNotFoundError:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    else:
+        instance_name = body.instance_name
+    if not instance_name:
+        raise HTTPException(status_code=422, detail="Connection target is required")
     try:
         completion = await orchestrator.run(
-            instance_name=body.instance_name,
+            instance_name=instance_name,
             code=body.code,
             phone_number_id=body.phone_number_id,
             business_account_id=body.business_account_id,
@@ -34,7 +45,7 @@ async def complete_signup(body: MetaSignupCompleteRequest):
     except MetaPlatformError as exc:
         logger.warning(
             "meta_signup_complete_failed",
-            instance=body.instance_name,
+            instance=instance_name,
             phone_number_id=body.phone_number_id,
             business_account_id=body.business_account_id,
             error=str(exc),
@@ -42,15 +53,15 @@ async def complete_signup(body: MetaSignupCompleteRequest):
         )
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except Exception as exc:
-        logger.error("meta_signup_evolution_create_failed", instance=body.instance_name, error=str(exc))
+        logger.error("meta_signup_evolution_create_failed", instance=instance_name, error=str(exc))
         status_code = getattr(exc, "status_code", 502)
         raise HTTPException(status_code=status_code if isinstance(status_code, int) else 502, detail=str(exc))
 
     result = completion.instance
-    instance_auth.ensure_instance_key(body.instance_name, instance_id=body.instance_name)
+    instance_auth.ensure_instance_key(instance_name, instance_id=instance_name)
     audit_event(
         "embedded_signup_completed",
-        instance=body.instance_name,
+        instance=instance_name,
         phoneNumberId=completion.credentials.phone_number_id,
         businessAccountId=completion.credentials.business_account_id,
     )
@@ -60,7 +71,7 @@ async def complete_signup(body: MetaSignupCompleteRequest):
         if isinstance(result["metadata"], dict):
             result["metadata"]["embeddedSignup"] = completion.credentials.public_dict()
         set_connection_metadata(
-            body.instance_name,
+            instance_name,
             {
                 "metadata": {
                     "embeddedSignup": completion.credentials.public_dict(),
@@ -68,12 +79,17 @@ async def complete_signup(body: MetaSignupCompleteRequest):
             },
         )
         normalized = normalize_instance(result)
+        if body.connection_id:
+            return connection_service.mark_meta_signup_completed(body.connection_id).public_dict()
         if normalized:
             return normalized
 
+    if body.connection_id:
+        return connection_service.mark_meta_signup_completed(body.connection_id).public_dict()
+
     return {
-        "id": body.instance_name,
-        "name": body.instance_name,
+        "id": instance_name,
+        "name": instance_name,
         "status": "open",
         "connectionType": "cloud",
         "integration": "WHATSAPP-BUSINESS",

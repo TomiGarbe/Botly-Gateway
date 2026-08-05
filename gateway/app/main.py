@@ -14,16 +14,18 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import alerts, automations, channels, instances, messages, operations, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning
+from app.routers import alerts, auth, automations, channels, clients, connections, dashboard, instances, messages, operations, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
 from app.services.automations import AutomationScheduler
 from app.services.operations import OperationWorker
+from app.services.connections import get_connection_service
 
 settings = get_settings()
 setup_logging(settings.log_level)
 logger = get_logger(__name__)
 _connection_manager = get_connection_manager()
+_connection_service = get_connection_service()
 
 
 async def _automation_instances() -> list[dict]:
@@ -78,13 +80,15 @@ async def lifespan(app: FastAPI):
         instance_api_keys_path=settings.instance_api_keys_path,
         instance_webhooks_path=settings.instance_webhooks_path,
         connection_metadata_path=settings.connection_metadata_path,
+        connection_registry_path=settings.connection_registry_path,
         official_credentials_path=settings.official_credentials_path,
         webhook_events_path=settings.webhook_events_path,
         automations_path=settings.automations_path,
         operations_path=settings.operations_path,
         media_cache_dir=settings.media_cache_dir,
     )
-    logger.info("[BOOT][MIGRATIONS] gateway has no DB migrations at startup")
+    migrated_connections = await _connection_service.migrate_legacy_connections()
+    logger.info("connection_domain_migration_complete", inserted=migrated_connections, storage_path=settings.connection_registry_path)
     logger.info("[BOOT][WEBHOOKS] instance webhook registry bootstrap", storage_path=settings.instance_webhooks_path)
     await _connection_manager.open_default()
     try:
@@ -118,6 +122,10 @@ api.add_middleware(AuthMiddleware)
 api.add_middleware(SlowAPIMiddleware)
 
 api.include_router(instances.router)
+api.include_router(auth.router)
+api.include_router(clients.router)
+api.include_router(connections.router)
+api.include_router(dashboard.router)
 api.include_router(channels.router)
 api.include_router(provisioning.router)
 api.include_router(messages.router)
@@ -167,6 +175,7 @@ app = CORSMiddleware(
     allow_origin_regex=settings.cors_allow_origin_regex or None,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    allow_credentials=True,
     max_age=600,
 )
 app = CorsDiagnosticsMiddleware(app)

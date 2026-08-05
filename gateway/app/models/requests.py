@@ -1,5 +1,5 @@
 from typing import Any, Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CreateInstanceRequest(BaseModel):
@@ -28,6 +28,93 @@ class CreateInstanceRequest(BaseModel):
                 raise ValueError(f"Campos obligatorios para WhatsApp Oficial: {', '.join(missing)}")
             self.qrcode = False
         return self
+
+
+class CreateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Client name is required")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return value or None
+
+
+class UpdateClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            raise ValueError("Client name cannot be null")
+        if not value:
+            raise ValueError("Client name is required")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return value or None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "UpdateClientRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one client field must be provided")
+        return self
+
+
+class CreateConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    client_id: str = Field(..., min_length=1, max_length=128)
+    channel: Literal["whatsapp"]
+
+
+class UpdateConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            raise ValueError("Connection name cannot be null")
+        if not value:
+            raise ValueError("Connection name is required")
+        return value
+
+    @model_validator(mode="after")
+    def require_change(self) -> "UpdateConnectionRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one connection field must be provided")
+        return self
+
+
+class ConnectionWebhookRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    url: str = Field(..., min_length=8, max_length=2048)
+
+
+class ConnectionQuickMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    number: str = Field(..., min_length=5, max_length=40)
+    text: str = Field(..., min_length=1, max_length=4096)
 
 
 class SendTextRequest(BaseModel):

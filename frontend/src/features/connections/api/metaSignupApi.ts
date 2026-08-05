@@ -1,0 +1,41 @@
+import type { Connection } from '@/domain/connection'
+import { gatewayRequest } from '@/shared/lib/gatewayClient'
+import { toConnection } from './connectionsApi'
+
+export interface MetaSignupConfig {
+  enabled: boolean
+  app_id: string | null
+  config_id: string | null
+  graph_version: string
+  supports_coexistence: boolean
+}
+
+interface EmbeddedSignupSession {
+  phoneNumberId: string
+  businessAccountId: string
+  raw: Record<string, unknown>
+}
+
+export async function getMetaSignupConfig(): Promise<MetaSignupConfig> {
+  return gatewayRequest<MetaSignupConfig>('/meta/signup/config')
+}
+
+export async function completeMetaSignup(
+  connectionId: string,
+  code: string,
+  session: EmbeddedSignupSession,
+  coexistenceRequested: boolean,
+): Promise<Connection> {
+  const payload = await gatewayRequest<Parameters<typeof toConnection>[0]>('/meta/signup/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      connection_id: connectionId,
+      code,
+      phone_number_id: session.phoneNumberId,
+      business_account_id: session.businessAccountId,
+      session_info: { ...session.raw, coexistenceRequested },
+    }),
+  })
+  return toConnection(payload)
+}

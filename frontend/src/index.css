@@ -3,19 +3,248 @@
 @tailwind utilities;
 
 @layer base {
-  * { @apply border-zinc-800; }
+  * { @apply border-zinc-200; }
   html { color-scheme: dark; }
-  body { @apply bg-zinc-950 text-zinc-50; }
+  body { @apply m-0 bg-zinc-950 text-zinc-100 font-sans; }
+  button, input { font: inherit; }
   :focus-visible { @apply outline-none ring-2 ring-blue-400 ring-offset-2 ring-offset-zinc-950; }
-  ::-webkit-scrollbar { @apply w-1.5; }
-  ::-webkit-scrollbar-track { @apply bg-transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-zinc-700 rounded-full; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-zinc-600; }
 }
 
 @layer components {
-  select.filter { @apply rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-400; }
-  button.action { @apply flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800; }
-  .mobile-nav { @apply flex gap-1 overflow-x-auto pb-0.5; }
-  .mobile-nav > button { @apply min-w-[72px] shrink-0; }
+  .app-shell { @apply grid min-h-screen grid-cols-[15rem_minmax(0,1fr)] bg-zinc-950; }
+  .app-sidebar { @apply flex min-h-screen flex-col border-r border-zinc-800 bg-zinc-900/40 px-3 py-5; }
+  .app-brand { @apply px-3 text-base font-semibold tracking-tight text-zinc-100; }
+  .app-brand span { @apply text-zinc-500; }
+  .app-navigation { @apply mt-10 space-y-1; }
+  .app-nav-link { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100; }
+  .app-nav-link.is-active { @apply bg-zinc-800 text-zinc-50; }
+  .app-content { @apply flex min-w-0 flex-col; }
+  .app-header { @apply flex min-h-16 items-center justify-between border-b border-zinc-800 px-8; }
+  .app-header h1 { @apply m-0 text-sm font-medium text-zinc-200; }
+  .app-profile { @apply flex items-center gap-2; }
+  .app-avatar { @apply flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-xs font-medium text-zinc-300; }
+  .app-profile-copy { @apply hidden text-right sm:block; }
+  .app-profile-copy span { @apply block text-xs text-zinc-200; }
+  .app-profile-copy small { @apply block text-[11px] text-zinc-500; }
+  .app-sign-out { @apply ml-1 rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40; }
+  .app-main { @apply flex-1 px-6 py-8 sm:px-10; }
+  .page-placeholder { @apply mx-auto max-w-2xl border-l border-zinc-700 py-2 pl-5; }
+  .page-placeholder-eyebrow { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .page-placeholder h2 { @apply mb-2 mt-3 text-2xl font-semibold text-zinc-100; }
+  .page-placeholder p { @apply m-0 text-sm leading-6 text-zinc-400; }
+  .page-placeholder span { @apply mt-5 inline-block font-mono text-xs text-zinc-500; }
+  .auth-page { @apply flex min-h-screen items-center justify-center bg-zinc-950 px-6; }
+  .auth-login, .auth-denied { @apply flex w-full max-w-sm flex-col items-center text-center; }
+  .auth-logo { @apply flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-lg font-semibold text-zinc-950; }
+  .auth-login h1, .auth-denied h1 { @apply mb-0 mt-5 text-xl font-semibold tracking-tight text-zinc-100; }
+  .auth-google-button { @apply mt-8 min-h-11; }
+  .auth-loading { @apply mt-4 text-zinc-500; }
+  .auth-unavailable { @apply mt-4 text-sm text-zinc-500; }
+  .auth-denied > svg { @apply text-red-300; }
+  .auth-denied p { @apply mb-0 mt-3 text-sm leading-6 text-zinc-400; }
+  .auth-denied a { @apply mt-6 text-sm font-medium text-zinc-200 underline underline-offset-4 hover:text-white; }
+  .auth-router-loading { @apply text-sm text-zinc-500; }
+  .dashboard-page { @apply mx-auto max-w-5xl; }
+  .dashboard-heading { @apply flex items-start justify-between gap-5; }
+  .dashboard-heading > div:first-child > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .dashboard-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .dashboard-overall { @apply inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-sm font-medium; }
+  .dashboard-overall-healthy { @apply bg-emerald-950/60 text-emerald-300; }
+  .dashboard-overall-attention { @apply bg-amber-950/60 text-amber-300; }
+  .dashboard-overall-critical { @apply bg-red-950/60 text-red-300; }
+  .dashboard-overall svg { @apply h-4 w-4; }
+  .dashboard-metrics { @apply mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4; }
+  .dashboard-metric { @apply rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .dashboard-metric > svg { @apply text-zinc-500; }
+  .dashboard-metric span { @apply mt-6 block text-sm text-zinc-400; }
+  .dashboard-metric strong { @apply mt-1 block text-2xl font-semibold tracking-tight text-zinc-100; }
+  .dashboard-section { @apply mt-14 border-t border-zinc-800 pt-7; }
+  .dashboard-section-heading h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .dashboard-section-heading p { @apply mb-0 mt-1 text-sm text-zinc-500; }
+  .dashboard-empty { @apply mt-6 text-sm text-zinc-500; }
+  .dashboard-activity-list, .dashboard-attention-list { @apply mt-6 list-none p-0; }
+  .dashboard-activity-list li { @apply grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-zinc-900 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]; }
+  .dashboard-activity-icon { @apply flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-zinc-400; }
+  .dashboard-activity-icon svg { @apply h-4 w-4; }
+  .dashboard-activity-icon.is-warning { @apply bg-amber-950/60 text-amber-300; }
+  .dashboard-activity-icon.is-critical { @apply bg-red-950/60 text-red-300; }
+  .dashboard-activity-list li > div, .dashboard-attention-list li > div { @apply flex min-w-0 flex-col gap-1; }
+  .dashboard-activity-list strong, .dashboard-attention-list strong { @apply text-sm font-medium text-zinc-200; }
+  .dashboard-activity-list li > div > span, .dashboard-attention-list li > div > span { @apply truncate text-xs text-zinc-500; }
+  .dashboard-activity-list time { @apply text-xs text-zinc-500; }
+  .dashboard-activity-list .client-button-secondary, .dashboard-attention-list .client-button-secondary { @apply text-xs; }
+  .dashboard-attention-list li { @apply flex flex-wrap items-center gap-4 border-b border-zinc-900 py-4; }
+  .dashboard-attention-list li > div { @apply min-w-40 flex-1; }
+  .dashboard-attention-status { @apply rounded-full px-2.5 py-1 text-xs font-medium; }
+  .dashboard-attention-status.is-warning { @apply bg-amber-950/60 text-amber-300; }
+  .dashboard-attention-status.is-critical { @apply bg-red-950/60 text-red-300; }
+  .dashboard-all-clear { @apply mt-6 flex items-center gap-2 text-sm text-emerald-300; }
+  .alerts-page { @apply mx-auto max-w-4xl; }
+  .alerts-heading > div > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .alerts-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .alerts-page > .client-form-error { @apply mt-6; }
+  .alerts-empty { @apply mt-10 flex items-start gap-3 border-l border-emerald-700/70 py-2 pl-5; }
+  .alerts-empty > svg { @apply mt-0.5 shrink-0 text-emerald-400; }
+  .alerts-empty > div { @apply flex flex-col gap-1; }
+  .alerts-empty strong { @apply text-sm font-medium text-emerald-200; }
+  .alerts-empty span { @apply text-sm text-zinc-500; }
+  .alerts-list { @apply mt-10 space-y-3; }
+  .alert-card { @apply flex gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .alert-card.is-critical { @apply border-red-950/70; }
+  .alert-card.is-resolved { @apply opacity-60; }
+  .alert-card-icon { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full; }
+  .alert-card-icon svg { @apply h-4 w-4; }
+  .alert-card-icon.is-critical { @apply bg-red-950/70 text-red-300; }
+  .alert-card-icon.is-warning { @apply bg-amber-950/70 text-amber-300; }
+  .alert-card-icon.is-info { @apply bg-blue-950/70 text-blue-300; }
+  .alert-card-content { @apply min-w-0 flex-1; }
+  .alert-card-title { @apply flex flex-wrap items-center gap-3; }
+  .alert-card-title h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .alert-card-content > p { @apply mb-0 mt-2 text-sm leading-6 text-zinc-400; }
+  .alert-severity { @apply rounded-full px-2.5 py-1 text-xs font-medium; }
+  .alert-severity.is-critical { @apply bg-red-950/60 text-red-300; }
+  .alert-severity.is-warning { @apply bg-amber-950/60 text-amber-300; }
+  .alert-severity.is-info { @apply bg-blue-950/60 text-blue-300; }
+  .alert-card-meta { @apply mt-5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500; }
+  .alert-card-actions { @apply mt-5 flex flex-wrap gap-2; }
+  .clients-page, .client-detail { @apply mx-auto max-w-5xl; }
+  .clients-page-heading, .client-detail-heading, .client-connections-heading { @apply flex items-start justify-between gap-5; }
+  .clients-page-heading > div > p, .client-connections-heading p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .clients-page-heading h2, .client-detail-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .client-button-primary, .client-button-secondary, .client-button-danger { @apply inline-flex shrink-0 items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45; }
+  .client-button-primary { @apply bg-zinc-100 text-zinc-950 hover:bg-white; }
+  .client-button-secondary { @apply border border-zinc-700 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800; }
+  .client-button-danger { @apply border border-red-950/70 text-red-300 hover:bg-red-950/40; }
+  .client-form { @apply mt-8 max-w-xl space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5; }
+  .client-form label { @apply block space-y-2; }
+  .client-form label > span { @apply block text-sm font-medium text-zinc-300; }
+  .client-form em { @apply ml-1 text-xs not-italic font-normal text-zinc-500; }
+  .client-form input, .client-form textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600; }
+  .client-form textarea { @apply resize-y; }
+  .client-form-actions, .client-detail-actions { @apply flex flex-wrap items-center gap-2; }
+  .client-form-error { @apply m-0 text-sm text-red-300; }
+  .clients-list { @apply mt-8 grid gap-3 sm:grid-cols-2; }
+  .client-card { @apply min-w-0 rounded-xl border border-zinc-800 bg-zinc-900/30 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60; }
+  .client-card-link { @apply block w-full cursor-pointer border-0 bg-transparent p-5 text-left; }
+  .client-card h2 { @apply m-0 text-base font-medium text-zinc-100; }
+  .client-card p { @apply mb-0 mt-2 line-clamp-2 text-sm leading-6 text-zinc-400; }
+  .client-card-meta { @apply mt-5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500; }
+  .clients-state { @apply mt-10 text-sm text-zinc-500; }
+  .clients-state-error { @apply rounded-lg border border-red-950/70 bg-red-950/20 p-4 text-red-200; }
+  .clients-state-error p { @apply m-0; }
+  .clients-state-error button { @apply mt-3 text-sm font-medium text-red-100 underline underline-offset-4; }
+  .client-back-link { @apply inline-flex items-center gap-2 border-0 bg-transparent p-0 text-sm text-zinc-500 transition-colors hover:text-zinc-200; }
+  .client-detail-heading { @apply mt-7 border-b border-zinc-800 pb-8; }
+  .client-detail-heading p { @apply mb-0 mt-3 max-w-2xl text-sm leading-6 text-zinc-400; }
+  .client-connections-heading { @apply mt-12 items-end; }
+  .client-connections-heading span { @apply mt-2 block text-sm text-zinc-400; }
+  .client-connections-list { @apply mt-5 grid gap-3 sm:grid-cols-2; }
+  .client-connections-empty { @apply rounded-xl border border-dashed border-zinc-800 px-5 py-6 text-sm leading-6 text-zinc-500; }
+  .connection-card { @apply rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .connection-card h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .connection-card > div:first-child > p { @apply mb-0 mt-2 text-sm text-zinc-400; }
+  .connection-card-footer { @apply mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 text-xs text-zinc-500; }
+  .connection-status { @apply inline-flex rounded-full px-2.5 py-1 text-xs font-medium; }
+  .connection-status-pending { @apply bg-amber-950/60 text-amber-300; }
+  .connection-status-connected { @apply bg-emerald-950/60 text-emerald-300; }
+  .connection-status-connecting { @apply bg-blue-950/60 text-blue-300; }
+  .connection-status-disconnected { @apply bg-zinc-800 text-zinc-400; }
+  .new-connection-page, .connection-detail { @apply mx-auto max-w-3xl; }
+  .new-connection-heading { @apply mt-7; }
+  .new-connection-heading > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .new-connection-heading h2, .connection-detail-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .channel-selection { @apply mt-8 grid gap-3; }
+  .channel-card { @apply flex items-center gap-4 rounded-xl border p-5 text-left; }
+  .channel-card-active { @apply border-zinc-700 bg-zinc-900/40 text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-60; }
+  .channel-card-active > svg:last-child { @apply ml-auto text-zinc-500; }
+  .channel-card span { @apply flex flex-col gap-1; }
+  .channel-card strong { @apply text-sm font-medium; }
+  .channel-card small { @apply text-sm text-zinc-500; }
+  .channel-card-disabled { @apply border-zinc-900 bg-zinc-950/30 text-zinc-600; }
+  .meta-signup-card { @apply mt-8 flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5; }
+  .meta-signup-card > svg { @apply text-emerald-400; }
+  .meta-signup-card h3 { @apply m-0 text-sm font-medium text-zinc-100; }
+  .meta-signup-card p { @apply mb-0 mt-1 text-sm text-zinc-400; }
+  .meta-signup-card .client-button-primary { @apply ml-auto; }
+  .connection-provisioning { @apply mt-8 max-w-xl; }
+  .connection-provisioning ol { @apply m-0 list-none space-y-4 border-l border-zinc-800 p-0 pl-5; }
+  .connection-provisioning li { @apply relative flex items-center gap-3 text-sm text-zinc-600; }
+  .connection-provisioning li > svg, .connection-provisioning li > span { @apply -ml-[1.89rem] box-content h-4 w-4 rounded-full border border-zinc-800 bg-zinc-950 p-0.5; }
+  .connection-provisioning li.is-active { @apply font-medium text-zinc-100; }
+  .connection-provisioning li.is-active > svg { @apply border-blue-400 text-blue-300; }
+  .connection-provisioning li.is-complete { @apply text-zinc-400; }
+  .connection-provisioning li.is-complete > svg { @apply border-emerald-500 text-emerald-400; }
+  .connection-provisioning > .client-button-primary { @apply mt-8; }
+  .provisioning-error { @apply mt-8 rounded-xl border border-red-950/70 bg-red-950/20 p-4; }
+  .provisioning-error p { @apply m-0 text-sm leading-6 text-red-200; }
+  .provisioning-error button { @apply mt-4; }
+  .connection-detail-heading { @apply mt-7 flex items-start justify-between gap-4 border-b border-zinc-800 pb-8; }
+  .connection-name-form { @apply mt-6 flex flex-wrap items-end gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4; }
+  .connection-name-form label { @apply min-w-60 flex-1 space-y-2; }
+  .connection-name-form label span { @apply block text-sm font-medium text-zinc-300; }
+  .connection-name-form input { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .connection-name-form > div { @apply flex gap-2; }
+  .connection-notice { @apply mt-5 flex items-center gap-2 text-sm text-emerald-300; }
+  .connection-section { @apply mt-10 border-t border-zinc-800 pt-7; }
+  .connection-section h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .connection-section-heading { @apply flex items-start justify-between gap-4; }
+  .connection-section-heading p { @apply mb-0 mt-1 text-sm text-zinc-500; }
+  .connection-information-list { @apply mt-5 space-y-4; }
+  .connection-information-list div { @apply flex flex-wrap items-center justify-between gap-3 border-b border-zinc-900 pb-4; }
+  .connection-information-list dt { @apply text-sm text-zinc-500; }
+  .connection-information-list dd { @apply m-0 text-sm text-zinc-200; }
+  .connection-webhook-summary { @apply mt-5 space-y-3; }
+  .connection-webhook-summary div { @apply flex flex-wrap items-center justify-between gap-3 border-b border-zinc-900 pb-3; }
+  .connection-webhook-summary dt { @apply text-sm text-zinc-500; }
+  .connection-webhook-summary dd { @apply m-0 max-w-xl break-all text-right text-sm text-zinc-300; }
+  .connection-section-value, .connection-key-value { @apply mb-0 mt-5 break-all text-sm leading-6 text-zinc-400; }
+  .connection-key-value { @apply font-mono text-zinc-200; }
+  .connection-inline-form { @apply mt-5 flex flex-wrap items-end gap-3; }
+  .connection-inline-form label { @apply min-w-60 flex-1 space-y-2; }
+  .connection-inline-form label span { @apply block text-sm text-zinc-500; }
+  .connection-inline-form input { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .connection-inline-form > div, .connection-inline-actions { @apply flex flex-wrap gap-2; }
+  .connection-text-action { @apply mt-5 border-0 bg-transparent p-0 text-sm font-medium text-zinc-300 underline underline-offset-4 hover:text-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-600; }
+  .connection-inline-actions { @apply mt-5; }
+  .connection-quick-message { @apply mt-5 space-y-4; }
+  .connection-quick-message label { @apply block space-y-2; }
+  .connection-quick-message label span { @apply block text-sm text-zinc-500; }
+  .connection-quick-message input, .connection-quick-message textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .connection-quick-message textarea { @apply resize-y; }
+  .connection-activity-list { @apply mt-5 list-none space-y-4 p-0; }
+  .connection-activity-list li { @apply border-b border-zinc-900 pb-4; }
+  .connection-activity-list li button { @apply flex w-full items-start justify-between gap-4 border-0 bg-transparent p-0 text-left; }
+  .connection-activity-list li button:hover strong { @apply text-white; }
+  .connection-activity-list li button > div { @apply flex min-w-0 flex-col gap-1; }
+  .connection-activity-list strong { @apply text-sm font-medium text-zinc-200; }
+  .connection-activity-list span { @apply text-xs text-zinc-500; }
+  .connection-activity-list em { @apply text-xs not-italic text-zinc-500; }
+  .activity-panel-backdrop { @apply fixed inset-0 z-50 flex justify-end bg-black/50; }
+  .activity-panel { @apply h-full w-full max-w-md overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6 shadow-2xl; }
+  .activity-panel-heading { @apply flex items-start justify-between gap-4 border-b border-zinc-800 pb-5; }
+  .activity-panel-heading h3 { @apply m-0 text-lg font-semibold text-zinc-100; }
+  .activity-panel-heading p { @apply mb-0 mt-2 text-sm text-zinc-500; }
+  .activity-panel-heading button { @apply rounded-md p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100; }
+  .activity-panel dl { @apply mt-6 space-y-5; }
+  .activity-panel dl div { @apply border-b border-zinc-900 pb-4; }
+  .activity-panel dt { @apply text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .activity-panel dd { @apply mb-0 mt-2 break-words text-sm leading-6 text-zinc-300; }
+}
+
+@media (max-width: 640px) {
+  .app-shell { @apply block; }
+  .app-sidebar { @apply min-h-0 border-b border-r-0 py-3; }
+  .app-navigation { @apply mt-4 flex gap-1 overflow-x-auto space-y-0; }
+  .app-nav-link { @apply shrink-0; }
+  .app-header { @apply px-5; }
+  .app-main { @apply px-5 py-8; }
+  .clients-page-heading, .client-detail-heading, .client-connections-heading { @apply flex-col items-stretch; }
+  .dashboard-heading { @apply flex-col items-stretch; }
+  .dashboard-overall { @apply self-start; }
+  .dashboard-activity-list li { @apply grid-cols-[auto_minmax(0,1fr)]; }
+  .dashboard-activity-list time { @apply col-start-2; }
+  .dashboard-activity-list .client-button-secondary { @apply col-start-2 justify-self-start; }
+  .client-detail-actions { @apply justify-start; }
+  .connection-detail-heading { @apply flex-col; }
+  .meta-signup-card .client-button-primary { @apply ml-0; }
 }

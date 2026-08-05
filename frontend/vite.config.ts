@@ -18,7 +18,7 @@ export default defineConfig({
         id: '/',
         name: 'Botly Gateway',
         short_name: 'Botly Gateway',
-        description: 'Conecta y administra tus canales, mensajes y webhooks.',
+        description: 'Administra clientes y conexiones de Botly.',
         theme_color: '#09090b',
         background_color: '#09090b',
         display: 'standalone',

@@ -1,0 +1,301 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from app.models.requests import CreateClientRequest, UpdateClientRequest
+from app.routers import clients as clients_router
+from app.routers import connections as connections_router
+from app.services.clients import ClientHasConnectionsError, ClientService
+from app.services.connection_registry import ConnectionRegistry
+from app.services.connections import ConnectionService
+from app.services.connection_operations import ConnectionOperationsService
+
+
+class _LegacyRuntime:
+    async def list_instances(self) -> list[dict]:
+        return [
+            {
+                "instanceName": "acme_support",
+                "instanceId": "connection-01",
+                "integration": "WHATSAPP-BUSINESS",
+                "connectionStatus": "open",
+                "profileName": "Acme",
+                "number": "5491100000000",
+            },
+            {
+                "instanceName": "acme_web",
+                "integration": "WHATSAPP-BAILEYS",
+                "connectionStatus": "connecting",
+            },
+        ]
+
+
+def test_client_service_persists_simple_client_model(tmp_path) -> None:
+    service = ClientService(ConnectionRegistry(tmp_path / "connection_registry.json"))
+
+    created = service.create_client("Global Tech", "Cliente de prueba")
+    updated = service.update_client(created.id, description=None)
+
+    assert updated.id == created.id
+    assert updated.name == "Global Tech"
+    assert updated.description is None
+    assert service.list_clients() == [updated]
+
+    service.delete_client(created.id)
+    assert service.list_clients() == []
+
+
+def test_client_overview_reports_connection_count_and_latest_activity(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    service = ClientService(registry)
+    client = service.create_client("Global Tech")
+    registry.save_connection_record(
+        "global-tech-support",
+        {
+            "id": "connection-01",
+            "legacy_name": "global-tech-support",
+            "client_id": client.id,
+            "created_at": "2026-08-01T00:00:00Z",
+            "updated_at": "2026-08-01T00:00:00Z",
+            "last_activity_at": "2026-08-02T09:00:00Z",
+        },
+    )
+    registry.save_connection_record(
+        "global-tech-sales",
+        {
+            "id": "connection-02",
+            "legacy_name": "global-tech-sales",
+            "client_id": client.id,
+            "created_at": "2026-08-01T00:00:00Z",
+            "updated_at": "2026-08-01T00:00:00Z",
+            "last_activity_at": "2026-08-03T09:00:00Z",
+        },
+    )
+
+    overview = service.get_client_overview(client.id)
+
+    assert overview.connection_count == 2
+    assert overview.last_activity_at == "2026-08-03T09:00:00Z"
+    with pytest.raises(ClientHasConnectionsError):
+        service.delete_client(client.id)
+
+
+def test_client_requests_trim_values_and_reject_invalid_updates() -> None:
+    created = CreateClientRequest(name="  Global Tech  ", description="  Cliente principal  ")
+
+    assert created.name == "Global Tech"
+    assert created.description == "Cliente principal"
+
+    with pytest.raises(ValidationError):
+        CreateClientRequest(name="   ")
+    with pytest.raises(ValidationError):
+        UpdateClientRequest()
+    with pytest.raises(ValidationError):
+        UpdateClientRequest(name=None)
+    with pytest.raises(ValidationError):
+        CreateClientRequest(name="Global Tech", unexpected="value")
+
+
+def test_clients_router_exposes_complete_crud_contract(monkeypatch, tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    service = ClientService(registry)
+    monkeypatch.setattr(clients_router, "_service", service)
+    api = FastAPI()
+    api.include_router(clients_router.router)
+    http = TestClient(api)
+
+    created = http.post("/clients", json={"name": "  Global Tech  ", "description": "  Cliente principal  "})
+    assert created.status_code == 201
+    assert created.json()["name"] == "Global Tech"
+    assert created.json()["connection_count"] == 0
+    client_id = created.json()["id"]
+
+    listed = http.get("/clients")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [client_id]
+
+    fetched = http.get(f"/clients/{client_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["description"] == "Cliente principal"
+
+    patched = http.patch(f"/clients/{client_id}", json={"description": None})
+    assert patched.status_code == 200
+    assert patched.json()["description"] is None
+
+    replaced = http.put(f"/clients/{client_id}", json={"name": "Global Tech Argentina"})
+    assert replaced.status_code == 200
+    assert replaced.json()["name"] == "Global Tech Argentina"
+
+    invalid = http.post("/clients", json={"name": " ", "extra": "not-allowed"})
+    assert invalid.status_code == 422
+
+    deleted = http.delete(f"/clients/{client_id}")
+    assert deleted.status_code == 204
+    assert http.get(f"/clients/{client_id}").status_code == 404
+
+    connected = service.create_client("Connected client")
+    registry.save_connection_record(
+        "connected-client",
+        {"id": "connection-03", "legacy_name": "connected-client", "client_id": connected.id},
+    )
+    assert http.delete(f"/clients/{connected.id}").status_code == 409
+
+
+class _EmptyRuntime:
+    async def list_instances(self) -> list[dict]:
+        return []
+
+    async def delete(self, _name: str) -> dict:
+        return {"ok": True}
+
+
+class _MessagingRuntime(_EmptyRuntime):
+    def __init__(self, runtime_name: str) -> None:
+        self.runtime_name = runtime_name
+        self.sent: list[tuple[str, str, str]] = []
+
+    async def list_instances(self) -> list[dict]:
+        return [{"name": self.runtime_name, "status": "open"}]
+
+    async def send_text(self, instance_name: str, number: str, text: str) -> dict:
+        self.sent.append((instance_name, number, text))
+        return {"messageId": "message-01"}
+
+    async def reconnect(self, _name: str) -> dict:
+        return {"ok": True}
+
+
+def test_connections_router_exposes_client_bound_crud_contract(monkeypatch, tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    clients = ClientService(registry)
+    owner = clients.create_client("Global Tech")
+    service = ConnectionService(_EmptyRuntime(), registry)
+    monkeypatch.setattr(connections_router, "_service", service)
+    api = FastAPI()
+    api.include_router(connections_router.router)
+    http = TestClient(api)
+
+    created = http.post("/connections", json={"client_id": owner.id, "channel": "whatsapp"})
+    assert created.status_code == 201
+    assert created.json()["client_id"] == owner.id
+    assert created.json()["client"]["name"] == "Global Tech"
+    assert created.json()["channel"]["id"] == "whatsapp"
+    assert created.json()["status"]["state"] == "pending"
+    connection_id = created.json()["id"]
+    assert clients.get_client_overview(owner.id).connection_count == 1
+
+    listed = http.get(f"/connections?client_id={owner.id}")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [connection_id]
+
+    updated = http.patch(f"/connections/{connection_id}", json={"name": "WhatsApp soporte"})
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "WhatsApp soporte"
+
+    assert http.post("/connections", json={"client_id": "missing", "channel": "whatsapp"}).status_code == 404
+    assert http.post("/connections", json={"client_id": owner.id, "channel": "instagram"}).status_code == 422
+    assert http.patch(f"/connections/{connection_id}", json={}).status_code == 422
+
+    deleted = http.delete(f"/connections/{connection_id}")
+    assert deleted.status_code == 204
+    assert http.get(f"/connections/{connection_id}").status_code == 404
+
+
+def test_empty_runtime_does_not_create_a_migration_client(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    service = ConnectionService(_EmptyRuntime(), registry)
+
+    assert asyncio.run(service.migrate_legacy_connections()) == 0
+    assert registry.list_clients() == []
+
+
+def test_connection_operations_are_scoped_to_the_connection(monkeypatch, tmp_path) -> None:
+    settings = SimpleNamespace(
+        instance_webhooks_path=str(tmp_path / "webhooks.json"),
+        instance_api_keys_path=str(tmp_path / "api_keys.json"),
+        webhook_dispatch_history_limit=30,
+    )
+    monkeypatch.setattr("app.services.instance_webhooks.get_settings", lambda: settings)
+    monkeypatch.setattr("app.services.instance_auth.get_settings", lambda: settings)
+
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    connection = ConnectionService(_EmptyRuntime(), registry).create_connection(client_id=client.id, channel="whatsapp")
+    operations = ConnectionOperationsService(_EmptyRuntime(), registry)
+
+    assert operations.webhook(connection.id)["configured"] is False
+    webhook = operations.update_webhook(connection.id, "https://example.test/webhooks/botly")
+    assert webhook["configured"] is True
+    assert webhook["enabled"] is True
+    assert webhook["url"] == "https://example.test/webhooks/botly"
+    assert webhook["successful_deliveries"] == 0
+    assert webhook["failed_deliveries"] == 0
+
+    api_key = operations.api_key(connection.id)
+    regenerated = operations.regenerate_api_key(connection.id)
+    assert api_key["has_api_key"] is True
+    assert regenerated["api_key"].startswith("inst_")
+    assert operations.recent_activity(connection.id) == []
+
+
+def test_connection_operations_record_quick_message_and_heartbeat(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    connection = ConnectionService(_EmptyRuntime(), registry).create_connection(client_id=client.id, channel="whatsapp")
+    runtime_name = registry.connection_record_by_id(connection.id)["legacy_name"]
+    runtime = _MessagingRuntime(runtime_name)
+    operations = ConnectionOperationsService(runtime, registry)
+
+    result = asyncio.run(operations.send_quick_message(connection.id, number="+54 9 11 0000 0000", text="Hola"))
+    status = asyncio.run(operations.status(connection.id))
+    activity = operations.recent_activity(connection.id)
+
+    assert result["ok"] is True
+    assert runtime.sent == [(runtime_name, "5491100000000", "Hola")]
+    assert status["connected"] is True
+    assert status["last_heartbeat_at"] is not None
+    assert activity[0]["description"] == "Mensaje enviado"
+    assert activity[0]["technical"]["Componente"] == "Mensajería"
+
+
+def test_legacy_connections_receive_a_migration_client_without_runtime_mutation(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    clients = ClientService(registry)
+    service = ConnectionService(_LegacyRuntime(), registry)
+
+    connections = asyncio.run(service.list_connections())
+
+    assert len(connections) == 2
+    assert {connection.client_id for connection in connections}
+    assert connections[0].id == "connection-01"
+    assert connections[0].status.state == "connected"
+    assert connections[0].provider.id == "meta"
+    assert connections[0].channel.id == "whatsapp"
+    assert connections[0].capabilities.supports_official_api is True
+    assert connections[1].capabilities.supports_qr is True
+
+    migrated_client = clients.get_client(connections[0].client_id)
+    assert migrated_client.name == "Migrated connections"
+    with pytest.raises(ClientHasConnectionsError):
+        clients.delete_client(migrated_client.id)
+
+
+def test_registry_migration_is_idempotent_and_snapshot_is_reversible(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    service = ConnectionService(_LegacyRuntime(), registry)
+
+    assert asyncio.run(service.migrate_legacy_connections()) == 2
+    snapshot = registry.snapshot()
+    assert asyncio.run(service.migrate_legacy_connections()) == 0
+
+    registry.replace({"clients": {}, "connections": {}})
+    assert registry.list_clients() == []
+    registry.replace(snapshot)
+
+    assert len(registry.connection_records()) == 2

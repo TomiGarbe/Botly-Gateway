@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Gateway
     gateway_api_key: str
+    google_client_id: str = ""
+    allowed_google_users: str = ""
+    auth_sessions_path: str = "/tmp/botly_gateway_sessions.json"
+    auth_session_ttl_seconds: int = 28800
     gateway_port: int = 9000
     # PUBLIC_BASE_URL se conserva como alias de lectura para no interrumpir
     # despliegues existentes durante la migracion del dominio.
@@ -64,6 +68,9 @@ class Settings(BaseSettings):
     instance_api_keys_path: str = "/tmp/botly_instance_api_keys.json"
     instance_webhooks_path: str = "/tmp/botly_instance_webhooks.json"
     connection_metadata_path: str = "/tmp/botly_connection_metadata.json"
+    # Product-domain ownership registry. It is additive and intentionally
+    # separate from provider/runtime persistence during the Instance migration.
+    connection_registry_path: str = "/tmp/botly_connection_registry.json"
     official_credentials_path: str = "/tmp/botly_official_credentials.json"
     # Timeline business events shown by /webhooks/events.  It must survive a
     # Gateway restart so a received first message is not lost before the UI
@@ -121,6 +128,10 @@ class Settings(BaseSettings):
             if origin and origin not in origins:
                 origins.append(origin)
         return origins
+
+    @property
+    def allowed_google_users_list(self) -> set[str]:
+        return {item.strip().lower() for item in self.allowed_google_users.split(",") if item.strip()}
 
     def is_cors_origin_allowed(self, origin: str | None) -> bool:
         value = str(origin or "").strip().rstrip("/")
