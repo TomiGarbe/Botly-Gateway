@@ -44,7 +44,7 @@ def legacy_instance_to_connection(
     return Connection(
         id=str(relation["id"]),
         client_id=str(relation["client_id"]),
-        name=str(legacy["name"]),
+        name=str(relation.get("name") or legacy["name"]),
         display_name=str(legacy["profileName"]) if legacy.get("profileName") else None,
         address=str(legacy["phone"]) if legacy.get("phone") else None,
         provider=provider,

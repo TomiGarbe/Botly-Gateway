@@ -56,3 +56,12 @@ export async function acknowledgeAlert(alertId: string): Promise<GatewayAlert> {
 export async function resolveAlert(alertId: string): Promise<GatewayAlert> {
   return toAlert(await gatewayRequest<ApiAlert>(`/alerts/${encodeURIComponent(alertId)}/resolve`, { method: 'POST' }))
 }
+
+export async function deleteAlert(alertId: string): Promise<void> {
+  await gatewayRequest<void>(`/alerts/${encodeURIComponent(alertId)}`, { method: 'DELETE' })
+}
+
+export async function deleteResolvedAlerts(): Promise<number> {
+  const payload = await gatewayRequest<{ deleted: number }>('/alerts/resolved', { method: 'DELETE' })
+  return payload.deleted
+}

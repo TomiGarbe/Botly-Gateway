@@ -21,6 +21,7 @@ _HEARTBEAT_MAX_AGE = timedelta(minutes=15)
 _RECONNECT_WINDOW = timedelta(hours=24)
 _RECONNECT_THRESHOLD = 3
 _ALERTS_KEY = "connection_alerts_v2"
+_DISMISSED_FINGERPRINTS_KEY = "dismissed_alert_fingerprints_v1"
 
 
 def _now() -> datetime:
@@ -39,16 +40,19 @@ class AlertStore:
 
     def _read_unlocked(self) -> dict[str, Any]:
         if not self._path.exists():
-            return {_ALERTS_KEY: []}
+            return {_ALERTS_KEY: [], _DISMISSED_FINGERPRINTS_KEY: []}
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except Exception:
-            return {_ALERTS_KEY: []}
+            return {_ALERTS_KEY: [], _DISMISSED_FINGERPRINTS_KEY: []}
         if not isinstance(raw, dict):
-            return {_ALERTS_KEY: []}
+            return {_ALERTS_KEY: [], _DISMISSED_FINGERPRINTS_KEY: []}
         raw.setdefault(_ALERTS_KEY, [])
         if not isinstance(raw[_ALERTS_KEY], list):
             raw[_ALERTS_KEY] = []
+        raw.setdefault(_DISMISSED_FINGERPRINTS_KEY, [])
+        if not isinstance(raw[_DISMISSED_FINGERPRINTS_KEY], list):
+            raw[_DISMISSED_FINGERPRINTS_KEY] = []
         return raw
 
     def _write_unlocked(self, payload: dict[str, Any]) -> None:
@@ -73,6 +77,11 @@ class AlertStore:
                 for item in items
                 if item.get("status") == "resolved" and item.get("resolution_source") == "manual"
             }
+            dismissed_fingerprints = {
+                str(fingerprint)
+                for fingerprint in payload[_DISMISSED_FINGERPRINTS_KEY]
+                if str(fingerprint) in active_fingerprints
+            }
 
             for item in items:
                 if item.get("status") in {"new", "acknowledged"} and item.get("fingerprint") not in active_fingerprints:
@@ -82,7 +91,7 @@ class AlertStore:
 
             for candidate in candidates:
                 current = active_by_fingerprint.get(candidate["fingerprint"])
-                if current is not None or candidate["fingerprint"] in manually_resolved:
+                if current is not None or candidate["fingerprint"] in manually_resolved or candidate["fingerprint"] in dismissed_fingerprints:
                     continue
                 items.append(
                     {
@@ -96,6 +105,7 @@ class AlertStore:
                 )
 
             payload[_ALERTS_KEY] = items
+            payload[_DISMISSED_FINGERPRINTS_KEY] = sorted(dismissed_fingerprints)
             self._write_unlocked(payload)
             return [dict(item) for item in items]
 
@@ -120,6 +130,36 @@ class AlertStore:
                 self._write_unlocked(payload)
                 return dict(item)
             return None
+
+    def delete(self, alert_id: str) -> bool:
+        with _LOCK:
+            payload = self._read_unlocked()
+            items = [item for item in payload[_ALERTS_KEY] if isinstance(item, dict)]
+            deleted = next((item for item in items if item.get("id") == alert_id), None)
+            if deleted is None:
+                return False
+            fingerprint = str(deleted.get("fingerprint") or "")
+            dismissed = {str(item) for item in payload[_DISMISSED_FINGERPRINTS_KEY]}
+            if fingerprint:
+                dismissed.add(fingerprint)
+            payload[_ALERTS_KEY] = [item for item in items if item.get("id") != alert_id]
+            payload[_DISMISSED_FINGERPRINTS_KEY] = sorted(dismissed)
+            self._write_unlocked(payload)
+            return True
+
+    def delete_resolved(self) -> int:
+        with _LOCK:
+            payload = self._read_unlocked()
+            items = [item for item in payload[_ALERTS_KEY] if isinstance(item, dict)]
+            resolved = [item for item in items if item.get("status") == "resolved"]
+            if not resolved:
+                return 0
+            dismissed = {str(item) for item in payload[_DISMISSED_FINGERPRINTS_KEY]}
+            dismissed.update(str(item.get("fingerprint")) for item in resolved if item.get("fingerprint"))
+            payload[_ALERTS_KEY] = [item for item in items if item.get("status") != "resolved"]
+            payload[_DISMISSED_FINGERPRINTS_KEY] = sorted(dismissed)
+            self._write_unlocked(payload)
+            return len(resolved)
 
 
 class AlertService:
@@ -156,6 +196,14 @@ class AlertService:
         await self.list_alerts()
         item = self._store.update_status(alert_id, "resolved")
         return self._to_alert(item) if item else None
+
+    async def delete(self, alert_id: str) -> bool:
+        await self.list_alerts()
+        return self._store.delete(alert_id)
+
+    async def delete_resolved(self) -> int:
+        await self.list_alerts()
+        return self._store.delete_resolved()
 
     def _candidates(self, connections: list[Connection], runtime_names: dict[str, Connection]) -> list[dict[str, Any]]:
         events = self._events_reader(limit=500)

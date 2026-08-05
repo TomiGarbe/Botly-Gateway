@@ -171,6 +171,19 @@ class _MessagingRuntime(_EmptyRuntime):
         return {"ok": True}
 
 
+def test_connection_name_update_is_retained_when_runtime_is_available(tmp_path) -> None:
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    connection = ConnectionService(_EmptyRuntime(), registry).create_connection(client_id=client.id, channel="whatsapp")
+    runtime_name = registry.connection_record_by_id(connection.id)["legacy_name"]
+    service = ConnectionService(_MessagingRuntime(runtime_name), registry)
+
+    updated = asyncio.run(service.update_connection(connection.id, name="WhatsApp soporte"))
+
+    assert updated.name == "WhatsApp soporte"
+    assert asyncio.run(service.get_connection(connection.id)).name == "WhatsApp soporte"
+
+
 def test_connections_router_exposes_client_bound_crud_contract(monkeypatch, tmp_path) -> None:
     registry = ConnectionRegistry(tmp_path / "connection_registry.json")
     clients = ClientService(registry)

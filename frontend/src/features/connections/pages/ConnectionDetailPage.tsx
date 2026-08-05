@@ -171,8 +171,8 @@ export function ConnectionDetailPage() {
     <header className="workspace-header">
       <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button>
       <div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void reconnect()}><RotateCw size={15} aria-hidden="true" /> Reconectar</button><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
-      <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
     </header>
+    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
 

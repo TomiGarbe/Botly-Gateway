@@ -27,6 +27,10 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Navegación principal">
+        <div className="app-product">
+          <img src="/logo-gateway-mark.svg" alt="Botly Gateway" />
+          <span>Botly <strong>Gateway</strong></span>
+        </div>
         <nav className="app-navigation">
           {navigation.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}>
@@ -40,10 +44,6 @@ export function AppShell() {
       <div className="app-content">
         <header className="app-header">
           <div className="app-header-context">
-            <div className="app-product">
-              <img src="/logo-gateway-mark.svg" alt="Botly Gateway" />
-              <span>Botly <strong>Gateway</strong></span>
-            </div>
             <nav className="app-breadcrumb" aria-label="Ubicación actual">
               {breadcrumbs.map((item, index) => <span key={`${item}-${index}`}>{index > 0 ? <ChevronRight size={14} aria-hidden="true" /> : null}{item}</span>)}
             </nav>

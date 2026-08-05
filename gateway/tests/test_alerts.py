@@ -109,7 +109,7 @@ def test_alert_service_returns_actionable_connection_incidents(tmp_path) -> None
     assert resolved.resolved_at is not None
 
 
-def test_alerts_router_exposes_list_acknowledge_and_resolve(monkeypatch, tmp_path) -> None:
+def test_alerts_router_exposes_alert_lifecycle_and_deletion(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(alerts_router, "_service", _service(tmp_path))
     api = FastAPI()
     api.include_router(alerts_router.router)
@@ -120,3 +120,8 @@ def test_alerts_router_exposes_list_acknowledge_and_resolve(monkeypatch, tmp_pat
     alert_id = listed.json()["items"][0]["id"]
     assert http.post(f"/alerts/{alert_id}/acknowledge").json()["status"] == "acknowledged"
     assert http.post(f"/alerts/{alert_id}/resolve").json()["status"] == "resolved"
+    assert http.delete("/alerts/resolved").json()["deleted"] == 1
+
+    another_alert_id = http.get("/alerts").json()["items"][0]["id"]
+    assert http.delete(f"/alerts/{another_alert_id}").status_code == 204
+    assert http.delete(f"/alerts/{another_alert_id}").status_code == 404

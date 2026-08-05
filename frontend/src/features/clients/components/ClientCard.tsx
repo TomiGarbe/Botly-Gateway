@@ -16,7 +16,7 @@ export function ClientCard({ client, onOpen }: ClientCardProps) {
   const lastActivity = client.lastActivityAt ? formatLastActivity(client.lastActivityAt) : null
   const hasConnections = client.connectionCount > 0
 
-  return <article className="client-card">
+  return <article className="client-card" role="button" tabIndex={0} aria-label={`Abrir cliente ${client.name}`} onClick={() => onOpen(client.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(client.id) } }}>
     <div className="client-card-content">
       <h2>{client.name}</h2>
       {client.description ? <p>{client.description}</p> : null}
@@ -26,6 +26,5 @@ export function ClientCard({ client, onOpen }: ClientCardProps) {
         <span>{lastActivity ? `Última actividad: ${lastActivity}` : 'Sin actividad registrada'}</span>
       </div>
     </div>
-    <button type="button" className="client-button-secondary client-card-action" onClick={() => onOpen(client.id)}>Abrir</button>
   </article>
 }

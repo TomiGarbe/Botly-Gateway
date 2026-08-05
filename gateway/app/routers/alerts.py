@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.services.alerts import get_alert_service
 
@@ -26,3 +26,15 @@ async def resolve_alert(alert_id: str):
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
     return alert.public_dict()
+
+
+@router.delete("/resolved")
+async def delete_resolved_alerts():
+    return {"deleted": await _service.delete_resolved()}
+
+
+@router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alert(alert_id: str) -> Response:
+    if not await _service.delete(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

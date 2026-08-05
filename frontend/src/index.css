@@ -20,6 +20,7 @@
 @layer components {
   .app-shell { @apply grid h-dvh grid-cols-[15rem_minmax(0,1fr)] overflow-hidden bg-zinc-950; }
   .app-sidebar { @apply sticky top-0 flex h-dvh flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900/40 px-3 py-5; }
+  .app-sidebar .app-product { @apply mb-6 px-3; }
   .app-navigation { @apply space-y-1; }
   .app-nav-link { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100; }
   .app-nav-link.is-active { @apply bg-zinc-800 font-medium text-zinc-50 shadow-sm; }
@@ -89,6 +90,7 @@
   .dashboard-attention-status.is-warning { @apply bg-amber-950/60 text-amber-300; }
   .dashboard-attention-status.is-critical { @apply bg-red-950/60 text-red-300; }
   .alerts-page { @apply mx-auto max-w-4xl; }
+  .alerts-heading { @apply flex items-end justify-between gap-5; }
   .alerts-heading > div > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .alerts-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
   .alerts-page > .client-form-error { @apply mt-6; }
@@ -148,13 +150,13 @@
   .connection-card-footer { @apply mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 text-xs text-zinc-500; }
   .new-connection-page, .connection-detail { @apply mx-auto max-w-3xl; }
   .workspace-detail { @apply max-w-5xl; }
-  .workspace-header { @apply sticky top-0 z-10 -mx-6 border-b border-zinc-800 bg-zinc-950/95 px-6 pb-0 pt-1 backdrop-blur sm:-mx-10 sm:px-10; }
-  .workspace-header > .client-back-link { @apply mt-4; }
+  .workspace-header { @apply pt-1; }
+  .workspace-header > .client-back-link { @apply mt-0; }
   .workspace-header-main { @apply mt-4 flex items-end justify-between gap-5 pb-5; }
   .workspace-header-main h2 { @apply mb-0 mt-3 text-2xl font-semibold tracking-tight text-zinc-100; }
   .workspace-header-main p { @apply mb-0 mt-2 text-sm text-zinc-500; }
   .workspace-header-actions { @apply flex shrink-0 flex-wrap gap-2; }
-  .workspace-tabs { @apply flex gap-1 overflow-x-auto border-t border-zinc-800 py-2; }
+  .workspace-tabs { @apply sticky -top-8 z-10 -mx-6 mt-5 flex gap-1 overflow-x-auto border-y border-zinc-800 bg-zinc-950 px-6 py-2 sm:-mx-10 sm:px-10; }
   .workspace-tabs button { @apply shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200; }
   .workspace-tabs button.is-active { @apply bg-zinc-800 text-zinc-50; }
   .workspace-tab-content { @apply pb-8; }
@@ -356,7 +358,6 @@
   .client-card-content { @apply min-w-0; }
   .client-card h2 { @apply text-lg; }
   .client-card-meta { @apply items-center gap-x-3 gap-y-2; }
-  .client-card-action { @apply self-start; }
   .client-detail-heading > div:first-child > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .client-detail-heading > div:first-child > span { @apply mb-0 mt-3 block max-w-2xl text-sm leading-6 text-zinc-400; }
   .client-connections-list { @apply gap-4; }
@@ -380,6 +381,7 @@
   .client-form-error, .workspace-feedback-error, .diagnostics-feedback-error { @apply rounded-lg border border-red-950/70 bg-red-950/20 px-3 py-2 text-red-200; }
   .workspace-feedback-success, .diagnostics-feedback-success, .connection-notice { @apply rounded-lg border border-emerald-950/70 bg-emerald-950/20 px-3 py-2 text-emerald-200; }
   .dashboard-metric, .client-card, .connection-card, .alert-card, .dashboard-attention-list li { @apply shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-200; }
+  .client-card, .connection-card { @apply cursor-pointer; }
   .client-card:hover, .connection-card:hover, .alert-card:hover, .dashboard-attention-list li:hover { @apply -translate-y-0.5 border-zinc-700 bg-zinc-900/60 shadow-lg shadow-black/10; }
   .workspace-tab-content { animation: ui-content-in 160ms ease-out; }
   .activity-panel { @apply max-w-md p-6; animation: ui-panel-in 180ms ease-out; }
@@ -405,6 +407,7 @@
 @media (max-width: 640px) {
   .app-shell { @apply grid grid-cols-1 grid-rows-[auto_minmax(0,1fr)]; }
   .app-sidebar { @apply h-auto border-b border-r-0 py-3; }
+  .app-sidebar .app-product { @apply mb-3 px-2; }
   .app-navigation { @apply flex gap-1 overflow-x-auto space-y-0; }
   .app-nav-link { @apply shrink-0; }
   .app-header { @apply min-h-14 px-5; }
@@ -412,7 +415,7 @@
   .app-product img { @apply h-6 w-6; }
   .app-product { @apply text-xs; }
   .app-main { @apply px-5 py-8; }
-  .clients-page-heading, .client-detail-heading, .client-connections-heading { @apply flex-col items-stretch; }
+  .clients-page-heading, .client-detail-heading, .client-connections-heading, .alerts-heading { @apply flex-col items-stretch; }
   .dashboard-heading { @apply flex-col items-stretch; }
   .dashboard-overall { @apply self-start; }
   .dashboard-attention-list .client-button-secondary { @apply justify-self-start; }
