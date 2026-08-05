@@ -277,6 +277,22 @@ def test_connection_operations_record_quick_message_and_heartbeat(tmp_path) -> N
     assert activity[0]["technical"]["Componente"] == "Mensajería"
 
 
+def test_connection_integration_endpoints_include_connection_runtime(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "app.services.connection_operations.get_settings",
+        lambda: SimpleNamespace(public_app_url="https://gateway.example.test", gateway_port=9000),
+    )
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    connection = ConnectionService(_EmptyRuntime(), registry).create_connection(client_id=client.id, channel="whatsapp")
+    runtime_name = registry.connection_record_by_id(connection.id)["legacy_name"]
+
+    endpoints = ConnectionOperationsService(_EmptyRuntime(), registry).integration_endpoints(connection.id)
+
+    assert endpoints["message_api_url"] == f"https://gateway.example.test/messages/{runtime_name}"
+    assert endpoints["meta_webhook_url"] == "https://gateway.example.test/webhooks/meta"
+
+
 def test_legacy_connections_receive_a_migration_client_without_runtime_mutation(tmp_path) -> None:
     registry = ConnectionRegistry(tmp_path / "connection_registry.json")
     clients = ClientService(registry)

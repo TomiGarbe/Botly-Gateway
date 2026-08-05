@@ -72,10 +72,26 @@ async def get_connection_webhook(connection_id: str):
         raise HTTPException(status_code=404, detail="Connection not found")
 
 
+@router.get("/{connection_id}/integration-endpoints")
+async def get_connection_integration_endpoints(connection_id: str):
+    try:
+        return _operations.integration_endpoints(connection_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except ConnectionOperationUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.put("/{connection_id}/webhook")
 async def update_connection_webhook(connection_id: str, body: ConnectionWebhookRequest):
     try:
-        return _operations.update_webhook(connection_id, body.url)
+        return _operations.update_webhook(
+            connection_id,
+            body.url,
+            auth_type=body.auth_type,
+            auth_config=body.auth_config,
+            custom_headers=body.custom_headers,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found")
     except ValueError as exc:

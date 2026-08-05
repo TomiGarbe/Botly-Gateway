@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 _LOCK = threading.Lock()
 _DEFAULT_EVENT_FILTERS = {"business": True, "transport": False, "operational": False}
 
-AuthType = Literal["NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS"]
+AuthType = Literal["NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS", "QUERY_PARAM"]
 
 
 def _now_iso() -> str:
@@ -72,7 +72,7 @@ def _sanitize_auth_config(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     out: dict[str, str] = {}
-    allowed = ("token", "headerName", "apiKey", "username", "password")
+    allowed = ("token", "headerName", "apiKey", "username", "password", "queryParamName", "queryParamValue")
     for key in allowed:
         value = str(raw.get(key) or "").strip()
         if value:
@@ -194,7 +194,7 @@ def _apply_dispatch_aggregate_fields(item: dict[str, Any], *, status: str, error
 
 def _sanitize_webhook(instance_name: str, record: dict[str, Any]) -> dict[str, Any]:
     auth_type = str(record.get("authType") or "NONE").upper()
-    if auth_type not in {"NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS"}:
+    if auth_type not in {"NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS", "QUERY_PARAM"}:
         auth_type = "NONE"
 
     consecutive_failures = int(record.get("consecutiveFailures") or 0)
@@ -260,13 +260,17 @@ def _public_webhook(record: dict[str, Any], reveal_secrets: bool = False) -> dic
     safe_auth: dict[str, Any] = {}
 
     for key, value in auth.items():
-        if key in {"token", "apiKey", "password"} and not reveal_secrets:
+        if key in {"token", "apiKey", "password", "queryParamValue"} and not reveal_secrets:
             safe_auth[key] = ""
             safe_auth[f"has{key[:1].upper()}{key[1:]}"] = bool(str(value or "").strip())
         else:
             safe_auth[key] = value
 
     item["authConfig"] = safe_auth
+    custom_headers = item.get("customHeaders") if isinstance(item.get("customHeaders"), dict) else {}
+    if not reveal_secrets:
+        item["customHeaders"] = {str(key): "" for key in custom_headers if str(key).strip()}
+        item["hasCustomHeaders"] = bool(custom_headers)
     return item
 
 
@@ -283,7 +287,7 @@ def _merge_auth_config_update(
 
     previous = _sanitize_auth_config(previous_auth_config)
     merged = dict(incoming)
-    for secret_key in ("token", "apiKey", "password"):
+    for secret_key in ("token", "apiKey", "password", "queryParamValue"):
         if not str(merged.get(secret_key) or "").strip() and str(previous.get(secret_key) or "").strip():
             merged[secret_key] = previous[secret_key]
     return merged
@@ -397,7 +401,7 @@ def update_webhook(
                         next_auth_type=str(auth_type or "NONE").upper(),
                         next_auth_config=auth_config,
                     ),
-                    "customHeaders": custom_headers or {},
+                    "customHeaders": custom_headers if custom_headers is not None else item.get("customHeaders"),
                     "eventFilters": event_filters if isinstance(event_filters, dict) else item.get("eventFilters"),
                     "updatedAt": _now_iso(),
                 },
@@ -505,6 +509,16 @@ def build_auth_headers(item: dict[str, Any]) -> dict[str, str]:
         headers[k] = str(value or "").strip()
 
     return headers
+
+
+def build_auth_query_params(item: dict[str, Any]) -> dict[str, str]:
+    auth_type = str(item.get("authType") or "NONE").upper()
+    auth = item.get("authConfig") if isinstance(item.get("authConfig"), dict) else {}
+    if auth_type != "QUERY_PARAM":
+        return {}
+    name = str(auth.get("queryParamName") or "").strip()
+    value = str(auth.get("queryParamValue") or "").strip()
+    return {name: value} if name and value else {}
 
 
 def mark_dispatch_result(instance_name: str, webhook_id: str, status: str, error: str | None = None) -> None:

@@ -12,7 +12,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.services.instance_webhooks import append_dispatch_history, build_auth_headers, mask_headers_for_log
+from app.services.instance_webhooks import append_dispatch_history, build_auth_headers, build_auth_query_params, mask_headers_for_log
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -194,6 +194,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
         return {"ok": True, "status": "skipped_by_filter", "statusCode": 204, "retriesUsed": 0, "latencyMs": 0.0}
 
     headers = {"Content-Type": "application/json", **build_auth_headers(item)}
+    query_params = build_auth_query_params(item)
     auth_type = str(item.get("authType") or "NONE").upper()
     verbose = _should_verbose_dispatch_logs()
     payload_json = json.dumps(target_payload, ensure_ascii=True, default=str)
@@ -259,7 +260,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                         attempt=attempt,
                         auth_type=auth_type,
                     )
-                resp = await client.post(url, json=target_payload, headers=headers)
+                resp = await client.post(url, json=target_payload, headers=headers, params=query_params)
             code = int(resp.status_code)
             response_snippet = (resp.text or "")[:_MAX_RESPONSE_PREVIEW_CHARS]
             response_headers = _response_headers_summary(resp.headers)

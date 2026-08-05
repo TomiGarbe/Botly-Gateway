@@ -210,10 +210,14 @@
   .connection-webhook-summary dd { @apply m-0 max-w-xl break-all text-right text-sm text-zinc-300; }
   .connection-section-value, .connection-key-value { @apply mb-0 mt-5 break-all text-sm leading-6 text-zinc-400; }
   .connection-key-value { @apply font-mono text-zinc-200; }
+  .connection-endpoint { @apply mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4; }
+  .connection-endpoint > span { @apply w-full text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .connection-endpoint code { @apply min-w-0 flex-1 break-all font-mono text-sm leading-6 text-zinc-200; }
+  .connection-endpoint-note { @apply mb-0 mt-3 text-xs leading-5 text-zinc-500; }
   .connection-inline-form { @apply mt-5 flex flex-wrap items-end gap-3; }
   .connection-inline-form label { @apply min-w-60 flex-1 space-y-2; }
   .connection-inline-form label span { @apply block text-sm text-zinc-500; }
-  .connection-inline-form input { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .connection-inline-form input, .connection-inline-form select { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
   .connection-inline-form > div, .connection-inline-actions { @apply flex flex-wrap gap-2; }
   .connection-text-action { @apply mt-5 border-0 bg-transparent p-0 text-sm font-medium text-zinc-300 underline underline-offset-4 hover:text-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-600; }
   .connection-inline-actions { @apply mt-5; }

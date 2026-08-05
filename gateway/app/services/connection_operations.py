@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.connections import ConnectionManager, get_connection_manager
+from app.core.config import get_settings
 from app.services import instance_auth
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
 from app.services.instance_webhooks import (
@@ -62,7 +63,16 @@ class ConnectionOperationsService:
                 "last_error": None,
                 "successful_deliveries": 0,
                 "failed_deliveries": 0,
+                "auth_type": "NONE",
+                "auth_header_name": None,
+                "query_param_name": None,
+                "custom_header_name": None,
+                "has_auth_secret": False,
             }
+        auth = item.get("authConfig") if isinstance(item.get("authConfig"), dict) else {}
+        custom_headers = item.get("customHeaders") if isinstance(item.get("customHeaders"), dict) else {}
+        auth_type = str(item.get("authType") or "NONE").upper()
+        secret_key = {"BEARER": "hasToken", "API_KEY": "hasApiKey", "QUERY_PARAM": "hasQueryParamValue"}.get(auth_type)
         return {
             "configured": True,
             "enabled": bool(item.get("enabled")),
@@ -72,6 +82,11 @@ class ConnectionOperationsService:
             "last_error": item.get("lastError"),
             "successful_deliveries": int(item.get("successCount") or 0),
             "failed_deliveries": int(item.get("failureCount") or 0),
+            "auth_type": auth_type,
+            "auth_header_name": str(auth.get("headerName") or "") or None,
+            "query_param_name": str(auth.get("queryParamName") or "") or None,
+            "custom_header_name": next((str(key) for key in custom_headers if str(key).strip()), None),
+            "has_auth_secret": bool(auth.get(secret_key)) if secret_key else bool(custom_headers),
         }
 
     def webhook(self, connection_id: str) -> dict[str, Any]:
@@ -79,7 +94,26 @@ class ConnectionOperationsService:
         hooks = list_instance_webhooks(runtime_name, reveal_secrets=False)
         return self._webhook_payload(hooks[0] if hooks else None)
 
-    def update_webhook(self, connection_id: str, url: str) -> dict[str, Any]:
+    def integration_endpoints(self, connection_id: str) -> dict[str, str]:
+        runtime_name = self._runtime_name(connection_id)
+        settings = get_settings()
+        base_url = str(settings.public_app_url or "").strip().rstrip("/")
+        if not base_url:
+            base_url = f"http://127.0.0.1:{settings.gateway_port}"
+        return {
+            "message_api_url": f"{base_url}/messages/{runtime_name}",
+            "meta_webhook_url": f"{base_url}/webhooks/meta",
+        }
+
+    def update_webhook(
+        self,
+        connection_id: str,
+        url: str,
+        *,
+        auth_type: str | None = None,
+        auth_config: dict[str, str] | None = None,
+        custom_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         runtime_name = self._runtime_name(connection_id)
         clean_url = str(url or "").strip()
         parsed = urlparse(clean_url)
@@ -89,15 +123,16 @@ class ConnectionOperationsService:
         hooks = list_instance_webhooks(runtime_name, reveal_secrets=False)
         if hooks:
             current = hooks[0]
+            next_auth_type = auth_type or str(current.get("authType") or "NONE")
             item = update_webhook(
                 runtime_name,
                 str(current["id"]),
                 name=str(current.get("name") or "Webhook"),
                 url=clean_url,
                 enabled=bool(current.get("enabled", True)),
-                auth_type=str(current.get("authType") or "NONE"),
-                auth_config=None,
-                custom_headers=None,
+                auth_type=next_auth_type,
+                auth_config=auth_config,
+                custom_headers=custom_headers,
                 event_filters=current.get("eventFilters") if isinstance(current.get("eventFilters"), dict) else None,
             )
         else:
@@ -106,9 +141,9 @@ class ConnectionOperationsService:
                 name="Webhook",
                 url=clean_url,
                 enabled=True,
-                auth_type="NONE",
-                auth_config=None,
-                custom_headers=None,
+                auth_type=auth_type or "NONE",
+                auth_config=auth_config,
+                custom_headers=custom_headers,
             )
         return self._webhook_payload(item)
 

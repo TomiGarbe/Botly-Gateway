@@ -10,9 +10,12 @@ import { Toast } from '@/shared/components/Toast'
 import {
   ConnectionActivity,
   ConnectionApiKey,
+  ConnectionIntegrationEndpoints,
   ConnectionStatusSummary,
   ConnectionWebhook,
+  WebhookSecurityType,
   getConnectionApiKey,
+  getConnectionIntegrationEndpoints,
   getConnectionStatusSummary,
   getConnectionWebhook,
   listConnectionActivity,
@@ -61,6 +64,7 @@ export function ConnectionDetailPage() {
   const { connectionId } = useParams()
   const [connection, setConnection] = useState<Connection | null>(null)
   const [webhook, setWebhook] = useState<ConnectionWebhook | null>(null)
+  const [integrationEndpoints, setIntegrationEndpoints] = useState<ConnectionIntegrationEndpoints | null>(null)
   const [apiKey, setApiKey] = useState<ConnectionApiKey | null>(null)
   const [statusSummary, setStatusSummary] = useState<ConnectionStatusSummary | null>(null)
   const [activity, setActivity] = useState<ConnectionActivity[]>([])
@@ -73,6 +77,9 @@ export function ConnectionDetailPage() {
   const [name, setName] = useState('')
   const [isEditingWebhook, setIsEditingWebhook] = useState(false)
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [webhookSecurityType, setWebhookSecurityType] = useState<WebhookSecurityType>('NONE')
+  const [webhookSecurityName, setWebhookSecurityName] = useState('')
+  const [webhookSecuritySecret, setWebhookSecuritySecret] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -96,14 +103,18 @@ export function ConnectionDetailPage() {
   const loadOperations = useCallback(async () => {
     if (!connectionId) return
     try {
-      const [nextWebhook, nextApiKey, nextStatus, nextActivity] = await Promise.all([
-        getConnectionWebhook(connectionId), getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), listConnectionActivity(connectionId),
+      const [nextWebhook, nextApiKey, nextStatus, nextActivity, nextIntegrationEndpoints] = await Promise.all([
+        getConnectionWebhook(connectionId), getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), listConnectionActivity(connectionId), getConnectionIntegrationEndpoints(connectionId),
       ])
       setWebhook(nextWebhook)
       setWebhookUrl(nextWebhook.url || '')
+      setWebhookSecurityType(nextWebhook.authType)
+      setWebhookSecurityName(nextWebhook.authType === 'API_KEY' ? (nextWebhook.authHeaderName || 'x-api-key') : nextWebhook.authType === 'QUERY_PARAM' ? (nextWebhook.queryParamName || '') : nextWebhook.authType === 'CUSTOM_HEADERS' ? (nextWebhook.customHeaderName || '') : '')
+      setWebhookSecuritySecret('')
       setApiKey(nextApiKey)
       setStatusSummary(nextStatus)
       setActivity(nextActivity)
+      setIntegrationEndpoints(nextIntegrationEndpoints)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo cargar la operación de la conexión.')
     }
@@ -125,7 +136,21 @@ export function ConnectionDetailPage() {
     event.preventDefault()
     if (!connection) return
     setError(null); setIsSaving(true)
-    try { const updated = await updateConnectionWebhook(connection.id, webhookUrl); setWebhook(updated); setWebhookUrl(updated.url || ''); setIsEditingWebhook(false); setNotice('Webhook actualizado.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el webhook.') } finally { setIsSaving(false) }
+    const authConfig: Record<string, string> = {}
+    let customHeaders: Record<string, string> | undefined
+    if (webhookSecurityType === 'BEARER' && webhookSecuritySecret) authConfig.token = webhookSecuritySecret
+    if (webhookSecurityType === 'API_KEY') { authConfig.headerName = webhookSecurityName || 'x-api-key'; if (webhookSecuritySecret) authConfig.apiKey = webhookSecuritySecret }
+    if (webhookSecurityType === 'QUERY_PARAM') { authConfig.queryParamName = webhookSecurityName; if (webhookSecuritySecret) authConfig.queryParamValue = webhookSecuritySecret }
+    if (webhookSecurityType === 'CUSTOM_HEADERS' && webhookSecuritySecret) customHeaders = { [webhookSecurityName]: webhookSecuritySecret }
+    if (webhookSecurityType === 'NONE') customHeaders = {}
+    try { const updated = await updateConnectionWebhook(connection.id, webhookUrl, { authType: webhookSecurityType, authConfig, customHeaders }); setWebhook(updated); setWebhookUrl(updated.url || ''); setIsEditingWebhook(false); setNotice('Webhook actualizado.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el webhook.') } finally { setIsSaving(false) }
+  }
+
+  function startEditingWebhook() {
+    setWebhookSecurityType(webhook?.authType || 'NONE')
+    setWebhookSecurityName(webhook?.authType === 'API_KEY' ? (webhook.authHeaderName || 'x-api-key') : webhook?.authType === 'QUERY_PARAM' ? (webhook.queryParamName || '') : webhook?.authType === 'CUSTOM_HEADERS' ? (webhook.customHeaderName || '') : '')
+    setWebhookSecuritySecret('')
+    setIsEditingWebhook(true)
   }
 
   async function runWebhookTest() {
@@ -144,6 +169,10 @@ export function ConnectionDetailPage() {
     const value = apiKey?.apiKey || apiKey?.maskedApiKey
     if (!value) return
     try { await navigator.clipboard.writeText(value); setNotice('API Key copiada.') } catch { setError('No se pudo copiar la API Key.') }
+  }
+
+  async function copyIntegrationUrl(url: string, label: string) {
+    try { await navigator.clipboard.writeText(url); setNotice(`${label} copiada.`) } catch { setError(`No se pudo copiar ${label.toLowerCase()}.`) }
   }
 
   async function reconnect() {
@@ -180,6 +209,7 @@ export function ConnectionDetailPage() {
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><label><span>Nombre</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
+        <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
         <OperationsDiagnostics connectionId={connection.id} runtimeName={connection.runtimeName} onReconnect={reconnect} onTestWebhook={runWebhookTest} onRefreshConnection={refreshWorkspace} />
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
@@ -188,7 +218,7 @@ export function ConnectionDetailPage() {
 
       {activeTab === 'messages' ? <><MessagesWorkspace runtimeName={connection.runtimeName} /><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del canal</h3><p>Gateway · Meta · Canal</p></div></div>{channelActivity.length === 0 ? <EmptyState icon={MessageCircle} title="No hay actividad del canal." description="La actividad de mensajería aparecerá aquí cuando se produzca." /> : <ol className="connection-activity-list">{channelActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
 
-      {activeTab === 'webhooks' ? <><section className="connection-section workspace-webhooks"><div className="connection-section-heading"><div><h3>Webhook</h3><p>{webhook?.configured ? (webhook.enabled ? 'Activo' : 'Desactivado') : 'Sin configurar'}</p></div><button type="button" className="client-button-secondary" onClick={() => setIsEditingWebhook((value) => !value)}>Editar</button></div>{webhook?.url && !isEditingWebhook ? <p className="connection-section-value">{webhook.url}</p> : null}{isEditingWebhook ? <form className="connection-inline-form" onSubmit={saveWebhook}><label><span>URL</span><input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://…" required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setWebhookUrl(webhook?.url || ''); setIsEditingWebhook(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}<dl className="connection-webhook-summary"><div><dt>Último envío</dt><dd>{dateTime(webhook?.lastDeliveryAt, 'Sin envíos')}</dd></div><div><dt>Último error</dt><dd>{webhook?.lastError || 'Sin errores'}</dd></div><div><dt>Envíos exitosos</dt><dd>{webhook?.successfulDeliveries || 0}</dd></div><div><dt>Errores</dt><dd>{webhook?.failedDeliveries || 0}</dd></div></dl><button type="button" className="connection-text-action" onClick={() => void runWebhookTest()} disabled={!webhook?.configured}>Probar webhook</button></section><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del webhook</h3><p>Gateway · Webhook del cliente</p></div></div>{webhookActivity.length === 0 ? <EmptyState icon={Webhook} title="No hay actividad de webhook." description="Las entregas y pruebas del webhook aparecerán aquí." /> : <ol className="connection-activity-list">{webhookActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
+      {activeTab === 'webhooks' ? <><section className="connection-section workspace-webhooks"><div className="connection-section-heading"><div><h3>Webhook</h3><p>{webhook?.configured ? (webhook.enabled ? 'Activo' : 'Desactivado') : 'Sin configurar'}</p></div><button type="button" className="client-button-secondary" onClick={startEditingWebhook}>Editar</button></div><div className="connection-endpoint"><span>Webhook de Meta → Gateway</span><code>{integrationEndpoints?.metaWebhookUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.metaWebhookUrl, 'URL del webhook de Meta')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Configurala en Meta para que el Gateway reciba los mensajes entrantes. Meta valida su firma; no usa una API key del Gateway.</p>{webhook?.url && !isEditingWebhook ? <p className="connection-section-value">{webhook.url}</p> : null}{isEditingWebhook ? <form className="connection-inline-form connection-webhook-form" onSubmit={saveWebhook}><label><span>URL de destino</span><input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://…" required autoFocus /></label><label><span>Tipo de seguridad</span><select value={webhookSecurityType} onChange={(event) => { setWebhookSecurityType(event.target.value as WebhookSecurityType); setWebhookSecurityName(event.target.value === 'API_KEY' ? 'x-api-key' : ''); setWebhookSecuritySecret('') }}><option value="NONE">Sin seguridad</option><option value="API_KEY">API key por header</option><option value="BEARER">Bearer token</option><option value="CUSTOM_HEADERS">Header personalizado</option><option value="QUERY_PARAM">Query param</option></select></label>{webhookSecurityType === 'API_KEY' || webhookSecurityType === 'CUSTOM_HEADERS' || webhookSecurityType === 'QUERY_PARAM' ? <label><span>{webhookSecurityType === 'QUERY_PARAM' ? 'Nombre del parámetro' : 'Nombre del header'}</span><input value={webhookSecurityName} onChange={(event) => setWebhookSecurityName(event.target.value)} placeholder={webhookSecurityType === 'QUERY_PARAM' ? 'api_key' : 'x-api-key'} required /></label> : null}{webhookSecurityType !== 'NONE' ? <label><span>{webhookSecurityType === 'BEARER' ? 'Bearer token' : webhookSecurityType === 'QUERY_PARAM' ? 'Valor del parámetro' : 'Valor secreto'}</span><input type="password" value={webhookSecuritySecret} onChange={(event) => setWebhookSecuritySecret(event.target.value)} placeholder={webhook?.hasAuthSecret ? 'Dejá vacío para conservar el valor actual' : 'Ingresá el valor secreto'} required={!webhook?.hasAuthSecret} /></label> : null}<div><button type="button" className="client-button-secondary" onClick={() => { setWebhookUrl(webhook?.url || ''); setIsEditingWebhook(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}<dl className="connection-webhook-summary"><div><dt>Seguridad</dt><dd>{webhook?.authType === 'NONE' ? 'Sin seguridad' : `${webhook?.authType || 'Sin seguridad'}${webhook?.hasAuthSecret ? ' · configurada' : ''}`}</dd></div><div><dt>Último envío</dt><dd>{dateTime(webhook?.lastDeliveryAt, 'Sin envíos')}</dd></div><div><dt>Último error</dt><dd>{webhook?.lastError || 'Sin errores'}</dd></div><div><dt>Envíos exitosos</dt><dd>{webhook?.successfulDeliveries || 0}</dd></div><div><dt>Errores</dt><dd>{webhook?.failedDeliveries || 0}</dd></div></dl><button type="button" className="connection-text-action" onClick={() => void runWebhookTest()} disabled={!webhook?.configured}>Probar webhook</button></section><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del webhook</h3><p>Gateway · Webhook del cliente</p></div></div>{webhookActivity.length === 0 ? <EmptyState icon={Webhook} title="No hay actividad de webhook." description="Las entregas y pruebas del webhook aparecerán aquí." /> : <ol className="connection-activity-list">{webhookActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
     </div>
 
     {selectedActivity ? <div className="activity-panel-backdrop" role="presentation" onMouseDown={() => setSelectedActivity(null)}><aside className="activity-panel" role="dialog" aria-modal="true" aria-label="Detalle técnico de actividad" onMouseDown={(event) => event.stopPropagation()}><div className="activity-panel-heading"><div><h3>{selectedActivity.description}</h3><p>{eventTime(selectedActivity.occurredAt)}</p></div><button type="button" onClick={() => setSelectedActivity(null)} aria-label="Cerrar detalle"><X size={18} /></button></div><dl>{Object.entries(selectedActivity.technical).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></aside></div> : null}

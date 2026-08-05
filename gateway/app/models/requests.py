@@ -104,10 +104,16 @@ class UpdateConnectionRequest(BaseModel):
         return self
 
 
+WebhookAuthType = Literal["NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS", "QUERY_PARAM"]
+
+
 class ConnectionWebhookRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     url: str = Field(..., min_length=8, max_length=2048)
+    auth_type: WebhookAuthType | None = None
+    auth_config: dict[str, str] | None = None
+    custom_headers: dict[str, str] | None = None
 
 
 class ConnectionQuickMessageRequest(BaseModel):
@@ -196,9 +202,6 @@ class SendListRequest(BaseModel):
 
 class CheckNumbersRequest(BaseModel):
     numbers: list[str]
-
-
-WebhookAuthType = Literal["NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS"]
 
 
 class WebhookConfigRequest(BaseModel):

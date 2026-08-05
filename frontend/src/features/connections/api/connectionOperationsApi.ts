@@ -9,6 +9,19 @@ export interface ConnectionWebhook {
   lastError: string | null
   successfulDeliveries: number
   failedDeliveries: number
+  authType: WebhookSecurityType
+  authHeaderName: string | null
+  queryParamName: string | null
+  customHeaderName: string | null
+  hasAuthSecret: boolean
+}
+
+export type WebhookSecurityType = 'NONE' | 'BEARER' | 'API_KEY' | 'CUSTOM_HEADERS' | 'QUERY_PARAM'
+
+export interface ConnectionWebhookSecurityInput {
+  authType: WebhookSecurityType
+  authConfig?: Record<string, string>
+  customHeaders?: Record<string, string>
 }
 
 export interface ConnectionApiKey {
@@ -32,6 +45,11 @@ export interface ConnectionStatusSummary {
   connected: boolean
   lastActivityAt: string | null
   lastHeartbeatAt: string | null
+}
+
+export interface ConnectionIntegrationEndpoints {
+  messageApiUrl: string
+  metaWebhookUrl: string
 }
 
 export interface ConnectionDiagnosticCheck {
@@ -93,6 +111,11 @@ export async function getConnectionWebhook(connectionId: string): Promise<Connec
     last_error: string | null
     successful_deliveries: number
     failed_deliveries: number
+    auth_type: WebhookSecurityType
+    auth_header_name: string | null
+    query_param_name: string | null
+    custom_header_name: string | null
+    has_auth_secret: boolean
   }>(`/connections/${encodeURIComponent(connectionId)}/webhook`)
   return {
     configured: payload.configured,
@@ -103,10 +126,20 @@ export async function getConnectionWebhook(connectionId: string): Promise<Connec
     lastError: payload.last_error,
     successfulDeliveries: payload.successful_deliveries,
     failedDeliveries: payload.failed_deliveries,
+    authType: payload.auth_type,
+    authHeaderName: payload.auth_header_name,
+    queryParamName: payload.query_param_name,
+    customHeaderName: payload.custom_header_name,
+    hasAuthSecret: payload.has_auth_secret,
   }
 }
 
-export async function updateConnectionWebhook(connectionId: string, url: string): Promise<ConnectionWebhook> {
+export async function getConnectionIntegrationEndpoints(connectionId: string): Promise<ConnectionIntegrationEndpoints> {
+  const payload = await gatewayRequest<{ message_api_url: string; meta_webhook_url: string }>(`/connections/${encodeURIComponent(connectionId)}/integration-endpoints`)
+  return { messageApiUrl: payload.message_api_url, metaWebhookUrl: payload.meta_webhook_url }
+}
+
+export async function updateConnectionWebhook(connectionId: string, url: string, security: ConnectionWebhookSecurityInput): Promise<ConnectionWebhook> {
   const payload = await gatewayRequest<{
     configured: boolean
     enabled: boolean
@@ -116,10 +149,15 @@ export async function updateConnectionWebhook(connectionId: string, url: string)
     last_error: string | null
     successful_deliveries: number
     failed_deliveries: number
+    auth_type: WebhookSecurityType
+    auth_header_name: string | null
+    query_param_name: string | null
+    custom_header_name: string | null
+    has_auth_secret: boolean
   }>(`/connections/${encodeURIComponent(connectionId)}/webhook`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, auth_type: security.authType, auth_config: security.authConfig, custom_headers: security.customHeaders }),
   })
   return {
     configured: payload.configured,
@@ -130,6 +168,11 @@ export async function updateConnectionWebhook(connectionId: string, url: string)
     lastError: payload.last_error,
     successfulDeliveries: payload.successful_deliveries,
     failedDeliveries: payload.failed_deliveries,
+    authType: payload.auth_type,
+    authHeaderName: payload.auth_header_name,
+    queryParamName: payload.query_param_name,
+    customHeaderName: payload.custom_header_name,
+    hasAuthSecret: payload.has_auth_secret,
   }
 }
 
