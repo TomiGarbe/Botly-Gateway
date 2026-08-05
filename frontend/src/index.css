@@ -3,31 +3,47 @@
 @tailwind utilities;
 
 @layer base {
+  :root { --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem; --space-12: 3rem; --radius-control: 0.5rem; --radius-surface: 0.75rem; }
   * { @apply border-zinc-200; }
   html { color-scheme: dark; }
   body { @apply m-0 bg-zinc-950 text-zinc-100 font-sans; }
   button, input { font: inherit; }
+  button { -webkit-tap-highlight-color: transparent; }
   :focus-visible { @apply outline-none ring-2 ring-blue-400 ring-offset-2 ring-offset-zinc-950; }
+  input:not([type="file"]), textarea, select { @apply rounded-lg border border-zinc-700 bg-zinc-950 text-sm text-zinc-100 placeholder:text-zinc-600; }
+  input:not([type="file"]), select { @apply min-h-10 px-3; }
+  textarea { @apply px-3 py-2.5; }
+  input[type="file"] { @apply w-full text-sm text-zinc-400; }
+  input[type="file"]::file-selector-button { @apply mr-3 rounded-lg border-0 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-700; }
 }
 
 @layer components {
-  .app-shell { @apply grid min-h-screen grid-cols-[15rem_minmax(0,1fr)] bg-zinc-950; }
-  .app-sidebar { @apply flex min-h-screen flex-col border-r border-zinc-800 bg-zinc-900/40 px-3 py-5; }
-  .app-brand { @apply px-3 text-base font-semibold tracking-tight text-zinc-100; }
-  .app-brand span { @apply text-zinc-500; }
-  .app-navigation { @apply mt-10 space-y-1; }
+  .app-shell { @apply grid h-dvh grid-cols-[15rem_minmax(0,1fr)] overflow-hidden bg-zinc-950; }
+  .app-sidebar { @apply sticky top-0 flex h-dvh flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900/40 px-3 py-5; }
+  .app-navigation { @apply space-y-1; }
   .app-nav-link { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100; }
-  .app-nav-link.is-active { @apply bg-zinc-800 text-zinc-50; }
-  .app-content { @apply flex min-w-0 flex-col; }
-  .app-header { @apply flex min-h-16 items-center justify-between border-b border-zinc-800 px-8; }
-  .app-header h1 { @apply m-0 text-sm font-medium text-zinc-200; }
-  .app-profile { @apply flex items-center gap-2; }
+  .app-nav-link.is-active { @apply bg-zinc-800 font-medium text-zinc-50 shadow-sm; }
+  .app-content { @apply flex min-h-0 min-w-0 flex-col overflow-hidden; }
+  .app-header { @apply z-20 flex min-h-16 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-6 backdrop-blur sm:px-8; }
+  .app-header-context { @apply flex min-w-0 items-center gap-5; }
+  .app-product { @apply flex shrink-0 items-center gap-2 text-sm font-medium text-zinc-100; }
+  .app-product img { @apply h-7 w-7; }
+  .app-product strong { @apply font-medium text-zinc-500; }
+  .app-breadcrumb { @apply hidden min-w-0 items-center gap-1 text-sm text-zinc-500 md:flex; }
+  .app-breadcrumb span { @apply inline-flex min-w-0 items-center gap-1 truncate; }
+  .app-breadcrumb span:last-child { @apply text-zinc-300; }
+  .app-profile { @apply flex cursor-pointer list-none items-center gap-2; }
+  .app-profile::-webkit-details-marker { display: none; }
   .app-avatar { @apply flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-xs font-medium text-zinc-300; }
   .app-profile-copy { @apply hidden text-right sm:block; }
   .app-profile-copy span { @apply block text-xs text-zinc-200; }
   .app-profile-copy small { @apply block text-[11px] text-zinc-500; }
-  .app-sign-out { @apply ml-1 rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40; }
-  .app-main { @apply flex-1 px-6 py-8 sm:px-10; }
+  .app-user-menu { @apply relative; }
+  .app-user-popover { @apply absolute right-0 z-30 mt-3 hidden w-56 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl; }
+  .app-user-menu[open] .app-user-popover { @apply block; }
+  .app-user-popover > span { @apply block truncate px-3 py-2 text-xs text-zinc-500; }
+  .app-user-popover button { @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40; }
+  .app-main { @apply min-h-0 flex-1 overflow-y-auto px-6 py-8 sm:px-10; }
   .page-placeholder { @apply mx-auto max-w-2xl border-l border-zinc-700 py-2 pl-5; }
   .page-placeholder-eyebrow { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .page-placeholder h2 { @apply mb-2 mt-3 text-2xl font-semibold text-zinc-100; }
@@ -44,7 +60,7 @@
   .auth-denied p { @apply mb-0 mt-3 text-sm leading-6 text-zinc-400; }
   .auth-denied a { @apply mt-6 text-sm font-medium text-zinc-200 underline underline-offset-4 hover:text-white; }
   .auth-router-loading { @apply text-sm text-zinc-500; }
-  .dashboard-page { @apply mx-auto max-w-5xl; }
+  .dashboard-page { @apply mx-auto max-w-6xl; }
   .dashboard-heading { @apply flex items-start justify-between gap-5; }
   .dashboard-heading > div:first-child > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .dashboard-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
@@ -61,33 +77,21 @@
   .dashboard-section { @apply mt-14 border-t border-zinc-800 pt-7; }
   .dashboard-section-heading h3 { @apply m-0 text-base font-medium text-zinc-100; }
   .dashboard-section-heading p { @apply mb-0 mt-1 text-sm text-zinc-500; }
-  .dashboard-empty { @apply mt-6 text-sm text-zinc-500; }
-  .dashboard-activity-list, .dashboard-attention-list { @apply mt-6 list-none p-0; }
-  .dashboard-activity-list li { @apply grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-zinc-900 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]; }
-  .dashboard-activity-icon { @apply flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-zinc-400; }
-  .dashboard-activity-icon svg { @apply h-4 w-4; }
-  .dashboard-activity-icon.is-warning { @apply bg-amber-950/60 text-amber-300; }
-  .dashboard-activity-icon.is-critical { @apply bg-red-950/60 text-red-300; }
-  .dashboard-activity-list li > div, .dashboard-attention-list li > div { @apply flex min-w-0 flex-col gap-1; }
-  .dashboard-activity-list strong, .dashboard-attention-list strong { @apply text-sm font-medium text-zinc-200; }
-  .dashboard-activity-list li > div > span, .dashboard-attention-list li > div > span { @apply truncate text-xs text-zinc-500; }
-  .dashboard-activity-list time { @apply text-xs text-zinc-500; }
-  .dashboard-activity-list .client-button-secondary, .dashboard-attention-list .client-button-secondary { @apply text-xs; }
-  .dashboard-attention-list li { @apply flex flex-wrap items-center gap-4 border-b border-zinc-900 py-4; }
-  .dashboard-attention-list li > div { @apply min-w-40 flex-1; }
+  .dashboard-attention-list { @apply mt-6 grid list-none gap-3 p-0; }
+  .dashboard-attention-list li { @apply grid gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center; }
+  .dashboard-attention-copy { @apply grid min-w-0 gap-x-5 gap-y-1 sm:grid-cols-[auto_minmax(0,1fr)]; }
+  .dashboard-attention-copy > span { @apply text-xs text-zinc-500; }
+  .dashboard-attention-copy strong, .dashboard-attention-copy b { @apply truncate text-sm font-medium text-zinc-200; }
+  .dashboard-attention-copy b { @apply font-normal text-zinc-300; }
+  .dashboard-attention-copy p { @apply col-span-full mb-0 mt-2 text-sm text-zinc-400; }
+  .dashboard-attention-list .client-button-secondary { @apply text-xs; }
   .dashboard-attention-status { @apply rounded-full px-2.5 py-1 text-xs font-medium; }
   .dashboard-attention-status.is-warning { @apply bg-amber-950/60 text-amber-300; }
   .dashboard-attention-status.is-critical { @apply bg-red-950/60 text-red-300; }
-  .dashboard-all-clear { @apply mt-6 flex items-center gap-2 text-sm text-emerald-300; }
   .alerts-page { @apply mx-auto max-w-4xl; }
   .alerts-heading > div > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .alerts-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
   .alerts-page > .client-form-error { @apply mt-6; }
-  .alerts-empty { @apply mt-10 flex items-start gap-3 border-l border-emerald-700/70 py-2 pl-5; }
-  .alerts-empty > svg { @apply mt-0.5 shrink-0 text-emerald-400; }
-  .alerts-empty > div { @apply flex flex-col gap-1; }
-  .alerts-empty strong { @apply text-sm font-medium text-emerald-200; }
-  .alerts-empty span { @apply text-sm text-zinc-500; }
   .alerts-list { @apply mt-10 space-y-3; }
   .alert-card { @apply flex gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
   .alert-card.is-critical { @apply border-red-950/70; }
@@ -125,7 +129,6 @@
   .client-form-error { @apply m-0 text-sm text-red-300; }
   .clients-list { @apply mt-8 grid gap-3 sm:grid-cols-2; }
   .client-card { @apply min-w-0 rounded-xl border border-zinc-800 bg-zinc-900/30 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60; }
-  .client-card-link { @apply block w-full cursor-pointer border-0 bg-transparent p-5 text-left; }
   .client-card h2 { @apply m-0 text-base font-medium text-zinc-100; }
   .client-card p { @apply mb-0 mt-2 line-clamp-2 text-sm leading-6 text-zinc-400; }
   .client-card-meta { @apply mt-5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500; }
@@ -139,17 +142,23 @@
   .client-connections-heading { @apply mt-12 items-end; }
   .client-connections-heading span { @apply mt-2 block text-sm text-zinc-400; }
   .client-connections-list { @apply mt-5 grid gap-3 sm:grid-cols-2; }
-  .client-connections-empty { @apply rounded-xl border border-dashed border-zinc-800 px-5 py-6 text-sm leading-6 text-zinc-500; }
   .connection-card { @apply rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
   .connection-card h3 { @apply m-0 text-base font-medium text-zinc-100; }
   .connection-card > div:first-child > p { @apply mb-0 mt-2 text-sm text-zinc-400; }
   .connection-card-footer { @apply mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 text-xs text-zinc-500; }
-  .connection-status { @apply inline-flex rounded-full px-2.5 py-1 text-xs font-medium; }
-  .connection-status-pending { @apply bg-amber-950/60 text-amber-300; }
-  .connection-status-connected { @apply bg-emerald-950/60 text-emerald-300; }
-  .connection-status-connecting { @apply bg-blue-950/60 text-blue-300; }
-  .connection-status-disconnected { @apply bg-zinc-800 text-zinc-400; }
   .new-connection-page, .connection-detail { @apply mx-auto max-w-3xl; }
+  .workspace-detail { @apply max-w-5xl; }
+  .workspace-header { @apply sticky top-0 z-10 -mx-6 border-b border-zinc-800 bg-zinc-950/95 px-6 pb-0 pt-1 backdrop-blur sm:-mx-10 sm:px-10; }
+  .workspace-header > .client-back-link { @apply mt-4; }
+  .workspace-header-main { @apply mt-4 flex items-end justify-between gap-5 pb-5; }
+  .workspace-header-main h2 { @apply mb-0 mt-3 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .workspace-header-main p { @apply mb-0 mt-2 text-sm text-zinc-500; }
+  .workspace-header-actions { @apply flex shrink-0 flex-wrap gap-2; }
+  .workspace-tabs { @apply flex gap-1 overflow-x-auto border-t border-zinc-800 py-2; }
+  .workspace-tabs button { @apply shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200; }
+  .workspace-tabs button.is-active { @apply bg-zinc-800 text-zinc-50; }
+  .workspace-tab-content { @apply pb-8; }
+  .workspace-tab-content > .connection-section:first-child, .workspace-tab-content > .connection-name-form + .connection-section { @apply mt-8; }
   .new-connection-heading { @apply mt-7; }
   .new-connection-heading > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .new-connection-heading h2, .connection-detail-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
@@ -216,7 +225,6 @@
   .workspace-feedback-error { @apply text-red-300; }
   .workspace-feedback-success { @apply text-emerald-300; }
   .workspace-thread { @apply mt-5 max-h-[38rem] min-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 sm:p-6; }
-  .workspace-empty { @apply flex min-h-60 items-center justify-center gap-2 text-sm text-zinc-500; }
   .workspace-message { @apply flex max-w-[82%] flex-col gap-2; }
   .workspace-message-inbound { @apply mr-auto items-start; }
   .workspace-message-outbound { @apply ml-auto items-end; }
@@ -298,20 +306,125 @@
   .activity-panel dd { @apply mb-0 mt-2 break-words text-sm leading-6 text-zinc-300; }
 }
 
+@layer components {
+  .loading-state { @apply mt-8 grid max-w-5xl gap-3; }
+  .loading-state-line { @apply block h-12 animate-pulse rounded-xl border border-zinc-800 bg-zinc-900/35; }
+  .loading-state-line-1 { @apply w-full; }
+  .loading-state-line-2 { @apply w-4/5; }
+  .loading-state-line-3 { @apply w-3/5; }
+
+  .status-badge { @apply inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium; }
+  .status-badge-healthy { @apply bg-emerald-950/60 text-emerald-300; }
+  .status-badge-attention, .status-badge-pending { @apply bg-amber-950/60 text-amber-300; }
+  .status-badge-critical { @apply bg-red-950/60 text-red-300; }
+  .status-badge-configuring { @apply bg-blue-950/60 text-blue-300; }
+  .status-badge-resolved { @apply bg-emerald-950/60 text-emerald-300; }
+  .status-badge-new { @apply bg-amber-950/60 text-amber-300; }
+  .status-badge-acknowledged { @apply bg-zinc-800 text-zinc-300; }
+  .status-badge-neutral { @apply bg-zinc-800 text-zinc-300; }
+
+  .empty-state { @apply mt-8 flex items-start gap-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 p-6; }
+  .empty-state-icon { @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-800 text-zinc-400; }
+  .empty-state > div { @apply min-w-0; }
+  .empty-state strong { @apply block text-sm font-medium text-zinc-200; }
+  .empty-state p { @apply mb-0 mt-1 text-sm leading-6 text-zinc-500; }
+  .empty-state-action { @apply mt-5; }
+  .empty-state-success { @apply border-emerald-900/60 bg-emerald-950/15; }
+  .empty-state-success .empty-state-icon { @apply bg-emerald-950/70 text-emerald-300; }
+  .empty-state-success strong { @apply text-emerald-200; }
+
+  .confirm-dialog-backdrop { @apply fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm; }
+  .confirm-dialog { @apply relative w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl; animation: ui-dialog-in 160ms ease-out; }
+  .confirm-dialog-icon { @apply flex h-10 w-10 items-center justify-center rounded-lg; }
+  .confirm-dialog-icon-danger { @apply bg-red-950/70 text-red-300; }
+  .confirm-dialog-icon-default { @apply bg-amber-950/70 text-amber-300; }
+  .confirm-dialog-close { @apply absolute right-4 top-4 rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50; }
+  .confirm-dialog h2 { @apply mb-0 mt-5 text-lg font-semibold text-zinc-100; }
+  .confirm-dialog > p { @apply mb-0 mt-2 text-sm leading-6 text-zinc-400; }
+  .confirm-dialog-actions { @apply mt-6 flex flex-wrap justify-end gap-2; }
+
+  .toast { @apply fixed right-5 top-5 z-[60] flex w-[calc(100%-2.5rem)] max-w-md items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-2xl sm:right-8 sm:top-8; animation: ui-toast-in 180ms ease-out; }
+  .toast-success { @apply border-emerald-900/70 bg-emerald-950 text-emerald-200; }
+  .toast-error { @apply border-red-900/70 bg-red-950 text-red-200; }
+  .toast-warning { @apply border-amber-900/70 bg-amber-950 text-amber-200; }
+  .toast-info { @apply border-blue-900/70 bg-blue-950 text-blue-200; }
+  .toast > svg { @apply shrink-0; }
+  .toast button { @apply ml-auto rounded-md p-1 text-current opacity-70 hover:bg-white/10 hover:opacity-100; }
+
+  .clients-list { @apply gap-4; }
+  .client-card { @apply flex min-h-52 flex-col justify-between gap-6 p-5; }
+  .client-card-content { @apply min-w-0; }
+  .client-card h2 { @apply text-lg; }
+  .client-card-meta { @apply items-center gap-x-3 gap-y-2; }
+  .client-card-action { @apply self-start; }
+  .client-detail-heading > div:first-child > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .client-detail-heading > div:first-child > span { @apply mb-0 mt-3 block max-w-2xl text-sm leading-6 text-zinc-400; }
+  .client-connections-list { @apply gap-4; }
+  .client-connections-list > .empty-state { @apply col-span-full mt-0; }
+  .connection-card { @apply flex min-h-52 flex-col justify-between; }
+  .connection-card-footer { @apply gap-x-3; }
+
+  .alerts-page { @apply max-w-5xl; }
+  .alerts-list { @apply grid gap-4 space-y-0; }
+  .alert-card { @apply gap-5 p-6; }
+  .alert-card.is-resolved { @apply opacity-70; }
+  .alert-card-meta { @apply items-center gap-x-4 gap-y-2; }
+  .alert-card-meta > span:not(.status-badge) { @apply inline-flex items-center gap-1.5; }
+  .alert-card-actions { @apply items-center; }
+  .alert-card-actions .client-button-primary { @apply order-last sm:order-first; }
+
+  .client-button-primary, .client-button-secondary, .client-button-danger { @apply min-h-10 rounded-lg px-4; }
+  .client-button-ghost { @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-45; }
+  .icon-button { @apply inline-flex h-10 w-10 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-45; }
+  .client-form input, .client-form textarea, .connection-name-form input, .connection-inline-form input, .workspace-composer input, .workspace-composer textarea { @apply min-h-10; }
+  .client-form-error, .workspace-feedback-error, .diagnostics-feedback-error { @apply rounded-lg border border-red-950/70 bg-red-950/20 px-3 py-2 text-red-200; }
+  .workspace-feedback-success, .diagnostics-feedback-success, .connection-notice { @apply rounded-lg border border-emerald-950/70 bg-emerald-950/20 px-3 py-2 text-emerald-200; }
+  .dashboard-metric, .client-card, .connection-card, .alert-card, .dashboard-attention-list li { @apply shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-200; }
+  .client-card:hover, .connection-card:hover, .alert-card:hover, .dashboard-attention-list li:hover { @apply -translate-y-0.5 border-zinc-700 bg-zinc-900/60 shadow-lg shadow-black/10; }
+  .workspace-tab-content { animation: ui-content-in 160ms ease-out; }
+  .activity-panel { @apply max-w-md p-6; animation: ui-panel-in 180ms ease-out; }
+  .activity-panel-heading button, .workspace-attachment-heading button { @apply inline-flex h-10 w-10 items-center justify-center rounded-lg; }
+}
+
+@keyframes ui-content-in { from { opacity: .7; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ui-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes ui-panel-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes ui-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
+@media (min-width: 641px) and (max-width: 1023px) {
+  .app-shell { grid-template-columns: 12rem minmax(0, 1fr); }
+  .app-main { @apply px-6; }
+  .clients-list, .client-connections-list { @apply grid-cols-1; }
+  .dashboard-metrics { @apply grid-cols-2; }
+}
+
 @media (max-width: 640px) {
-  .app-shell { @apply block; }
-  .app-sidebar { @apply min-h-0 border-b border-r-0 py-3; }
-  .app-navigation { @apply mt-4 flex gap-1 overflow-x-auto space-y-0; }
+  .app-shell { @apply grid grid-cols-1 grid-rows-[auto_minmax(0,1fr)]; }
+  .app-sidebar { @apply h-auto border-b border-r-0 py-3; }
+  .app-navigation { @apply flex gap-1 overflow-x-auto space-y-0; }
   .app-nav-link { @apply shrink-0; }
-  .app-header { @apply px-5; }
+  .app-header { @apply min-h-14 px-5; }
+  .app-header-context { @apply gap-3; }
+  .app-product img { @apply h-6 w-6; }
+  .app-product { @apply text-xs; }
   .app-main { @apply px-5 py-8; }
   .clients-page-heading, .client-detail-heading, .client-connections-heading { @apply flex-col items-stretch; }
   .dashboard-heading { @apply flex-col items-stretch; }
   .dashboard-overall { @apply self-start; }
-  .dashboard-activity-list li { @apply grid-cols-[auto_minmax(0,1fr)]; }
-  .dashboard-activity-list time { @apply col-start-2; }
-  .dashboard-activity-list .client-button-secondary { @apply col-start-2 justify-self-start; }
+  .dashboard-attention-list .client-button-secondary { @apply justify-self-start; }
   .client-detail-actions { @apply justify-start; }
   .connection-detail-heading { @apply flex-col; }
+  .client-card { @apply min-h-0; }
+  .connection-card { @apply min-h-0; }
+  .alert-card { @apply flex-col p-5; }
+  .alert-card-actions .client-button-primary { @apply order-first; }
+  .workspace-header { @apply -mx-5 px-5; }
+  .workspace-header-main { @apply flex-col items-stretch; }
+  .workspace-header-actions { @apply shrink justify-start; }
+  .workspace-tabs button { @apply px-3; }
   .meta-signup-card .client-button-primary { @apply ml-0; }
 }

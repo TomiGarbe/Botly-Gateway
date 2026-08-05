@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import type { Client } from '@/domain/client'
 import type { Connection } from '@/domain/connection'
 import { getClient } from '@/features/clients/api/clientsApi'
+import { LoadingState } from '@/shared/components/LoadingState'
 import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { createConnection, getConnection } from '../api/connectionsApi'
 import { completeMetaSignup, getMetaSignupConfig } from '../api/metaSignupApi'
@@ -193,7 +194,7 @@ export function NewConnectionPage() {
     }
   }
 
-  if (isLoading) return <p className="clients-state">Cargando cliente…</p>
+  if (isLoading) return <LoadingState label="Cargando cliente…" />
   if (!client) return <div className="clients-state clients-state-error" role="alert"><p>{error || 'Cliente no encontrado.'}</p><button type="button" onClick={() => navigate('/clients')}>Volver a clientes</button></div>
 
   const activeIndex = provisioningSteps.findIndex((item) => item.id === step)

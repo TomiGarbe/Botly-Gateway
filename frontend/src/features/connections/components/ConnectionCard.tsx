@@ -1,4 +1,5 @@
 import type { Connection } from '@/domain/connection'
+import { StatusBadge, type StatusTone } from '@/shared/components/StatusBadge'
 
 interface ConnectionCardProps {
   connection: Connection
@@ -12,12 +13,17 @@ function activityLabel(value: string | null): string | null {
   return new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-function stateLabel(state: Connection['status']['state']): string {
-  return { pending: 'Pendiente', connected: 'Conectada', connecting: 'Conectando', disconnected: 'Desconectada' }[state]
+function stateDetails(connection: Connection): { label: string; tone: StatusTone } {
+  if (connection.status.state === 'connected' || connection.status.health === 'healthy') return { label: 'Operativa', tone: 'healthy' }
+  if (connection.status.state === 'pending') return { label: 'Pendiente', tone: 'pending' }
+  if (connection.status.state === 'connecting') return { label: 'Configurando', tone: 'configuring' }
+  if (connection.status.health === 'unhealthy' || connection.status.state === 'disconnected') return { label: 'Problema crítico', tone: 'critical' }
+  return { label: 'Atención requerida', tone: 'attention' }
 }
 
 export function ConnectionCard({ connection, onOpen }: ConnectionCardProps) {
   const activity = activityLabel(connection.lastActivityAt)
+  const state = stateDetails(connection)
 
   return (
     <article className="connection-card">
@@ -26,9 +32,9 @@ export function ConnectionCard({ connection, onOpen }: ConnectionCardProps) {
         <p>{connection.channel.displayName} · {connection.provider.displayName}</p>
       </div>
       <div className="connection-card-footer">
-        <span className={`connection-status connection-status-${connection.status.state}`}>{stateLabel(connection.status.state)}</span>
+        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
         <span>{activity ? `Última actividad: ${activity}` : 'Sin actividad registrada'}</span>
-        <button type="button" className="client-button-secondary" onClick={() => onOpen(connection.id)}>Abrir</button>
+        <button type="button" className="client-button-secondary" onClick={() => onOpen(connection.id)}>Abrir Workspace</button>
       </div>
     </article>
   )

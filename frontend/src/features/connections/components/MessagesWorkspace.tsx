@@ -1,7 +1,10 @@
-import { AlertCircle, Check, CheckCheck, FileText, Image, LoaderCircle, Mic, RefreshCw, Send, Video, X } from 'lucide-react'
+import { Check, CheckCheck, FileText, Image, MessageCircle, Mic, RefreshCw, Send, Video, X } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import type { MessageKind, TimelineMessage } from '../api/messagesApi'
 import { listTimelineMessages, sendWorkspaceMessage } from '../api/messagesApi'
+import { EmptyState } from '@/shared/components/EmptyState'
+import { LoadingState } from '@/shared/components/LoadingState'
+import { Toast } from '@/shared/components/Toast'
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
@@ -132,11 +135,11 @@ export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null 
   return (
     <section className="connection-section workspace-messages">
       <div className="connection-section-heading"><div><h3>Mensajes</h3><p>Verificá el envío, la recepción y los estados de esta conexión.</p></div><button type="button" className="client-button-secondary" onClick={() => void load()} disabled={isLoading}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div>
-      {error ? <p className="workspace-feedback workspace-feedback-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p> : null}
-      {notice ? <p className="workspace-feedback workspace-feedback-success" role="status"><Check size={15} aria-hidden="true" /> {notice}</p> : null}
+      <Toast message={error} tone="error" onDismiss={() => setError(null)} />
+      <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
       <div className="workspace-thread" aria-live="polite">
-        {isLoading ? <p className="workspace-empty"><LoaderCircle className="animate-spin" size={17} /> Cargando mensajes…</p> : null}
-        {!isLoading && visibleMessages.length === 0 ? <p className="workspace-empty">Todavía no hay mensajes para esta conexión.</p> : null}
+        {isLoading ? <LoadingState label="Cargando mensajes…" lines={3} /> : null}
+        {!isLoading && visibleMessages.length === 0 ? <EmptyState icon={MessageCircle} title="No hay mensajes todavía." description="Enviá un mensaje de prueba para verificar esta conexión." /> : null}
         {visibleMessages.map((message) => <article className={`workspace-message workspace-message-${message.direction}`} key={`${message.id}-${message.timestamp}`}>
           <div className="workspace-message-body">
             {message.media ? <div className="workspace-media-summary">{typeIcon(message.kind)}<span>{message.media.fileName || (message.kind === 'document' ? 'Documento' : `Archivo ${message.kind}`)}</span></div> : null}
