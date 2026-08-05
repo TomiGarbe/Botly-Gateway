@@ -14,6 +14,12 @@ class GoogleLoginRequest(BaseModel):
     credential: str = Field(min_length=20, max_length=8192)
 
 
+@router.get("/config")
+async def auth_config():
+    """Expose only the public Google client identifier needed by GIS."""
+    return {"google_client_id": get_settings().google_client_id}
+
+
 def _set_session_cookie(response: Response, token: str, ttl: int) -> None:
     settings = get_settings()
     response.set_cookie(

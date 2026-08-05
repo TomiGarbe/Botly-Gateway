@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { environment } from '../config/environment'
 import { GatewayRequestError } from '@/shared/lib/gatewayClient'
-import { getCurrentUser, signInWithGoogleCredential, signOutCurrentUser, type AuthUser } from './authApi'
+import { getCurrentUser, getGoogleClientId, signInWithGoogleCredential, signOutCurrentUser, type AuthUser } from './authApi'
 
 export type { AuthUser } from './authApi'
 
@@ -21,12 +21,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
+  const [googleClientId, setGoogleClientId] = useState(environment.googleClientId)
 
   useEffect(() => {
     let active = true
-    void getCurrentUser()
-      .then((nextUser) => { if (active) setUser(nextUser) })
-      .catch(() => undefined)
+    void Promise.all([
+      getCurrentUser().catch(() => null),
+      getGoogleClientId().catch(() => environment.googleClientId),
+    ])
+      .then(([nextUser, configuredGoogleClientId]) => {
+        if (!active) return
+        setUser(nextUser)
+        setGoogleClientId(configuredGoogleClientId || environment.googleClientId)
+      })
       .finally(() => { if (active) setIsLoading(false) })
     return () => { active = false }
   }, [])
@@ -53,13 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(() => ({
     user,
-    googleClientId: environment.googleClientId,
+    googleClientId,
     isLoading,
     accessDenied,
     signInWithGoogle,
     signOut,
     clearAccessDenied: () => setAccessDenied(false),
-  }), [accessDenied, isLoading, signInWithGoogle, signOut, user])
+  }), [accessDenied, googleClientId, isLoading, signInWithGoogle, signOut, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

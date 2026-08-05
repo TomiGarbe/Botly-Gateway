@@ -23,6 +23,11 @@ export async function getCurrentUser(): Promise<AuthUser> {
   return toUser(payload.user)
 }
 
+export async function getGoogleClientId(): Promise<string> {
+  const payload = await gatewayRequest<{ google_client_id: string }>('/auth/config')
+  return payload.google_client_id.trim()
+}
+
 export async function signInWithGoogleCredential(credential: string): Promise<AuthUser> {
   const payload = await gatewayRequest<{ user: ApiUser }>('/auth/google', {
     method: 'POST',

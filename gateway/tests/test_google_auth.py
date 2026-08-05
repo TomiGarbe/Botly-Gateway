@@ -79,7 +79,7 @@ def test_google_token_whitelist_and_persisted_session(tmp_path) -> None:
 def test_auth_routes_protect_gateway_and_support_logout(monkeypatch, tmp_path) -> None:
     service, credential = _service(tmp_path)
     monkeypatch.setattr(auth_router, "_service", service)
-    monkeypatch.setattr(auth_router, "get_settings", lambda: SimpleNamespace(debug=True))
+    monkeypatch.setattr(auth_router, "get_settings", lambda: SimpleNamespace(debug=True, google_client_id="google-client"))
     monkeypatch.setattr(auth_middleware, "get_auth_service", lambda: service)
 
     api = FastAPI()
@@ -91,6 +91,7 @@ def test_auth_routes_protect_gateway_and_support_logout(monkeypatch, tmp_path) -
         return {"ok": True}
 
     http = TestClient(api)
+    assert http.get("/auth/config").json() == {"google_client_id": "google-client"}
     assert http.get("/protected").status_code == 401
     login = http.post("/auth/google", json={"credential": credential})
     assert login.status_code == 200
