@@ -232,6 +232,7 @@ def test_connection_operations_are_scoped_to_the_connection(monkeypatch, tmp_pat
     settings = SimpleNamespace(
         instance_webhooks_path=str(tmp_path / "webhooks.json"),
         instance_api_keys_path=str(tmp_path / "api_keys.json"),
+        gateway_api_key="test-gateway-key",
         webhook_dispatch_history_limit=30,
     )
     monkeypatch.setattr("app.services.instance_webhooks.get_settings", lambda: settings)
@@ -254,6 +255,9 @@ def test_connection_operations_are_scoped_to_the_connection(monkeypatch, tmp_pat
     regenerated = operations.regenerate_api_key(connection.id)
     assert api_key["has_api_key"] is True
     assert regenerated["api_key"].startswith("inst_")
+    assert regenerated["can_reveal_api_key"] is True
+    revealed = operations.api_key(connection.id, reveal=True)
+    assert revealed["api_key"] == regenerated["api_key"]
     assert operations.recent_activity(connection.id) == []
 
 

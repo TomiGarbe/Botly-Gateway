@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     media_cache_max_files: int = 500
     media_download_timeout: int = 30
     instance_api_keys_path: str = "/tmp/botly_instance_api_keys.json"
+    # Key used to encrypt instance API keys at rest so an authorized user can
+    # reveal a previously generated key from the Workspace. When unset, the
+    # Gateway API key is used as backwards-compatible key material.
+    instance_api_keys_encryption_key: str = ""
     instance_webhooks_path: str = "/tmp/botly_instance_webhooks.json"
     connection_metadata_path: str = "/tmp/botly_connection_metadata.json"
     # Product-domain ownership registry. It is additive and intentionally

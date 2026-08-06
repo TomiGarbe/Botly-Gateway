@@ -5,8 +5,11 @@ import json
 import secrets
 import threading
 import time
+from base64 import urlsafe_b64encode
 from pathlib import Path
 from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -60,6 +63,35 @@ def _write_store_unlocked(store: dict[str, Any]) -> None:
     path = _storage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(store, ensure_ascii=True, indent=2), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        logger.debug("instance_auth_store_chmod_skipped", path=str(path))
+
+
+def _cipher() -> Fernet:
+    """Build the at-rest cipher without storing or logging key material."""
+    settings = get_settings()
+    configured_key = str(getattr(settings, "instance_api_keys_encryption_key", "") or "").strip()
+    fallback_key = str(getattr(settings, "gateway_api_key", "") or "").strip()
+    material = configured_key or fallback_key
+    if not material:
+        raise RuntimeError("No hay clave configurada para cifrar las API keys de instancia")
+    return Fernet(urlsafe_b64encode(hashlib.sha256(material.encode("utf-8")).digest()))
+
+
+def _encrypt_token(token: str) -> str:
+    return _cipher().encrypt(token.encode("utf-8")).decode("ascii")
+
+
+def _decrypt_token(ciphertext: object) -> str | None:
+    if not isinstance(ciphertext, str) or not ciphertext:
+        return None
+    try:
+        return _cipher().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+    except (InvalidToken, UnicodeDecodeError) as exc:
+        logger.warning("instance_api_key_decryption_failed", error=str(exc))
+        return None
 
 
 def _new_token() -> str:
@@ -77,6 +109,7 @@ def _new_record(instance_name: str, instance_id: str | None = None) -> tuple[dic
             "enabled": True,
             "apiKeyHash": _hash_token(token),
             "apiKeyPrefix": token[:12],
+            "apiKeyCiphertext": _encrypt_token(token),
         },
         token,
     )
@@ -122,6 +155,7 @@ def get_instance_key_info(instance_name: str, reveal: bool = False) -> dict[str,
             "enabled": False,
             "hasApiKey": False,
             "maskedApiKey": None,
+            "canRevealApiKey": False,
         }
     payload = {
         "instanceId": str(record.get("instanceId") or instance_name),
@@ -134,8 +168,10 @@ def get_instance_key_info(instance_name: str, reveal: bool = False) -> dict[str,
     prefix = str(record.get("apiKeyPrefix") or "").strip()
     if prefix and payload["hasApiKey"]:
         payload["maskedApiKey"] = f"{prefix}...****"
+    ciphertext = record.get("apiKeyCiphertext")
+    payload["canRevealApiKey"] = isinstance(ciphertext, str) and bool(ciphertext)
     if reveal:
-        payload["apiKey"] = None
+        payload["apiKey"] = _decrypt_token(ciphertext)
     return payload
 
 
@@ -151,11 +187,13 @@ def revoke_instance_key(instance_name: str) -> dict[str, Any]:
                 "enabled": False,
                 "apiKeyHash": None,
                 "apiKeyPrefix": None,
+                "apiKeyCiphertext": None,
             }
         else:
             record["enabled"] = False
             record["apiKeyHash"] = None
             record["apiKeyPrefix"] = None
+            record["apiKeyCiphertext"] = None
         _write_store_unlocked(store)
     logger.warning("instance_api_key_revoked", instance=instance_name)
     return get_instance_key_info(instance_name, reveal=False)

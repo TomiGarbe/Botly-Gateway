@@ -177,10 +177,10 @@ class ConnectionOperationsService:
             "error": result.get("error"),
         }
 
-    def api_key(self, connection_id: str) -> dict[str, Any]:
+    def api_key(self, connection_id: str, *, reveal: bool = False) -> dict[str, Any]:
         runtime_name = self._runtime_name(connection_id)
         instance_auth.ensure_instance_key(runtime_name, instance_id=connection_id)
-        return self._api_key_payload(instance_auth.get_instance_key_info(runtime_name, reveal=False))
+        return self._api_key_payload(instance_auth.get_instance_key_info(runtime_name, reveal=reveal))
 
     def regenerate_api_key(self, connection_id: str) -> dict[str, Any]:
         runtime_name = self._runtime_name(connection_id)
@@ -194,9 +194,11 @@ class ConnectionOperationsService:
             "has_api_key": bool(item.get("hasApiKey")),
             "masked_api_key": item.get("maskedApiKey"),
             "created_at": item.get("createdAt"),
+            "can_reveal_api_key": bool(item.get("canRevealApiKey")),
         }
-        if api_key:
-            payload["api_key"] = api_key
+        value = api_key or item.get("apiKey")
+        if value:
+            payload["api_key"] = value
         return payload
 
     async def reconnect(self, connection_id: str) -> None:

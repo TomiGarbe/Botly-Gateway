@@ -24,7 +24,7 @@ class _StubConnectionManager:
 def _isolate_key_store(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.instance_auth.get_settings",
-        lambda: SimpleNamespace(instance_api_keys_path=str(tmp_path / "instance_api_keys.json")),
+        lambda: SimpleNamespace(instance_api_keys_path=str(tmp_path / "instance_api_keys.json"), gateway_api_key="test-gateway-key"),
     )
 
 

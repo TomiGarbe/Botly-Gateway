@@ -301,10 +301,8 @@ async def get_instance_api_key(instance_name: str, request: Request, reveal: boo
     auth_instance = getattr(request.state, "auth_instance", None)
     if auth_instance and auth_instance != instance_name:
         raise HTTPException(status_code=403, detail="Token no autorizado para esta instancia")
-    if reveal:
-        raise HTTPException(status_code=403, detail="No se permite revelar API keys completas")
     instance_auth.ensure_instance_key(instance_name, instance_id=instance_name)
-    return instance_auth.get_instance_key_info(instance_name, reveal=False)
+    return instance_auth.get_instance_key_info(instance_name, reveal=reveal)
 
 
 @router.post("/{instance_name}/api-key/regenerate")

@@ -179,11 +179,30 @@ export function ConnectionDetailPage() {
   async function regenerateKey() {
     if (!connection) return
     setError(null)
-    try { const updated = await regenerateConnectionApiKey(connection.id); setApiKey(updated); setShowKey(true); setNotice('Nueva API Key generada. Copiala ahora: no volverá a mostrarse completa.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo regenerar la API Key.') }
+    try { const updated = await regenerateConnectionApiKey(connection.id); setApiKey(updated); setShowKey(true); setNotice('Nueva API Key generada. Podés mostrarla o copiarla cuando la necesites.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo regenerar la API Key.') }
+  }
+
+  async function revealKey() {
+    if (!connection) return null
+    if (apiKey?.apiKey) return apiKey.apiKey
+    try {
+      const updated = await getConnectionApiKey(connection.id, true)
+      setApiKey(updated)
+      return updated.apiKey || null
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo mostrar la API Key.')
+      return null
+    }
+  }
+
+  async function toggleKeyVisibility() {
+    if (showKey) { setShowKey(false); return }
+    const value = await revealKey()
+    if (value) setShowKey(true)
   }
 
   async function copyKey() {
-    const value = apiKey?.apiKey || apiKey?.maskedApiKey
+    const value = apiKey?.apiKey || await revealKey()
     if (!value) return
     try { await navigator.clipboard.writeText(value); setNotice('API Key copiada.') } catch { setError('No se pudo copiar la API Key.') }
   }
@@ -231,7 +250,7 @@ export function ConnectionDetailPage() {
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
 
-      {activeTab === 'security' ? <section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl><div className="connection-inline-actions">{apiKey?.apiKey ? <button type="button" className="client-button-secondary" onClick={() => setShowKey((value) => !value)}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!displayedKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section> : null}
+      {activeTab === 'security' ? <section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl>{apiKey?.hasApiKey && !apiKey.canRevealApiKey ? <p className="connection-endpoint-note">Esta clave fue creada antes de habilitar la visualización. Regenerala una vez para poder mostrarla y copiarla luego.</p> : null}<div className="connection-inline-actions">{apiKey?.canRevealApiKey ? <button type="button" className="client-button-secondary" onClick={() => void toggleKeyVisibility()}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!apiKey?.canRevealApiKey && !apiKey?.apiKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section> : null}
 
       {activeTab === 'messages' ? <><MessagesWorkspace runtimeName={connection.runtimeName} /><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del canal</h3><p>Gateway · Meta · Canal</p></div></div>{channelActivity.length === 0 ? <EmptyState icon={MessageCircle} title="No hay actividad del canal." description="La actividad de mensajería aparecerá aquí cuando se produzca." /> : <ol className="connection-activity-list">{channelActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
 

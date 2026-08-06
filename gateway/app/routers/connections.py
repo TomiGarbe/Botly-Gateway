@@ -113,9 +113,9 @@ async def test_connection_webhook(connection_id: str):
 
 
 @router.get("/{connection_id}/api-key")
-async def get_connection_api_key(connection_id: str):
+async def get_connection_api_key(connection_id: str, reveal: bool = Query(default=False)):
     try:
-        return _operations.api_key(connection_id)
+        return _operations.api_key(connection_id, reveal=reveal)
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found")
 

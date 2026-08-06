@@ -29,6 +29,7 @@ export interface ConnectionApiKey {
   hasApiKey: boolean
   maskedApiKey: string | null
   createdAt: string | null
+  canRevealApiKey: boolean
   apiKey?: string
 }
 
@@ -88,6 +89,7 @@ interface ApiConnectionApiKey {
   has_api_key: boolean
   masked_api_key: string | null
   created_at: string | null
+  can_reveal_api_key: boolean
   api_key?: string
 }
 
@@ -97,6 +99,7 @@ function toApiKey(payload: ApiConnectionApiKey): ConnectionApiKey {
     hasApiKey: payload.has_api_key,
     maskedApiKey: payload.masked_api_key,
     createdAt: payload.created_at,
+    canRevealApiKey: payload.can_reveal_api_key,
     apiKey: payload.api_key,
   }
 }
@@ -180,8 +183,9 @@ export async function testConnectionWebhook(connectionId: string): Promise<{ ok:
   return gatewayRequest(`/connections/${encodeURIComponent(connectionId)}/webhook/test`, { method: 'POST' })
 }
 
-export async function getConnectionApiKey(connectionId: string): Promise<ConnectionApiKey> {
-  return toApiKey(await gatewayRequest<ApiConnectionApiKey>(`/connections/${encodeURIComponent(connectionId)}/api-key`))
+export async function getConnectionApiKey(connectionId: string, reveal = false): Promise<ConnectionApiKey> {
+  const query = reveal ? '?reveal=true' : ''
+  return toApiKey(await gatewayRequest<ApiConnectionApiKey>(`/connections/${encodeURIComponent(connectionId)}/api-key${query}`))
 }
 
 export async function regenerateConnectionApiKey(connectionId: string): Promise<ConnectionApiKey> {
