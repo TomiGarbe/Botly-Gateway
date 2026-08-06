@@ -51,7 +51,7 @@ export function LoginPage() {
   if (accessDenied) return <Navigate to="/access-denied" replace />
   return <main className="auth-page">
     <section className="auth-login" aria-label="Acceso a Botly Gateway">
-      <div className="auth-logo" aria-hidden="true">B</div>
+      <img className="auth-logo" src="/logo-gateway-mark.svg" alt="" />
       <h1>Botly Gateway</h1>
       <div ref={host} className="auth-google-button" aria-label="Continuar con Google" />
       {isLoading || (!isGoogleReady && !!googleClientId) ? <LoaderCircle size={18} className="auth-loading animate-spin" aria-label="Cargando" /> : null}

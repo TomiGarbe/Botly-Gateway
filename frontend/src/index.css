@@ -52,7 +52,7 @@
   .page-placeholder span { @apply mt-5 inline-block font-mono text-xs text-zinc-500; }
   .auth-page { @apply flex min-h-screen items-center justify-center bg-zinc-950 px-6; }
   .auth-login, .auth-denied { @apply flex w-full max-w-sm flex-col items-center text-center; }
-  .auth-logo { @apply flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-lg font-semibold text-zinc-950; }
+  .auth-logo { @apply h-12 w-12; }
   .auth-login h1, .auth-denied h1 { @apply mb-0 mt-5 text-xl font-semibold tracking-tight text-zinc-100; }
   .auth-google-button { @apply mt-8 min-h-11; }
   .auth-loading { @apply mt-4 text-zinc-500; }
@@ -172,6 +172,24 @@
   .channel-card strong { @apply text-sm font-medium; }
   .channel-card small { @apply text-sm text-zinc-500; }
   .channel-card-disabled { @apply border-zinc-900 bg-zinc-950/30 text-zinc-600; }
+  .settings-page { @apply mx-auto max-w-3xl; }
+  .settings-heading > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .settings-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .settings-heading > span { @apply mt-2 block text-sm text-zinc-500; }
+  .settings-channel-list { @apply mt-10 grid gap-3; }
+  .settings-channel-card { @apply flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .settings-channel-card > svg { @apply shrink-0 text-zinc-400; }
+  .settings-channel-card > div { @apply min-w-0 flex-1; }
+  .settings-channel-card h3 { @apply m-0 text-sm font-medium text-zinc-100; }
+  .settings-channel-card p { @apply mb-0 mt-1 text-sm text-zinc-500; }
+  .settings-channel-card small { @apply mt-3 block text-xs font-medium text-zinc-400; }
+  .settings-channel-toggle { @apply flex shrink-0 flex-col items-end gap-2 text-xs text-zinc-500; }
+  .settings-channel-toggle input { @apply relative h-6 w-11 cursor-pointer appearance-none rounded-full border-0 bg-zinc-700 p-0 transition-colors checked:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50; }
+  .settings-channel-toggle input::after { content: ''; @apply absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform; }
+  .settings-channel-toggle input:checked::after { @apply translate-x-5; }
+  .settings-error { @apply mt-8 flex items-center justify-between gap-4 rounded-xl border border-red-900/70 bg-red-950/30 p-4 text-sm text-red-200; }
+  .settings-error p { @apply m-0; }
+  .settings-error button { @apply shrink-0 text-sm font-medium text-red-100 underline underline-offset-4; }
   .meta-signup-card { @apply mt-8 flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5; }
   .meta-signup-card > svg { @apply text-emerald-400; }
   .meta-signup-card h3 { @apply m-0 text-sm font-medium text-zinc-100; }
@@ -218,6 +236,14 @@
   .connection-inline-form label { @apply min-w-60 flex-1 space-y-2; }
   .connection-inline-form label span { @apply block text-sm text-zinc-500; }
   .connection-inline-form input, .connection-inline-form select { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
+  .connection-security-picker { @apply relative block; }
+  .connection-security-trigger { @apply flex min-h-10 w-full items-center justify-between gap-4 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-left transition-colors hover:border-zinc-500 focus-visible:border-zinc-500 focus-visible:ring-zinc-500; }
+  .connection-security-trigger strong { @apply text-sm font-medium text-zinc-200; }
+  .connection-security-trigger > svg { @apply shrink-0 text-zinc-500; }
+  .connection-security-options { @apply absolute left-0 right-0 top-[calc(100%+0.25rem)] z-20 grid overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-xl shadow-black/50; }
+  .connection-security-options button { @apply rounded-md px-3 py-2 text-left transition-colors hover:bg-zinc-800; }
+  .connection-security-options button.is-selected { @apply bg-zinc-800; }
+  .connection-security-options strong { @apply text-sm font-medium text-zinc-200; }
   .connection-inline-form > div, .connection-inline-actions { @apply flex flex-wrap gap-2; }
   .connection-text-action { @apply mt-5 border-0 bg-transparent p-0 text-sm font-medium text-zinc-300 underline underline-offset-4 hover:text-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-600; }
   .connection-inline-actions { @apply mt-5; }

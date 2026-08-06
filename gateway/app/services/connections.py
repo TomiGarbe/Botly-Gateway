@@ -18,6 +18,12 @@ from app.domain.connection import (
 )
 from app.services.connection_adapter import legacy_instance_to_connection
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
+from app.services.gateway_settings import (
+    ChannelDisabledError,
+    ChannelNotImplementedError,
+    GatewaySettingsService,
+    get_gateway_settings_service,
+)
 from app.services.instances_contract import normalize_instance_list
 
 
@@ -48,9 +54,11 @@ class ConnectionService:
         self,
         connection_manager: ConnectionManager | None = None,
         registry: ConnectionRegistry | None = None,
+        gateway_settings: GatewaySettingsService | None = None,
     ) -> None:
         self._connection_manager = connection_manager or get_connection_manager()
         self._registry = registry or get_connection_registry()
+        self._gateway_settings = gateway_settings or get_gateway_settings_service()
 
     def _migration_client_record(self) -> dict[str, str | None]:
         record = self._registry.get_client(_MIGRATION_CLIENT_ID)
@@ -160,6 +168,7 @@ class ConnectionService:
 
     def create_connection(self, *, client_id: str, channel: str) -> Connection:
         client = self._client_reference(client_id)
+        self._gateway_settings.require_channel_available(channel)
         if channel != _WHATSAPP_CHANNEL:
             raise UnsupportedConnectionChannelError("Only WhatsApp is available for new connections")
         now = _now()

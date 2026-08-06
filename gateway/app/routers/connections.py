@@ -4,8 +4,10 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.models.requests import ConnectionQuickMessageRequest, ConnectionWebhookRequest, CreateConnectionRequest, UpdateConnectionRequest
 from app.services.connections import (
+    ChannelDisabledError,
     ConnectionClientNotFoundError,
     ConnectionNotFoundError,
+    ChannelNotImplementedError,
     UnsupportedConnectionChannelError,
     get_connection_service,
 )
@@ -42,6 +44,8 @@ async def create_connection(body: CreateConnectionRequest):
     except ConnectionClientNotFoundError:
         raise HTTPException(status_code=404, detail="Client not found")
     except UnsupportedConnectionChannelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except (ChannelNotImplementedError, ChannelDisabledError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
 

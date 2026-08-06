@@ -1,9 +1,10 @@
-import { ArrowLeft, CheckCircle2, ChevronRight, LoaderCircle, MessageCircle, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Camera, CheckCircle2, ChevronRight, LoaderCircle, MessageCircle, MessagesSquare, RotateCcw, Send } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Client } from '@/domain/client'
 import type { Connection } from '@/domain/connection'
 import { getClient } from '@/features/clients/api/clientsApi'
+import { getGatewayChannels, type GatewayChannelSettings } from '@/features/settings/api/gatewaySettingsApi'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { createConnection, getConnection } from '../api/connectionsApi'
@@ -20,6 +21,8 @@ const provisioningSteps: Array<{ id: ProvisioningStep; label: string }> = [
   { id: 'testing', label: 'Probando conexión…' },
   { id: 'ready', label: 'Listo' },
 ]
+
+const channelIcons = { 'message-circle': MessageCircle, instagram: Camera, facebook: MessagesSquare, send: Send }
 
 declare global {
   interface Window {
@@ -130,6 +133,7 @@ export function NewConnectionPage() {
   const navigate = useNavigate()
   const { clientId } = useParams()
   const [client, setClient] = useState<Client | null>(null)
+  const [channels, setChannels] = useState<Record<string, GatewayChannelSettings>>({})
   const [connection, setConnection] = useState<Connection | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -139,7 +143,9 @@ export function NewConnectionPage() {
   const loadClient = useCallback(async () => {
     if (!clientId) return
     try {
-      setClient(await getClient(clientId))
+      const [nextClient, nextChannels] = await Promise.all([getClient(clientId), getGatewayChannels()])
+      setClient(nextClient)
+      setChannels(nextChannels)
     } catch {
       setError('No pudimos abrir este cliente. Volvé a intentarlo desde Clientes.')
     } finally {
@@ -149,15 +155,15 @@ export function NewConnectionPage() {
 
   useEffect(() => { void loadClient() }, [loadClient])
 
-  async function selectWhatsApp() {
+  async function selectChannel(channel: string) {
     if (!clientId) return
     setError(null)
     setStep('connecting')
     setIsStarting(true)
     try {
-      setConnection(await createConnection({ clientId, channel: 'whatsapp' }))
-    } catch {
-      setError('No pudimos preparar la conexión. Intentá nuevamente.')
+      setConnection(await createConnection({ clientId, channel }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No pudimos preparar la conexión. Intentá nuevamente.')
     } finally {
       setIsStarting(false)
     }
@@ -204,10 +210,13 @@ export function NewConnectionPage() {
       {!connection ? <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${client.id}`)}><ArrowLeft size={16} aria-hidden="true" /> {client.name}</button> : null}
       <div className="new-connection-heading"><p>Agregar conexión</p><h2>{connection ? 'Conectando WhatsApp' : `Elegí un canal para ${client.name}`}</h2></div>
       {!connection ? <div className="channel-selection">
-        <button type="button" className="channel-card channel-card-active" onClick={() => void selectWhatsApp()} disabled={isStarting}>
-          <MessageCircle size={20} aria-hidden="true" /><span><strong>WhatsApp</strong><small>Conexión oficial con Meta</small></span><ChevronRight size={17} aria-hidden="true" />
-        </button>
-        {['Instagram', 'Facebook', 'Telegram'].map((channel) => <div key={channel} className="channel-card channel-card-disabled"><span><strong>{channel}</strong><small>Próximamente</small></span></div>)}
+        {Object.entries(channels).filter(([, channel]) => !channel.implemented || channel.enabled).map(([channelId, channel]) => {
+          const Icon = channelIcons[channel.icon as keyof typeof channelIcons] || MessageCircle
+          const selectable = channel.implemented && channel.enabled
+          return selectable ? <button key={channelId} type="button" className="channel-card channel-card-active" onClick={() => void selectChannel(channelId)} disabled={isStarting}>
+            <Icon size={20} aria-hidden="true" /><span><strong>{channel.name}</strong><small>{channel.description}</small></span><ChevronRight size={17} aria-hidden="true" />
+          </button> : <div key={channelId} className="channel-card channel-card-disabled"><Icon size={20} aria-hidden="true" /><span><strong>{channel.name}</strong><small>Próximamente</small></span></div>
+        })}
       </div> : <div className="connection-provisioning">
         <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
         {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()}>Continuar con WhatsApp</button> : null}

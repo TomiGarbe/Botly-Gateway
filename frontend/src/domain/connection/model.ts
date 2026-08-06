@@ -44,5 +44,5 @@ export interface Connection {
 
 export interface CreateConnectionInput {
   clientId: string
-  channel: 'whatsapp'
+  channel: string
 }

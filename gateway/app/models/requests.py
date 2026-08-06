@@ -80,7 +80,19 @@ class CreateConnectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     client_id: str = Field(..., min_length=1, max_length=128)
-    channel: Literal["whatsapp"]
+    channel: str = Field(..., min_length=1, max_length=64)
+
+
+class ChannelSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class UpdateChannelSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channels: dict[str, ChannelSettingsUpdate] = Field(..., min_length=1)
 
 
 class UpdateConnectionRequest(BaseModel):
