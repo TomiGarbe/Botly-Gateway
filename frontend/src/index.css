@@ -164,6 +164,9 @@
   .new-connection-heading { @apply mt-7; }
   .new-connection-heading > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .new-connection-heading h2, .connection-detail-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .new-connection-name { @apply mt-8 block max-w-xl space-y-2; }
+  .new-connection-name span { @apply block text-sm font-medium text-zinc-300; }
+  .new-connection-name input { @apply box-border min-h-10 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
   .channel-selection { @apply mt-8 grid gap-3; }
   .channel-card { @apply flex items-center gap-4 rounded-xl border p-5 text-left; }
   .channel-card-active { @apply border-zinc-700 bg-zinc-900/40 text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-60; }
@@ -176,17 +179,27 @@
   .settings-heading > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
   .settings-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
   .settings-heading > span { @apply mt-2 block text-sm text-zinc-500; }
+  .settings-group { @apply mt-10; }
+  .settings-group > h3 { @apply m-0 text-base font-semibold text-zinc-100; }
+  .settings-group > p { @apply mb-0 mt-1 text-sm text-zinc-500; }
   .settings-channel-list { @apply mt-10 grid gap-3; }
-  .settings-channel-card { @apply flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .settings-group .settings-channel-list { @apply mt-4; }
+  .settings-channel-card { @apply flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5 transition-colors hover:border-zinc-700 hover:bg-zinc-900/50; }
   .settings-channel-card > svg { @apply shrink-0 text-zinc-400; }
   .settings-channel-card > div { @apply min-w-0 flex-1; }
   .settings-channel-card h3 { @apply m-0 text-sm font-medium text-zinc-100; }
   .settings-channel-card p { @apply mb-0 mt-1 text-sm text-zinc-500; }
   .settings-channel-card small { @apply mt-3 block text-xs font-medium text-zinc-400; }
-  .settings-channel-toggle { @apply flex shrink-0 flex-col items-end gap-2 text-xs text-zinc-500; }
-  .settings-channel-toggle input { @apply relative h-6 w-11 cursor-pointer appearance-none rounded-full border-0 bg-zinc-700 p-0 transition-colors checked:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50; }
-  .settings-channel-toggle input::after { content: ''; @apply absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform; }
-  .settings-channel-toggle input:checked::after { @apply translate-x-5; }
+  .settings-channel-toggle { @apply flex shrink-0 flex-col items-end gap-2 border-0 bg-transparent p-0 text-xs font-medium text-zinc-500 outline-none transition-colors; }
+  .settings-channel-toggle:focus-visible .settings-channel-toggle-track { @apply ring-2 ring-emerald-400 ring-offset-2 ring-offset-zinc-900; }
+  .settings-channel-toggle:disabled { @apply cursor-not-allowed opacity-45; }
+  .settings-channel-toggle:not(:disabled) { @apply cursor-pointer; }
+  .settings-channel-toggle-label { @apply leading-none; }
+  .settings-channel-toggle.is-enabled .settings-channel-toggle-label { @apply text-emerald-400; }
+  .settings-channel-toggle-track { @apply relative flex h-7 w-12 items-center rounded-full border border-zinc-700 bg-zinc-800 p-0.5 shadow-inner transition-all duration-200; }
+  .settings-channel-toggle.is-enabled .settings-channel-toggle-track { @apply border-emerald-400/50 bg-emerald-500; }
+  .settings-channel-toggle-thumb { @apply flex h-5 w-5 items-center justify-center rounded-full bg-zinc-300 text-zinc-600 shadow-sm transition-all duration-200; }
+  .settings-channel-toggle.is-enabled .settings-channel-toggle-thumb { @apply translate-x-5 bg-white text-emerald-600; }
   .settings-error { @apply mt-8 flex items-center justify-between gap-4 rounded-xl border border-red-900/70 bg-red-950/30 p-4 text-sm text-red-200; }
   .settings-error p { @apply m-0; }
   .settings-error button { @apply shrink-0 text-sm font-medium text-red-100 underline underline-offset-4; }
@@ -204,6 +217,10 @@
   .connection-provisioning li.is-complete { @apply text-zinc-400; }
   .connection-provisioning li.is-complete > svg { @apply border-emerald-500 text-emerald-400; }
   .connection-provisioning > .client-button-primary { @apply mt-8; }
+  .evolution-qr-panel h3 { @apply m-0 text-lg font-semibold text-zinc-100; }
+  .evolution-qr-panel > p { @apply mt-2 text-sm text-zinc-400; }
+  .evolution-qr-panel > img { @apply mt-6 h-64 w-64 rounded-xl bg-white p-3; }
+  .evolution-qr-actions { @apply mt-5 flex flex-wrap gap-3; }
   .provisioning-error { @apply mt-8 rounded-xl border border-red-950/70 bg-red-950/20 p-4; }
   .provisioning-error p { @apply m-0 text-sm leading-6 text-red-200; }
   .provisioning-error button { @apply mt-4; }

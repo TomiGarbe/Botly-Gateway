@@ -45,4 +45,6 @@ export interface Connection {
 export interface CreateConnectionInput {
   clientId: string
   channel: string
+  name: string
+  provider: 'meta' | 'evolution'
 }

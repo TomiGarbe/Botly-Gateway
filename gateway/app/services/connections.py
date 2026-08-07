@@ -6,6 +6,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.connections import ConnectionManager, get_connection_manager
+from app.core.config import get_settings
 from app.domain.connection import (
     Channel,
     Connection,
@@ -22,6 +23,8 @@ from app.services.gateway_settings import (
     ChannelDisabledError,
     ChannelNotImplementedError,
     GatewaySettingsService,
+    ProviderDisabledError,
+    ProviderNotImplementedError,
     get_gateway_settings_service,
 )
 from app.services.instances_contract import normalize_instance_list
@@ -44,6 +47,10 @@ class ConnectionClientNotFoundError(KeyError):
 
 
 class UnsupportedConnectionChannelError(ValueError):
+    pass
+
+
+class UnsupportedConnectionProviderError(ValueError):
     pass
 
 
@@ -93,7 +100,7 @@ class ConnectionService:
         return Connection(
             id=str(record["id"]),
             client_id=client.id,
-            name=str(record.get("name") or "WhatsApp Oficial"),
+            name=str(record.get("name") or "WhatsApp"),
             display_name=str(record["display_name"]) if record.get("display_name") else None,
             address=str(record["address"]) if record.get("address") else None,
             provider=Provider(
@@ -113,9 +120,10 @@ class ConnectionService:
                 supports_messaging=True,
                 supports_webhook=True,
                 supports_media=True,
+                supports_qr=str(record.get("provider_id") or "meta") == "evolution",
                 supports_reconnect=True,
                 supports_api_key=True,
-                supports_official_api=True,
+                supports_official_api=str(record.get("provider_id") or "meta") == "meta",
             ),
             webhook=ConnectionWebhook(supported=True),
             api_key=ConnectionApiKey(supported=True),
@@ -166,23 +174,31 @@ class ConnectionService:
                 return connection
         raise ConnectionNotFoundError(connection_id)
 
-    def create_connection(self, *, client_id: str, channel: str) -> Connection:
+    def create_connection(self, *, client_id: str, channel: str, name: str | None = None, provider: str = "meta") -> Connection:
         client = self._client_reference(client_id)
         self._gateway_settings.require_channel_available(channel)
         if channel != _WHATSAPP_CHANNEL:
             raise UnsupportedConnectionChannelError("Only WhatsApp is available for new connections")
+        if provider not in {"meta", "evolution"}:
+            raise UnsupportedConnectionProviderError(f"Unsupported provider: {provider}")
+        self._gateway_settings.require_provider_available(provider)
+        if provider == "meta":
+            self._gateway_settings.require_provider_available("evolution")
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            clean_name = "WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution"
         now = _now()
         connection_id = str(uuid4())
         record = {
             "id": connection_id,
             "legacy_name": f"connection_{connection_id.replace('-', '')[:24]}",
             "client_id": client.id,
-            "name": "WhatsApp Oficial",
-            "provider_id": "meta",
-            "provider_display_name": "Meta",
+            "name": clean_name,
+            "provider_id": provider,
+            "provider_display_name": "Meta" if provider == "meta" else "Evolution",
             "channel_id": _WHATSAPP_CHANNEL,
             "channel_display_name": "WhatsApp",
-            "status_state": "pending",
+            "status_state": "pending" if provider == "meta" else "connecting",
             "status_health": "unknown",
             "created_at": now,
             "updated_at": now,
@@ -191,6 +207,44 @@ class ConnectionService:
         if saved is None:
             raise ConnectionClientNotFoundError(client.id)
         return self._stored_connection(record)
+
+    async def start_evolution_connection(self, connection_id: str) -> Connection:
+        record = self._registry.connection_record_by_id(connection_id)
+        if record is None:
+            raise ConnectionNotFoundError(connection_id)
+        if str(record.get("provider_id") or "") != "evolution":
+            raise UnsupportedConnectionProviderError("This connection does not use Evolution")
+        self._gateway_settings.require_provider_available("evolution")
+        try:
+            await self._connection_manager.create(
+                self._runtime_name(record),
+                qrcode=True,
+                connection_type="baileys",
+            )
+        except Exception:
+            self._registry.delete_connection_record(connection_id)
+            raise
+        try:
+            await self._connection_manager.set_webhook(
+                self._runtime_name(record),
+                f"http://gateway:{get_settings().gateway_port}/webhooks/evolution",
+                ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE"],
+                connection_type="baileys",
+            )
+        except Exception:
+            # The QR connection is usable even if webhook setup must be
+            # retried later, mirroring the existing instance creation flow.
+            pass
+        return self._stored_connection(record)
+
+    async def evolution_qr(self, connection_id: str) -> dict[str, Any]:
+        record = self._registry.connection_record_by_id(connection_id)
+        if record is None:
+            raise ConnectionNotFoundError(connection_id)
+        if str(record.get("provider_id") or "") != "evolution":
+            raise UnsupportedConnectionProviderError("This connection does not use Evolution")
+        self._gateway_settings.require_provider_available("evolution")
+        return await self._connection_manager.connect(self._runtime_name(record), connection_type="baileys")
 
     async def update_connection(self, connection_id: str, *, name: str | None = None) -> Connection:
         record = self._registry.connection_record_by_id(connection_id)

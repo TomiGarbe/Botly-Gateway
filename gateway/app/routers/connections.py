@@ -8,6 +8,9 @@ from app.services.connections import (
     ConnectionClientNotFoundError,
     ConnectionNotFoundError,
     ChannelNotImplementedError,
+    ProviderDisabledError,
+    ProviderNotImplementedError,
+    UnsupportedConnectionProviderError,
     UnsupportedConnectionChannelError,
     get_connection_service,
 )
@@ -40,12 +43,32 @@ async def get_connection(connection_id: str):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_connection(body: CreateConnectionRequest):
     try:
-        return _service.create_connection(client_id=body.client_id, channel=body.channel).public_dict()
+        connection = _service.create_connection(
+            client_id=body.client_id,
+            channel=body.channel,
+            name=body.name,
+            provider=body.provider,
+        )
+        if body.provider == "evolution":
+            connection = await _service.start_evolution_connection(connection.id)
+        return connection.public_dict()
     except ConnectionClientNotFoundError:
         raise HTTPException(status_code=404, detail="Client not found")
-    except UnsupportedConnectionChannelError as exc:
+    except (UnsupportedConnectionChannelError, UnsupportedConnectionProviderError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except (ChannelNotImplementedError, ChannelDisabledError) as exc:
+    except (ChannelNotImplementedError, ChannelDisabledError, ProviderNotImplementedError, ProviderDisabledError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/{connection_id}/qr")
+async def get_connection_qr(connection_id: str):
+    try:
+        return await _service.evolution_qr(connection_id)
+    except ConnectionNotFoundError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except UnsupportedConnectionProviderError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except (ProviderNotImplementedError, ProviderDisabledError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
 

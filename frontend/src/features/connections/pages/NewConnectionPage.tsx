@@ -1,15 +1,16 @@
-import { ArrowLeft, Camera, CheckCircle2, ChevronRight, LoaderCircle, MessageCircle, MessagesSquare, RotateCcw, Send } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, CheckCircle2, LoaderCircle, MessageCircle, QrCode, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Client } from '@/domain/client'
 import type { Connection } from '@/domain/connection'
 import { getClient } from '@/features/clients/api/clientsApi'
-import { getGatewayChannels, type GatewayChannelSettings } from '@/features/settings/api/gatewaySettingsApi'
+import { getGatewayChannels, getGatewayProviders, type GatewayChannelSettings, type GatewayProviderSettings } from '@/features/settings/api/gatewaySettingsApi'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
-import { createConnection, getConnection } from '../api/connectionsApi'
+import { createConnection, getConnection, getConnectionQr } from '../api/connectionsApi'
 import { completeMetaSignup, getMetaSignupConfig } from '../api/metaSignupApi'
 
+type ProviderId = 'meta' | 'evolution'
 type EmbeddedSession = { phoneNumberId: string; businessAccountId: string; raw: Record<string, unknown> }
 type ProvisioningStep = 'connecting' | 'authorizing' | 'creating' | 'webhook' | 'testing' | 'ready'
 
@@ -21,8 +22,6 @@ const provisioningSteps: Array<{ id: ProvisioningStep; label: string }> = [
   { id: 'testing', label: 'Probando conexión…' },
   { id: 'ready', label: 'Listo' },
 ]
-
-const channelIcons = { 'message-circle': MessageCircle, instagram: Camera, facebook: MessagesSquare, send: Send }
 
 declare global {
   interface Window {
@@ -50,11 +49,7 @@ function waitForSession(): Promise<EmbeddedSession> {
       if (!isFacebookOrigin(event.origin)) return
       let raw: unknown = event.data
       if (typeof raw === 'string') {
-        try {
-          raw = JSON.parse(raw)
-        } catch {
-          return
-        }
+        try { raw = JSON.parse(raw) } catch { return }
       }
       if (typeof raw !== 'object' || raw === null) return
       const data = raw as { type?: string; event?: string; data?: Record<string, unknown> }
@@ -66,8 +61,8 @@ function waitForSession(): Promise<EmbeddedSession> {
         return
       }
       const payload: Record<string, unknown> = data.data || data
-      const phoneNumberId = String(payload['phone_number_id'] || payload['phoneNumberId'] || '')
-      const businessAccountId = String(payload['waba_id'] || payload['business_account_id'] || payload['businessAccountId'] || '')
+      const phoneNumberId = String(payload.phone_number_id || payload.phoneNumberId || '')
+      const businessAccountId = String(payload.waba_id || payload.business_account_id || payload.businessAccountId || '')
       if (!phoneNumberId || !businessAccountId) return
       window.clearTimeout(timeout)
       window.removeEventListener('message', listener)
@@ -102,10 +97,7 @@ async function loadFacebookSdk(appId: string, graphVersion: string): Promise<voi
 
 function loginWithFacebook(configId: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (!window.FB) {
-      reject(new Error('signup_unavailable'))
-      return
-    }
+    if (!window.FB) return reject(new Error('signup_unavailable'))
     window.FB.login((response) => {
       const code = response.authResponse?.code
       if (code) resolve(code)
@@ -119,6 +111,12 @@ function loginWithFacebook(configId: string): Promise<string> {
   })
 }
 
+function qrSource(payload: { qrcode?: { base64?: string; code?: string }; base64?: string }): string | null {
+  const value = payload.qrcode?.base64 || payload.base64 || payload.qrcode?.code
+  if (!value) return null
+  return value.startsWith('data:') ? value : `data:image/png;base64,${value}`
+}
+
 function friendlyError(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : ''
   if (message === 'signup_cancelled') return 'La autorización se canceló antes de terminar. Podés intentarlo nuevamente.'
@@ -126,7 +124,7 @@ function friendlyError(reason: unknown): string {
   if (message === 'signup_unavailable') return 'No pudimos abrir la autorización de Meta. Revisá tu conexión e intentá nuevamente.'
   if (message === 'signup_incomplete') return 'La autorización no pudo completarse. Intentá nuevamente.'
   if (message.includes('configurada')) return 'La conexión oficial no está disponible en este momento. Intentá más tarde.'
-  return 'No pudimos terminar la conexión. Podés reintentar sin perder el avance.'
+  return message || 'No pudimos terminar la conexión. Podés reintentar sin perder el avance.'
 }
 
 export function NewConnectionPage() {
@@ -134,7 +132,10 @@ export function NewConnectionPage() {
   const { clientId } = useParams()
   const [client, setClient] = useState<Client | null>(null)
   const [channels, setChannels] = useState<Record<string, GatewayChannelSettings>>({})
+  const [providers, setProviders] = useState<Record<string, GatewayProviderSettings>>({})
   const [connection, setConnection] = useState<Connection | null>(null)
+  const [connectionName, setConnectionName] = useState('')
+  const [qr, setQr] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isStarting, setIsStarting] = useState(false)
@@ -143,9 +144,10 @@ export function NewConnectionPage() {
   const loadClient = useCallback(async () => {
     if (!clientId) return
     try {
-      const [nextClient, nextChannels] = await Promise.all([getClient(clientId), getGatewayChannels()])
+      const [nextClient, nextChannels, nextProviders] = await Promise.all([getClient(clientId), getGatewayChannels(), getGatewayProviders()])
       setClient(nextClient)
       setChannels(nextChannels)
+      setProviders(nextProviders)
     } catch {
       setError('No pudimos abrir este cliente. Volvé a intentarlo desde Clientes.')
     } finally {
@@ -155,15 +157,28 @@ export function NewConnectionPage() {
 
   useEffect(() => { void loadClient() }, [loadClient])
 
-  async function selectChannel(channel: string) {
+  async function loadQr(connectionId: string) {
+    const payload = await getConnectionQr(connectionId)
+    const nextQr = qrSource(payload)
+    if (!nextQr) throw new Error('Evolution no devolvió un código QR. Actualizalo e intentá nuevamente.')
+    setQr(nextQr)
+  }
+
+  async function selectProvider(provider: ProviderId) {
     if (!clientId) return
+    const name = connectionName.trim()
+    if (!name) {
+      setError('Ingresá un nombre para la conexión.')
+      return
+    }
     setError(null)
-    setStep('connecting')
     setIsStarting(true)
     try {
-      setConnection(await createConnection({ clientId, channel }))
+      const created = await createConnection({ clientId, channel: 'whatsapp', name, provider })
+      setConnection(created)
+      if (provider === 'evolution') await loadQr(created.id)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pudimos preparar la conexión. Intentá nuevamente.')
+      setError(friendlyError(reason))
     } finally {
       setIsStarting(false)
     }
@@ -204,25 +219,30 @@ export function NewConnectionPage() {
   if (!client) return <div className="clients-state clients-state-error" role="alert"><p>{error || 'Cliente no encontrado.'}</p><button type="button" onClick={() => navigate('/clients')}>Volver a clientes</button></div>
 
   const activeIndex = provisioningSteps.findIndex((item) => item.id === step)
+  const whatsappEnabled = channels.whatsapp?.implemented && channels.whatsapp.enabled
+  const metaEnabled = providers.meta?.implemented && providers.meta.enabled
+  const evolutionEnabled = providers.evolution?.implemented && providers.evolution.enabled
 
-  return (
-    <section className="new-connection-page">
-      {!connection ? <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${client.id}`)}><ArrowLeft size={16} aria-hidden="true" /> {client.name}</button> : null}
-      <div className="new-connection-heading"><p>Agregar conexión</p><h2>{connection ? 'Conectando WhatsApp' : `Elegí un canal para ${client.name}`}</h2></div>
-      {!connection ? <div className="channel-selection">
-        {Object.entries(channels).filter(([, channel]) => !channel.implemented || channel.enabled).map(([channelId, channel]) => {
-          const Icon = channelIcons[channel.icon as keyof typeof channelIcons] || MessageCircle
-          const selectable = channel.implemented && channel.enabled
-          return selectable ? <button key={channelId} type="button" className="channel-card channel-card-active" onClick={() => void selectChannel(channelId)} disabled={isStarting}>
-            <Icon size={20} aria-hidden="true" /><span><strong>{channel.name}</strong><small>{channel.description}</small></span><ChevronRight size={17} aria-hidden="true" />
-          </button> : <div key={channelId} className="channel-card channel-card-disabled"><Icon size={20} aria-hidden="true" /><span><strong>{channel.name}</strong><small>Próximamente</small></span></div>
-        })}
-      </div> : <div className="connection-provisioning">
-        <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
-        {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()}>Continuar con WhatsApp</button> : null}
-        {error ? <div className="provisioning-error" role="alert"><p>{error}</p><button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button></div> : null}
-      </div>}
-      {error && !connection ? <p className="client-form-error" role="alert">{error}</p> : null}
-    </section>
-  )
+  return <section className="new-connection-page">
+    {!connection ? <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${client.id}`)}><ArrowLeft size={16} aria-hidden="true" /> {client.name}</button> : null}
+    <div className="new-connection-heading"><p>Agregar conexión</p><h2>{connection ? `Conectando ${connection.name}` : `Nueva conexión para ${client.name}`}</h2></div>
+    {!connection ? <>
+      <label className="new-connection-name"><span>Nombre de la conexión</span><input value={connectionName} onChange={(event) => setConnectionName(event.target.value)} maxLength={160} placeholder="Ej.: Ventas Argentina" autoFocus /></label>
+      <div className="channel-selection">
+        {whatsappEnabled && metaEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('meta')} disabled={isStarting}><BadgeCheck size={20} aria-hidden="true" /><span><strong>WhatsApp oficial con Meta</strong><small>Conectá una cuenta de WhatsApp Business mediante Meta.</small></span></button> : null}
+        {whatsappEnabled && evolutionEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('evolution')} disabled={isStarting}><QrCode size={20} aria-hidden="true" /><span><strong>WhatsApp con Evolution</strong><small>Conectá WhatsApp Web escaneando un código QR.</small></span></button> : null}
+        {!whatsappEnabled || (!metaEnabled && !evolutionEnabled) ? <div className="channel-card channel-card-disabled"><MessageCircle size={20} aria-hidden="true" /><span><strong>WhatsApp</strong><small>Habilitá el canal y al menos un proveedor desde Configuración.</small></span></div> : null}
+      </div>
+    </> : connection.provider.id === 'evolution' ? <div className="connection-provisioning evolution-qr-panel">
+      <h3>Escaneá el código QR</h3><p>Abrí WhatsApp en el teléfono y vinculá un dispositivo para terminar la conexión.</p>
+      {qr ? <img src={qr} alt="Código QR para conectar WhatsApp con Evolution" /> : <LoaderCircle size={28} className="animate-spin" aria-label="Cargando código QR" />}
+      <div className="evolution-qr-actions"><button type="button" className="client-button-secondary" onClick={() => void loadQr(connection.id).catch((reason) => setError(friendlyError(reason)))} disabled={isStarting}>Actualizar código QR</button><button type="button" className="client-button-primary" onClick={() => navigate(`/connections/${connection.id}`)}>Abrir conexión</button></div>
+      {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
+    </div> : <div className="connection-provisioning">
+      <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
+      {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()}>Continuar con WhatsApp</button> : null}
+      {error ? <div className="provisioning-error" role="alert"><p>{error}</p><button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button></div> : null}
+    </div>}
+    {error && !connection ? <p className="client-form-error" role="alert">{error}</p> : null}
+  </section>
 }

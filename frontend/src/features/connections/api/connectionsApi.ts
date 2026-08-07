@@ -74,9 +74,13 @@ export async function createConnection(input: CreateConnectionInput): Promise<Co
   const payload = await gatewayRequest<ApiConnection>('/connections', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: input.clientId, channel: input.channel }),
+    body: JSON.stringify({ client_id: input.clientId, channel: input.channel, name: input.name, provider: input.provider }),
   })
   return toConnection(payload)
+}
+
+export async function getConnectionQr(connectionId: string): Promise<{ qrcode?: { base64?: string; code?: string } }> {
+  return gatewayRequest<{ qrcode?: { base64?: string; code?: string } }>(`/connections/${encodeURIComponent(connectionId)}/qr`)
 }
 
 export async function updateConnectionName(connectionId: string, name: string): Promise<Connection> {

@@ -81,6 +81,8 @@ class CreateConnectionRequest(BaseModel):
 
     client_id: str = Field(..., min_length=1, max_length=128)
     channel: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=160)
+    provider: Literal["meta", "evolution"] = "meta"
 
 
 class ChannelSettingsUpdate(BaseModel):
@@ -93,6 +95,18 @@ class UpdateChannelSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     channels: dict[str, ChannelSettingsUpdate] = Field(..., min_length=1)
+
+
+class ProviderSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class UpdateProviderSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    providers: dict[str, ProviderSettingsUpdate] = Field(..., min_length=1)
 
 
 class UpdateConnectionRequest(BaseModel):
