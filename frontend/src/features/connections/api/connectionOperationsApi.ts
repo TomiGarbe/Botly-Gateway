@@ -53,6 +53,31 @@ export interface ConnectionIntegrationEndpoints {
   metaWebhookUrl: string
 }
 
+export interface WebhookDelivery {
+  timestamp: number
+  webhookName: string | null
+  destinationUrl: string | null
+  eventType: string | null
+  messageId: string | null
+  status: string
+  success: boolean
+  statusCode: number
+  durationMs: number
+  retryCount: number
+  error: string | null
+  errorType: string | null
+  request: { payloadSummary?: Record<string, unknown>; payloadPreview?: string; payloadTruncated?: boolean }
+  response: { bodyPreview?: string }
+}
+
+export interface WebhookDeliveryMetrics {
+  totalDeliveries: number
+  successfulDeliveries: number
+  failedDeliveries: number
+  retries: number
+  averageResponseTimeMs: number
+}
+
 export interface ConnectionDiagnosticCheck {
   code: string
   label: string
@@ -135,6 +160,11 @@ export async function getConnectionWebhook(connectionId: string): Promise<Connec
     customHeaderName: payload.custom_header_name,
     hasAuthSecret: payload.has_auth_secret,
   }
+}
+
+export async function listConnectionWebhookDeliveries(connectionId: string): Promise<{ items: WebhookDelivery[]; metrics: WebhookDeliveryMetrics }> {
+  const payload = await gatewayRequest<{ items: WebhookDelivery[]; metrics: WebhookDeliveryMetrics }>(`/connections/${encodeURIComponent(connectionId)}/webhook/deliveries?limit=100`)
+  return { items: Array.isArray(payload.items) ? payload.items : [], metrics: payload.metrics }
 }
 
 export async function getConnectionIntegrationEndpoints(connectionId: string): Promise<ConnectionIntegrationEndpoints> {

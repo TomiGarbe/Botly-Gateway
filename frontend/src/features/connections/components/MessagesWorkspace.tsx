@@ -39,7 +39,8 @@ function MessageStatus({ status }: { status: string | null }) {
   const label = statusLabel(status)
   if (!label) return null
   const Icon = status?.toLowerCase() === 'read' || status?.toLowerCase() === 'delivered' ? CheckCheck : Check
-  return <span className="workspace-message-status"><Icon size={13} aria-hidden="true" /> {label}</span>
+  const isError = status?.toLowerCase() === 'failed'
+  return <span className={`workspace-message-status ${isError ? 'is-error' : 'is-success'}`}><Icon size={13} aria-hidden="true" /> {label}</span>
 }
 
 export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null }) {
@@ -140,7 +141,7 @@ export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null 
       <div className="workspace-thread" aria-live="polite">
         {isLoading ? <LoadingState label="Cargando mensajes…" lines={3} /> : null}
         {!isLoading && visibleMessages.length === 0 ? <EmptyState icon={MessageCircle} title="No hay mensajes todavía." description="Enviá un mensaje de prueba para verificar esta conexión." /> : null}
-        {visibleMessages.map((message) => <article className={`workspace-message workspace-message-${message.direction}`} key={`${message.id}-${message.timestamp}`}>
+        {visibleMessages.map((message) => <article className={`workspace-message workspace-message-${message.direction} ${message.status?.toLowerCase() === 'failed' ? 'is-error' : ''}`} key={`${message.id}-${message.timestamp}`}>
           <div className="workspace-message-body">
             {message.media ? <div className="workspace-media-summary">{typeIcon(message.kind)}<span>{message.media.fileName || (message.kind === 'document' ? 'Documento' : `Archivo ${message.kind}`)}</span></div> : null}
             {message.text ? <p>{message.text}</p> : !message.media ? <p>Mensaje sin contenido legible.</p> : null}

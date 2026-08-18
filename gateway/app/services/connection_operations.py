@@ -14,7 +14,9 @@ from app.services.credential_manager import get_credential_manager
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
 from app.services.instance_webhooks import (
     create_webhook,
+    get_dispatch_metrics,
     list_instance_webhooks,
+    list_recent_dispatches,
     update_webhook,
 )
 from app.services.normalization import list_events, save_business_event, save_pipeline_event
@@ -95,6 +97,15 @@ class ConnectionOperationsService:
         runtime_name = self._runtime_name(connection_id)
         hooks = list_instance_webhooks(runtime_name, reveal_secrets=False)
         return self._webhook_payload(hooks[0] if hooks else None)
+
+    def webhook_deliveries(self, connection_id: str, *, limit: int = 50) -> dict[str, Any]:
+        """Expose the safe, persisted delivery history for the connection UI."""
+        runtime_name = self._runtime_name(connection_id)
+        safe_limit = max(1, min(limit, 200))
+        return {
+            "items": list_recent_dispatches(runtime_name, limit=safe_limit),
+            "metrics": get_dispatch_metrics(runtime_name),
+        }
 
     def integration_endpoints(self, connection_id: str) -> dict[str, str]:
         runtime_name = self._runtime_name(connection_id)

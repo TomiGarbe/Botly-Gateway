@@ -26,7 +26,7 @@ export function ConnectionCard({ connection, onOpen }: ConnectionCardProps) {
   const state = stateDetails(connection)
 
   return (
-    <article className="connection-card" role="button" tabIndex={0} aria-label={`Abrir conexión ${connection.name}`} onClick={() => onOpen(connection.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(connection.id) } }}>
+    <article className={`connection-card connection-card-${state.tone}`} role="button" tabIndex={0} aria-label={`Abrir conexión ${connection.name}`} onClick={() => onOpen(connection.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(connection.id) } }}>
       <div>
         <h3>{connection.name}</h3>
         <p>{connection.channel.displayName} · {connection.provider.displayName}</p>

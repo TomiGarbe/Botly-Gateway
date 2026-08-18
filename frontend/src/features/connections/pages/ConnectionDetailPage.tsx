@@ -27,6 +27,7 @@ import {
 import { deleteConnection, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
+import { WebhookDeliveryLog } from '../components/WebhookDeliveryLog'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
 
@@ -242,6 +243,7 @@ export function ConnectionDetailPage() {
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
 
     <div className="workspace-tab-content">
+      {activeTab === 'webhooks' ? <WebhookDeliveryLog connectionId={connection.id} /> : null}
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><label><span>Nombre</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>

@@ -410,6 +410,10 @@
   .client-connections-list { @apply gap-4; }
   .client-connections-list > .empty-state { @apply col-span-full mt-0; }
   .connection-card { @apply flex min-h-52 flex-col justify-between; }
+  .connection-card-healthy { @apply border-emerald-900/70 bg-emerald-950/15; }
+  .connection-card-attention, .connection-card-pending { @apply border-amber-900/70 bg-amber-950/15; }
+  .connection-card-critical { @apply border-red-900/70 bg-red-950/20; }
+  .connection-card-configuring { @apply border-blue-900/70 bg-blue-950/20; }
   .connection-card-footer { @apply gap-x-3; }
 
   .alerts-page { @apply max-w-5xl; }
@@ -431,6 +435,41 @@
   .client-card, .connection-card { @apply cursor-pointer; }
   .client-card:hover, .connection-card:hover, .alert-card:hover, .dashboard-attention-list li:hover { @apply -translate-y-0.5 border-zinc-700 bg-zinc-900/60 shadow-lg shadow-black/10; }
   .workspace-tab-content { animation: ui-content-in 160ms ease-out; }
+  .workspace-message-status { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+  .workspace-message-status.is-success { @apply bg-emerald-950/60 text-emerald-300; }
+  .workspace-message-status.is-error { @apply bg-red-950/60 text-red-300; }
+  .workspace-message.is-error .workspace-message-body { @apply border-red-900/70 bg-red-950/30; }
+  .webhook-delivery-log { @apply mt-8 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .webhook-log-metrics { @apply mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4; }
+  .webhook-log-metrics span { @apply flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400; }
+  .webhook-log-metrics span svg { @apply text-zinc-500; }
+  .webhook-log-metrics .is-success { @apply border-emerald-900/60 bg-emerald-950/20 text-emerald-300; }
+  .webhook-log-metrics .is-success svg { @apply text-emerald-400; }
+  .webhook-log-metrics .is-error { @apply border-red-900/60 bg-red-950/20 text-red-300; }
+  .webhook-log-metrics .is-error svg { @apply text-red-400; }
+  .webhook-log-error { @apply mt-4 rounded-lg border border-red-900/70 bg-red-950/20 p-3 text-sm text-red-200; }
+  .webhook-delivery-list { @apply mt-5 list-none space-y-3 p-0; }
+  .webhook-delivery-list > li { @apply grid gap-3 rounded-xl border border-zinc-800 bg-zinc-950/45 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start; }
+  .webhook-delivery-list > li.is-success { @apply border-emerald-900/45; }
+  .webhook-delivery-list > li.is-error { @apply border-red-900/60 bg-red-950/10; }
+  .webhook-delivery-result { @apply flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 text-zinc-300; }
+  .webhook-delivery-list .is-success .webhook-delivery-result { @apply bg-emerald-950/70 text-emerald-300; }
+  .webhook-delivery-list .is-error .webhook-delivery-result { @apply bg-red-950/70 text-red-300; }
+  .webhook-delivery-main { @apply min-w-0; }
+  .webhook-delivery-main strong { @apply block text-sm font-medium text-zinc-100; }
+  .webhook-delivery-main span { @apply mt-1 block break-words text-xs text-zinc-500; }
+  .webhook-delivery-main p { @apply mb-0 mt-2 break-words text-sm leading-5 text-red-300; }
+  .webhook-delivery-meta { @apply flex flex-wrap gap-2 text-xs text-zinc-400 sm:justify-end; }
+  .webhook-delivery-meta span { @apply rounded-full bg-zinc-800 px-2 py-1; }
+  .webhook-delivery-list details { @apply col-span-full border-t border-zinc-800 pt-3; }
+  .webhook-delivery-list summary { @apply flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200; }
+  .webhook-delivery-list summary::-webkit-details-marker { display: none; }
+  .webhook-delivery-list details[open] summary svg { @apply rotate-180; }
+  .webhook-delivery-list details dl { @apply mt-3 grid gap-3; }
+  .webhook-delivery-list details dl div { @apply grid gap-1; }
+  .webhook-delivery-list details dt { @apply text-xs font-medium text-zinc-500; }
+  .webhook-delivery-list details dd { @apply m-0 break-all text-xs leading-5 text-zinc-300; }
+  .webhook-delivery-list details code { @apply whitespace-pre-wrap text-zinc-400; }
   .activity-panel { @apply max-w-md p-6; animation: ui-panel-in 180ms ease-out; }
   .activity-panel-heading button, .workspace-attachment-heading button { @apply inline-flex h-10 w-10 items-center justify-center rounded-lg; }
 }

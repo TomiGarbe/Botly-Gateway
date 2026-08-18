@@ -99,6 +99,14 @@ async def get_connection_webhook(connection_id: str):
         raise HTTPException(status_code=404, detail="Connection not found")
 
 
+@router.get("/{connection_id}/webhook/deliveries")
+async def get_connection_webhook_deliveries(connection_id: str, limit: int = Query(default=50, ge=1, le=200)):
+    try:
+        return _operations.webhook_deliveries(connection_id, limit=limit)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+
 @router.get("/{connection_id}/integration-endpoints")
 async def get_connection_integration_endpoints(connection_id: str):
     try:
