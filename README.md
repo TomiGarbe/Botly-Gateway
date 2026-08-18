@@ -113,7 +113,7 @@ Se normalizan quitando slash final para evitar rutas inconsistentes.
 
 `VITE_PUBLIC_BASE_URL` se mantiene solo como compatibilidad de lectura para builds anteriores; los nuevos despliegues deben usar `VITE_PUBLIC_APP_URL`.
 
-El build de produccion usa `frontend/.env.production`: `VITE_PUBLIC_APP_URL` apunta a `https://gateway.botly.com.ar` (frontend) y `VITE_GATEWAY_URL` a `https://gateway-server.botly.com.ar` (API del Gateway en Contabo). El archivo `.env` sin sufijo puede mantenerse con valores locales para desarrollo.
+El build de produccion usa `frontend/.env.production`: `VITE_PUBLIC_APP_URL` apunta a `https://gateway.botly.com.ar` (frontend) y `VITE_GATEWAY_URL` a `https://gateway-server.botly.com.ar` (API del Gateway en el server propio, Docker sobre WSL2, expuesto por Cloudflare Tunnel). El archivo `.env` sin sufijo puede mantenerse con valores locales para desarrollo.
 
 ### PUBLIC_APP_URL (backend)
 
