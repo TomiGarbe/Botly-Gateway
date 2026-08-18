@@ -458,6 +458,8 @@
   .webhook-delivery-main { @apply min-w-0; }
   .webhook-delivery-main strong { @apply block text-sm font-medium text-zinc-100; }
   .webhook-delivery-main span { @apply mt-1 block break-words text-xs text-zinc-500; }
+  .webhook-delivery-main .webhook-delivery-message { @apply mb-0 mt-2 break-words text-sm leading-5 text-zinc-200; }
+  .webhook-delivery-main small { @apply mt-1 block break-words text-xs text-zinc-500; }
   .webhook-delivery-main p { @apply mb-0 mt-2 break-words text-sm leading-5 text-red-300; }
   .webhook-delivery-meta { @apply flex flex-wrap gap-2 text-xs text-zinc-400 sm:justify-end; }
   .webhook-delivery-meta span { @apply rounded-full bg-zinc-800 px-2 py-1; }

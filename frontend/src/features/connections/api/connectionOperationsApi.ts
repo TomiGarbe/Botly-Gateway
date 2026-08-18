@@ -66,7 +66,21 @@ export interface WebhookDelivery {
   retryCount: number
   error: string | null
   errorType: string | null
-  request: { payloadSummary?: Record<string, unknown>; payloadPreview?: string; payloadTruncated?: boolean }
+  request: {
+    payloadSummary?: {
+      event?: string
+      type?: string
+      subtype?: string
+      direction?: 'inbound' | 'outbound' | string
+      recipient?: string
+      messageType?: string
+      textPreview?: string
+      mediaKind?: string
+      mediaCaption?: string
+    }
+    payloadPreview?: string
+    payloadTruncated?: boolean
+  }
   response: { bodyPreview?: string }
 }
 

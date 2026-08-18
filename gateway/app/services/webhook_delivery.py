@@ -59,7 +59,11 @@ def _should_verbose_dispatch_logs() -> bool:
 
 def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-    text = str(payload.get("text") or payload.get("content") or "")
+    content = payload.get("content")
+    content_text = content.get("text") if isinstance(content, dict) else content
+    message_text = message.get("text") or message.get("caption")
+    text = str(payload.get("text") or content_text or message_text or "")
+    media = payload.get("media") if isinstance(payload.get("media"), dict) else {}
     return {
         "event": payload.get("event"),
         "type": payload.get("type"),
@@ -67,7 +71,11 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "instance": payload.get("instance"),
         "messageId": message.get("id") or payload.get("messageId"),
         "direction": payload.get("direction"),
+        "recipient": payload.get("recipient"),
+        "messageType": payload.get("messageType") or message.get("kind"),
         "textPreview": text[:120] if text else "",
+        "mediaKind": media.get("kind"),
+        "mediaCaption": str(media.get("caption") or "")[:120],
     }
 
 
