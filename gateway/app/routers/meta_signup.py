@@ -41,6 +41,7 @@ async def complete_signup(body: MetaSignupCompleteRequest):
             phone_number_id=body.phone_number_id,
             business_account_id=body.business_account_id,
             session_info=body.session_info,
+            registration_pin=body.registration_pin,
         )
     except MetaPlatformError as exc:
         logger.warning(

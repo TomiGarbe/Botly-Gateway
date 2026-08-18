@@ -182,8 +182,8 @@ class ConnectionService:
         if provider not in {"meta", "evolution"}:
             raise UnsupportedConnectionProviderError(f"Unsupported provider: {provider}")
         self._gateway_settings.require_provider_available(provider)
-        if provider == "meta":
-            self._gateway_settings.require_provider_available("evolution")
+        # Meta (WhatsApp Cloud) es independiente del motor Evolution: opera directo
+        # contra la Graph API. No exigir el proveedor "evolution" para conexiones Meta.
         clean_name = str(name or "").strip()
         if not clean_name:
             clean_name = "WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution"

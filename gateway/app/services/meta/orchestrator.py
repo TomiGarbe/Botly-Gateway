@@ -60,6 +60,7 @@ class MetaOnboardingOrchestrator:
         phone_number_id: str,
         business_account_id: str,
         session_info: dict[str, Any] | None = None,
+        registration_pin: str | None = None,
     ) -> MetaOnboardingResult:
         onboarding_type = self._onboarding_type(session_info)
         record = self._store.start(instance_name, onboarding_type)
@@ -132,7 +133,7 @@ class MetaOnboardingOrchestrator:
             save_pipeline_event(stage="webhook", status="verified", instance=instance_name, event="WEBHOOK_VERIFIED", component="Meta")
 
             if not record.completed(MetaOnboardingState.PHONE_REGISTERED):
-                registration_pin = None
+                effective_pin = None
                 if onboarding_type != OnboardingType.COEXISTENCE:
                     # Store token and the generated 2FA PIN before the first
                     # Graph call. If Meta times out after accepting the request,
@@ -146,12 +147,14 @@ class MetaOnboardingOrchestrator:
                         source="embedded_signup",
                         metadata={"onboarding": "embedded_signup", "onboardingType": onboarding_type.value},
                     )
-                    registration_pin = self._credentials_store.get_or_create_registration_pin(instance_name)
+                    effective_pin = self._credentials_store.get_or_create_registration_pin(
+                        instance_name, provided_pin=registration_pin
+                    )
                 registration = await self._registration.ensure_registered(
                     discovery.phone_number_id,
                     onboarding_type,
                     credentials.access_token,
-                    registration_pin,
+                    effective_pin,
                 )
                 self._store.advance(record, MetaOnboardingState.PHONE_REGISTERED, details={"registration": registration})
                 logger.info("phone_registered", instance=instance_name, skipped=registration.get("skipped", False))
@@ -164,13 +167,21 @@ class MetaOnboardingOrchestrator:
             save_pipeline_event(stage="phone_verification", status="completed", instance=instance_name, event="PHONE_VERIFIED", component="Meta")
 
             resources, channels = await self._sync_legacy_resources(credentials, instance_name)
-            if record.completed(MetaOnboardingState.EVOLUTION_READY):
-                instance = self._resumed_instance(instance_name)
-            else:
-                instance = await self._evolution.provision(instance_name, credentials)
+            # Los numeros de WhatsApp Cloud se operan directo contra la Graph API
+            # (envio) y el webhook de Meta (recepcion); NO requieren una instancia
+            # del motor Evolution. Representamos el canal con una instancia
+            # sintetica para el contrato de la respuesta y el registro.
+            instance = {
+                "instanceName": instance_name,
+                "name": instance_name,
+                "status": "open",
+                "connectionType": "cloud",
+                "integration": "WHATSAPP-BUSINESS",
+            }
+            if not record.completed(MetaOnboardingState.EVOLUTION_READY):
                 self._store.advance(record, MetaOnboardingState.EVOLUTION_READY)
-                logger.info("evolution_created", instance=instance_name)
-                save_pipeline_event(stage="evolution_provisioning", status="completed", instance=instance_name, event="EVOLUTION_PROVISIONED", component="Evolution")
+                logger.info("cloud_channel_ready", instance=instance_name)
+                save_pipeline_event(stage="cloud_provisioning", status="completed", instance=instance_name, event="CLOUD_PROVISIONED", component="Meta")
 
             if not record.completed(MetaOnboardingState.CREDENTIALS_PERSISTED):
                 self._credentials_store.upsert_official_credentials(

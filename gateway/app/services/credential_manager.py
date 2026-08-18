@@ -193,18 +193,31 @@ class CredentialManager:
             return None
         return self._decrypt_access_token(ciphertext)
 
-    def get_or_create_registration_pin(self, instance_name: str) -> str:
+    def get_or_create_registration_pin(self, instance_name: str, provided_pin: str | None = None) -> str:
         """Return the encrypted-at-rest 2FA PIN for a Cloud phone registration.
 
-        The number is generated only after its credential record exists, so an
-        interrupted first registration can retry with exactly the same PIN.
-        PIN values intentionally never leave this method except for the
-        immediate outbound Graph API request.
+        If ``provided_pin`` is supplied (the number owner entered their existing
+        two-step-verification PIN, or chose a new one), it is validated, stored
+        and returned, overriding any previously generated value. Otherwise the
+        stored PIN is returned, or a random one is generated only after the
+        credential record exists, so an interrupted first registration can retry
+        with exactly the same PIN. PIN values intentionally never leave this
+        method except for the immediate outbound Graph API request.
         """
         payload = self._load()
         record = payload["official"].get(instance_name)
         if not isinstance(record, dict):
             raise RuntimeError("No hay credenciales oficiales para guardar el PIN de registro")
+
+        if provided_pin is not None:
+            pin = str(provided_pin).strip()
+            if len(pin) != 6 or not pin.isascii() or not pin.isdigit():
+                raise RuntimeError("El PIN debe contener exactamente seis digitos")
+            record["registrationPinCiphertext"] = self._encrypt_secret(pin)
+            record["updatedAt"] = _now_iso()
+            self._save(payload)
+            audit_event("official_registration_pin_set", instance=instance_name)
+            return pin
 
         ciphertext = record.get("registrationPinCiphertext")
         if isinstance(ciphertext, str) and ciphertext.strip():

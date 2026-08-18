@@ -107,7 +107,8 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         }
         assert calls.count(("POST", "/v23.0/waba_456/subscribed_apps")) == 1
         assert calls.count(("POST", "/v23.0/phone_123/register")) == 1
-        assert len(manager.calls) == 1
+        # Meta Cloud es independiente del motor Evolution: no se crea instancia.
+        assert len(manager.calls) == 0
         stored_credentials = (tmp_path / "credentials.json").read_text(encoding="utf-8")
         assert "secret-token" not in stored_credentials
         assert '"registrationPinCiphertext"' in stored_credentials

@@ -140,6 +140,7 @@ export function NewConnectionPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isStarting, setIsStarting] = useState(false)
   const [step, setStep] = useState<ProvisioningStep>('connecting')
+  const [registrationPin, setRegistrationPin] = useState('')
 
   const loadClient = useCallback(async () => {
     if (!clientId) return
@@ -200,7 +201,7 @@ export function NewConnectionPage() {
       setStep('creating')
       progressTimers.push(window.setTimeout(() => setStep('webhook'), 900))
       progressTimers.push(window.setTimeout(() => setStep('testing'), 2100))
-      const completed = await completeMetaSignup(connection.id, code, session, config.supports_coexistence)
+      const completed = await completeMetaSignup(connection.id, code, session, config.supports_coexistence, registrationPin)
       progressTimers.forEach(window.clearTimeout)
       setStep('testing')
       await getConnection(completed.id)
@@ -240,6 +241,7 @@ export function NewConnectionPage() {
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
     </div> : <div className="connection-provisioning">
       <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
+      {!isStarting && step === 'connecting' ? <label className="new-connection-name meta-pin-field"><span>PIN de verificación en dos pasos (6 dígitos)</span><input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /><small>Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN.</small></label> : null}
       {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()}>Continuar con WhatsApp</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p><button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button></div> : null}
     </div>}

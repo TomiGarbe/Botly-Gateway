@@ -12,6 +12,11 @@ class MetaSignupCompleteRequest(BaseModel):
     phone_number_id: str = Field(..., min_length=2)
     business_account_id: str = Field(..., min_length=2)
     session_info: dict[str, Any] = Field(default_factory=dict)
+    # PIN de verificacion en dos pasos del numero de WhatsApp. Si el numero ya
+    # tiene uno configurado, el usuario debe ingresarlo; si no tiene, elige uno
+    # nuevo (que Meta setea como su 2FA). Vacio = el backend genera uno (solo
+    # sirve para numeros sin 2FA previo).
+    registration_pin: str | None = Field(default=None, pattern=r"^\d{6}$")
 
     @model_validator(mode="after")
     def require_connection_target(self) -> "MetaSignupCompleteRequest":

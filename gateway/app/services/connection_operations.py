@@ -8,7 +8,9 @@ from urllib.parse import urlparse
 
 from app.connections import ConnectionManager, get_connection_manager
 from app.core.config import get_settings
+from app.providers.whatsapp_official import get_official_whatsapp_provider
 from app.services import instance_auth
+from app.services.credential_manager import get_credential_manager
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
 from app.services.instance_webhooks import (
     create_webhook,
@@ -203,6 +205,14 @@ class ConnectionOperationsService:
 
     async def reconnect(self, connection_id: str) -> None:
         runtime_name = self._runtime_name(connection_id)
+        # Cloud (Meta) es stateless via Graph API: no hay socket que reconectar.
+        if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
+            self._registry.update_connection_record(
+                connection_id,
+                {"last_activity_at": _now(), "updated_at": _now()},
+            )
+            save_pipeline_event(stage="connection_reconnect", status="skipped", instance=runtime_name, event="CONNECTION_RECONNECT", details={"reason": "cloud_stateless"})
+            return
         records = await self._connection_manager.list_instances()
         if not any(str(item.get("name") or item.get("instanceName") or "") == runtime_name for item in records if isinstance(item, dict)):
             raise ConnectionOperationUnavailableError("Connection is not ready to reconnect")
@@ -216,6 +226,19 @@ class ConnectionOperationsService:
     async def status(self, connection_id: str) -> dict[str, Any]:
         record = self._record(connection_id)
         runtime_name = self._runtime_name(connection_id)
+        # Numeros WhatsApp Cloud (Meta): no hay socket vivo en Evolution; el canal
+        # esta operativo mientras existan credenciales oficiales.
+        if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
+            heartbeat_at = _now()
+            self._registry.update_connection_record(
+                connection_id,
+                {"last_heartbeat_at": heartbeat_at, "updated_at": heartbeat_at},
+            )
+            return {
+                "connected": True,
+                "last_activity_at": record.get("last_activity_at"),
+                "last_heartbeat_at": heartbeat_at,
+            }
         records = await self._connection_manager.list_instances()
         runtime = next(
             (
@@ -254,7 +277,12 @@ class ConnectionOperationsService:
             details={"kind": "text", "number": clean_number},
         )
         try:
-            result = await self._connection_manager.send_text(runtime_name, clean_number, clean_text)
+            if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
+                result = await get_official_whatsapp_provider().send_text(
+                    instance_name=runtime_name, number=clean_number, text=clean_text
+                )
+            else:
+                result = await self._connection_manager.send_text(runtime_name, clean_number, clean_text)
         except Exception as exc:
             save_pipeline_event(
                 stage="send_whatsapp",

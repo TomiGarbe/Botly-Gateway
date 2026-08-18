@@ -25,7 +25,9 @@ export async function completeMetaSignup(
   code: string,
   session: EmbeddedSignupSession,
   coexistenceRequested: boolean,
+  registrationPin?: string,
 ): Promise<Connection> {
+  const trimmedPin = (registrationPin ?? '').trim()
   const payload = await gatewayRequest<Parameters<typeof toConnection>[0]>('/meta/signup/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -35,6 +37,7 @@ export async function completeMetaSignup(
       phone_number_id: session.phoneNumberId,
       business_account_id: session.businessAccountId,
       session_info: { ...session.raw, coexistenceRequested },
+      ...(trimmedPin ? { registration_pin: trimmedPin } : {}),
     }),
   })
   return toConnection(payload)

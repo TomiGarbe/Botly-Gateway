@@ -109,17 +109,10 @@ def test_meta_signup_service_exchanges_code_creates_evolution_instance_discovers
         assert ("GET", "/v23.0/debug_token") in requests
         assert ("POST", "/v23.0/waba_456/subscribed_apps") in requests
         assert ("GET", "/v23.0/phone_123") in requests
-        assert manager.calls == [
-            {
-                "instance_name": "cloud_instance",
-                "qrcode": False,
-                "token": "secret-token",
-                "phone_number_id": "phone_123",
-                "business_id": "waba_456",
-                "connection_type": "cloud",
-            }
-        ]
+        # Meta Cloud es independiente del motor Evolution: no se crea instancia.
+        assert manager.calls == []
         assert completion.instance["instanceName"] == "cloud_instance"
+        assert completion.instance["connectionType"] == "cloud"
         assert len(completion.resources) == 1
         assert len(completion.channels) == 1
         assert completion.channels[0].integration_id == "whatsapp.official.evolution"
