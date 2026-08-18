@@ -65,6 +65,12 @@ def _validate_instance_name(raw: str) -> str:
     return value
 
 
+def _require_instance_token_scope(request: Request, instance_name: str) -> None:
+    authenticated_instance = getattr(request.state, "auth_instance", None)
+    if authenticated_instance and authenticated_instance != instance_name:
+        raise HTTPException(status_code=403, detail="Token no autorizado para esta instancia")
+
+
 async def _upload_file_to_base64(file: UploadFile, max_bytes: int) -> tuple[str, int]:
     size = 0
     encoded = StringIO()
@@ -184,6 +190,7 @@ def _is_official_instance(instance_name: str) -> bool:
 
 async def _send_message_unified(instance_name: str, request: Request):
     instance_name = _validate_instance_name(instance_name)
+    _require_instance_token_scope(request, instance_name)
     settings = get_settings()
     content_type = str(request.headers.get("content-type") or "").lower()
 

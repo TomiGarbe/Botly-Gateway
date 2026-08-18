@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
 from app.services.google_auth import get_auth_service
+from app.services.instance_auth import authenticate_instance_token
 
 
 _PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta"}
@@ -37,6 +38,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if expected_key and provided_key and hmac.compare_digest(provided_key, expected_key):
             request.state.auth_method = "gateway_api_key"
             return await call_next(request)
+
+        # Instance API keys are the credentials Botly stores per Evolution
+        # channel.  They intentionally have a narrower scope than the global
+        # Gateway key: only the unified message endpoint accepts them.
+        instance_auth = authenticate_instance_token(provided_key)
+        if instance_auth and request.url.path.startswith("/messages/"):
+            request.state.auth_method = "instance_api_key"
+            request.state.auth_instance = instance_auth["instance"]
+            return await call_next(request)
+
         user = get_auth_service().current_user(request.cookies.get(_COOKIE, ""))
         if user is None:
             return JSONResponse(status_code=401, content={"detail": "Iniciá sesión para continuar."})

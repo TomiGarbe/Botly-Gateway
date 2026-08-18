@@ -53,7 +53,7 @@ Evolution API queda disponible en `http://localhost:8080` (o el puerto de
 | `EVOLUTION_API_KEY` | Clave global de Evolution API. Generá con `openssl rand -hex 32` |
 | `POSTGRES_PASSWORD` | Contraseña de PostgreSQL. Generá con `openssl rand -hex 16` |
 | `REDIS_PASSWORD` | Contraseña de Redis. Generá con `openssl rand -hex 16` |
-| `GATEWAY_API_KEY` | Clave que usa el bot para autenticarse al gateway |
+| `GATEWAY_API_KEY` | Clave global para administraciÃ³n y rutas privilegiadas del Gateway |
 | `MAX_EVENT_AGE_SECONDS` | Edad máxima aceptable de eventos entrantes antes de descartarlos (`0` deshabilita, recomendado `600`) |
 
 Las demás variables tienen valores por defecto funcionales para desarrollo local.
