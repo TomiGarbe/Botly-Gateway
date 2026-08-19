@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     allowed_google_users: str = ""
     auth_sessions_path: str = "/tmp/botly_gateway_sessions.json"
     auth_session_ttl_seconds: int = 28800
+    gateway_users_database_url: str = ""
+    initial_admin_email: str = ""
+    initial_admin_password: str = ""
+    initial_admin_name: str = "Botly Administrator"
+    meta_review_email: str = ""
+    meta_review_password: str = ""
+    meta_review_name: str = "Meta Review"
+    # Comma-separated email=role assignments. Roles are evaluated on each request.
+    authorization_role_assignments_raw: str = Field(default="", validation_alias="AUTHORIZATION_ROLE_ASSIGNMENTS")
     gateway_port: int = 9000
     # PUBLIC_BASE_URL se conserva como alias de lectura para no interrumpir
     # despliegues existentes durante la migracion del dominio.
@@ -136,6 +145,15 @@ class Settings(BaseSettings):
     @property
     def allowed_google_users_list(self) -> set[str]:
         return {item.strip().lower() for item in self.allowed_google_users.split(",") if item.strip()}
+
+    @property
+    def authorization_role_assignments(self) -> dict[str, str]:
+        assignments: dict[str, str] = {}
+        for item in self.authorization_role_assignments_raw.split(","):
+            email, separator, role = item.partition("=")
+            if separator and email.strip() and role.strip():
+                assignments[email.strip().lower()] = role.strip().lower()
+        return assignments
 
     def is_cors_origin_allowed(self, origin: str | None) -> bool:
         value = str(origin or "").strip().rstrip("/")

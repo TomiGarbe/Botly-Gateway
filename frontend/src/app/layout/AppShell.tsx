@@ -23,6 +23,7 @@ export function AppShell() {
   const { pathname } = useLocation()
   const { user, signOut } = useAuth()
   const breadcrumbs = breadcrumbsFor(pathname)
+  const isReviewer = user?.role === 'meta_reviewer'
 
   return (
     <div className="app-shell">
@@ -32,7 +33,7 @@ export function AppShell() {
           <span>Botly <strong>Gateway</strong></span>
         </div>
         <nav className="app-navigation">
-          {navigation.map(({ to, label, icon: Icon }) => (
+          {navigation.filter((item) => !isReviewer || item.to === '/clients').map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}>
               <Icon size={17} aria-hidden="true" />
               {label}

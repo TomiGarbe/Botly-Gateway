@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/app/providers/AuthProvider'
 
@@ -32,8 +32,11 @@ function loadGoogleAccounts(): Promise<GoogleAccounts> {
 
 export function LoginPage() {
   const host = useRef<HTMLDivElement>(null)
-  const { user, googleClientId, isLoading, accessDenied, signInWithGoogle } = useAuth()
+  const { user, googleClientId, isLoading, accessDenied, signInWithGoogle, signInWithEmail } = useAuth()
   const [isGoogleReady, setIsGoogleReady] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -47,12 +50,23 @@ export function LoginPage() {
     return () => { active = false }
   }, [googleClientId, signInWithGoogle])
 
-  if (user) return <Navigate to="/dashboard" replace />
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(null)
+    try { await signInWithEmail(email, password) } catch { setError('Email o contraseña incorrectos.') }
+  }
+
+  if (user) return <Navigate to={user.role === 'meta_reviewer' ? '/clients' : '/dashboard'} replace />
   if (accessDenied) return <Navigate to="/access-denied" replace />
   return <main className="auth-page">
     <section className="auth-login" aria-label="Acceso a Botly Gateway">
       <img className="auth-logo" src="/logo-gateway-mark.svg" alt="" />
       <h1>Botly Gateway</h1>
+      <form className="auth-password-form" onSubmit={(event) => void submit(event)}>
+        <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
+        <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
+        <button type="submit" disabled={isLoading}>Ingresar</button>
+      </form>
+      {error ? <p className="auth-unavailable" role="alert">{error}</p> : null}
       <div ref={host} className="auth-google-button" aria-label="Continuar con Google" />
       {isLoading || (!isGoogleReady && !!googleClientId) ? <LoaderCircle size={18} className="auth-loading animate-spin" aria-label="Cargando" /> : null}
       {!googleClientId ? <span className="auth-unavailable">Google no está configurado.</span> : null}

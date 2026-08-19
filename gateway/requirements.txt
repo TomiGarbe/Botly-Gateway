@@ -7,3 +7,4 @@ pydantic-settings==2.6.1
 structlog==24.4.0
 slowapi==0.1.9
 python-multipart==0.0.12
+psycopg[binary]==3.2.3

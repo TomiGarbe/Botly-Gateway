@@ -20,6 +20,7 @@ from app.services.instances_contract import normalize_instance_list
 from app.services.automations import AutomationScheduler
 from app.services.operations import OperationWorker
 from app.services.connections import get_connection_service
+from app.services.users import bootstrap_initial_admin, bootstrap_meta_reviewer, ensure_meta_review_business
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -87,6 +88,9 @@ async def lifespan(app: FastAPI):
         operations_path=settings.operations_path,
         media_cache_dir=settings.media_cache_dir,
     )
+    bootstrap_initial_admin()
+    ensure_meta_review_business()
+    bootstrap_meta_reviewer()
     migrated_connections = await _connection_service.migrate_legacy_connections()
     logger.info("connection_domain_migration_complete", inserted=migrated_connections, storage_path=settings.connection_registry_path)
     logger.info("[BOOT][WEBHOOKS] instance webhook registry bootstrap", storage_path=settings.instance_webhooks_path)

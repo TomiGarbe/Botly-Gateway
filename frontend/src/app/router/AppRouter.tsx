@@ -1,3 +1,4 @@
+import { type ReactElement } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AppShell } from '../layout/AppShell'
 import { AlertsPage } from '../../features/alerts/pages/AlertsPage'
@@ -18,6 +19,11 @@ function RequireAuth() {
   return user ? <Outlet /> : <Navigate to="/login" replace />
 }
 
+function ReviewerRoute({ children }: { children: ReactElement }) {
+  const { user } = useAuth()
+  return user?.role === 'meta_reviewer' ? <Navigate to="/clients" replace /> : children
+}
+
 export function AppRouter() {
   return (
     <Routes>
@@ -26,13 +32,13 @@ export function AppRouter() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="dashboard" element={<ReviewerRoute><DashboardPage /></ReviewerRoute>} />
           <Route path="clients" element={<ClientsPage />} />
           <Route path="clients/:clientId" element={<ClientDetailPage />} />
           <Route path="clients/:clientId/connections/new" element={<NewConnectionPage />} />
           <Route path="connections/:connectionId" element={<ConnectionDetailPage />} />
-          <Route path="alerts" element={<AlertsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="alerts" element={<ReviewerRoute><AlertsPage /></ReviewerRoute>} />
+          <Route path="settings" element={<ReviewerRoute><SettingsPage /></ReviewerRoute>} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

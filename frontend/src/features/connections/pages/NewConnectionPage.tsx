@@ -9,6 +9,8 @@ import { LoadingState } from '@/shared/components/LoadingState'
 import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { createConnection, getConnection, getConnectionQr } from '../api/connectionsApi'
 import { completeMetaSignup, getMetaSignupConfig } from '../api/metaSignupApi'
+import { gatewayRequest } from '@/shared/lib/gatewayClient'
+import { useAuth } from '@/app/providers/AuthProvider'
 
 type ProviderId = 'meta' | 'evolution'
 type EmbeddedSession = { phoneNumberId: string; businessAccountId: string; raw: Record<string, unknown> }
@@ -141,20 +143,30 @@ export function NewConnectionPage() {
   const [isStarting, setIsStarting] = useState(false)
   const [step, setStep] = useState<ProvisioningStep>('connecting')
   const [registrationPin, setRegistrationPin] = useState('')
+  const { user } = useAuth()
 
   const loadClient = useCallback(async () => {
     if (!clientId) return
     try {
-      const [nextClient, nextChannels, nextProviders] = await Promise.all([getClient(clientId), getGatewayChannels(), getGatewayProviders()])
+      const reviewerCatalog = user?.role === 'meta_reviewer'
+        ? gatewayRequest<{ items: Array<{ id: string; methods: Array<{ id: string }> }> }>('/channels/')
+        : null
+      const [nextClient, nextChannels, nextProviders, catalog] = await Promise.all([getClient(clientId), reviewerCatalog ? Promise.resolve({}) : getGatewayChannels(), reviewerCatalog ? Promise.resolve({}) : getGatewayProviders(), reviewerCatalog || Promise.resolve(null)])
       setClient(nextClient)
-      setChannels(nextChannels)
-      setProviders(nextProviders)
+      if (catalog) {
+        const whatsapp = catalog.items.find((item) => item.id === 'whatsapp')
+        setChannels({ whatsapp: { name: 'WhatsApp', description: '', icon: 'message-circle', implemented: true, enabled: Boolean(whatsapp) } })
+        setProviders({
+          meta: { name: 'Meta', description: '', icon: 'server', implemented: true, enabled: Boolean(whatsapp?.methods.some((method) => method.id === 'official')) },
+          evolution: { name: 'Evolution', description: '', icon: 'server', implemented: true, enabled: Boolean(whatsapp?.methods.some((method) => method.id === 'web')) },
+        })
+      } else { setChannels(nextChannels); setProviders(nextProviders) }
     } catch {
       setError('No pudimos abrir este cliente. Volvé a intentarlo desde Clientes.')
     } finally {
       setIsLoading(false)
     }
-  }, [clientId])
+  }, [clientId, user?.role])
 
   useEffect(() => { void loadClient() }, [loadClient])
 

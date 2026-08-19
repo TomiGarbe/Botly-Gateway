@@ -81,7 +81,7 @@ class CreateConnectionRequest(BaseModel):
 
     client_id: str = Field(..., min_length=1, max_length=128)
     channel: str = Field(..., min_length=1, max_length=64)
-    name: str = Field(..., min_length=1, max_length=160)
+    name: str = Field(default="WhatsApp", min_length=1, max_length=160)
     provider: Literal["meta", "evolution"] = "meta"
 
 

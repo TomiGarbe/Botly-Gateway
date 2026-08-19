@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.logging import get_logger
 from app.models.meta import MetaSignupCompleteRequest, MetaSignupConfigResponse
@@ -11,23 +11,25 @@ from app.services.connections import ConnectionNotFoundError, get_connection_ser
 from app.services.instances_contract import normalize_instance
 from app.services.meta import get_meta_onboarding_orchestrator
 from app.platforms.meta import MetaPlatformError
+from app.services.authorization import require_reviewer_connection_access
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/meta/signup", tags=["meta-signup"])
 
 
 @router.get("/config", response_model=MetaSignupConfigResponse)
-async def get_signup_config():
+async def get_signup_config(request: Request):
     return get_meta_onboarding_orchestrator().public_config()
 
 
 @router.post("/complete", status_code=status.HTTP_201_CREATED)
-async def complete_signup(body: MetaSignupCompleteRequest):
+async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
     orchestrator = get_meta_onboarding_orchestrator()
     connection_service = get_connection_service()
     if body.connection_id:
         try:
             instance_name = connection_service.connection_runtime_name(body.connection_id)
+            require_reviewer_connection_access(request, await connection_service.get_connection(body.connection_id))
         except ConnectionNotFoundError:
             raise HTTPException(status_code=404, detail="Connection not found")
     else:
@@ -98,7 +100,11 @@ async def complete_signup(body: MetaSignupCompleteRequest):
 
 
 @router.get("/onboarding/{instance_name}")
-async def onboarding_status(instance_name: str):
+async def onboarding_status(instance_name: str, request: Request):
+    try:
+        require_reviewer_connection_access(request, await get_connection_service().get_connection_by_runtime_name(instance_name))
+    except ConnectionNotFoundError:
+        raise HTTPException(status_code=404, detail="No existe conexión para este onboarding")
     result = get_meta_onboarding_orchestrator().status(instance_name)
     if result is None:
         raise HTTPException(status_code=404, detail="No existe estado de onboarding para esta instancia")
