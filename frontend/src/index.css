@@ -50,13 +50,29 @@
   .page-placeholder h2 { @apply mb-2 mt-3 text-2xl font-semibold text-zinc-100; }
   .page-placeholder p { @apply m-0 text-sm leading-6 text-zinc-400; }
   .page-placeholder span { @apply mt-5 inline-block font-mono text-xs text-zinc-500; }
-  .auth-page { @apply flex min-h-screen items-center justify-center bg-zinc-950 px-6; }
-  .auth-login, .auth-denied { @apply flex w-full max-w-sm flex-col items-center text-center; }
-  .auth-logo { @apply h-12 w-12; }
-  .auth-login h1, .auth-denied h1 { @apply mb-0 mt-5 text-xl font-semibold tracking-tight text-zinc-100; }
-  .auth-google-button { @apply mt-8 min-h-11; }
-  .auth-loading { @apply mt-4 text-zinc-500; }
-  .auth-unavailable { @apply mt-4 text-sm text-zinc-500; }
+  .auth-page { @apply relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950 px-5 py-8; background-image: radial-gradient(circle at 50% 0%, rgba(63, 63, 70, .24), transparent 38rem); }
+  .auth-page::before { content: ''; @apply pointer-events-none absolute left-1/2 top-1/2 h-[32rem] w-[32rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-zinc-800/30; }
+  .auth-login { @apply relative z-10 flex w-full max-w-md flex-col rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 text-center shadow-2xl shadow-black/30 backdrop-blur sm:p-8; }
+  .auth-denied { @apply flex w-full max-w-sm flex-col items-center text-center; }
+  .auth-brand { @apply flex flex-col items-center; }
+  .auth-logo-frame { @apply flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-700/80 bg-zinc-800/70 shadow-inner shadow-white/[.03]; }
+  .auth-logo { @apply h-8 w-8; }
+  .auth-eyebrow { @apply mt-5 text-[11px] font-semibold tracking-[.22em] text-zinc-500; }
+  .auth-login h1, .auth-denied h1 { @apply mb-0 mt-3 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .auth-brand p { @apply mb-0 mt-2 max-w-xs text-sm leading-6 text-zinc-400; }
+  .auth-password-form { @apply mt-7 grid w-full gap-4 text-left; }
+  .auth-field { @apply grid gap-2; }
+  .auth-field label { @apply text-sm font-medium text-zinc-300; }
+  .auth-field input { @apply min-h-11 w-full border-zinc-700 bg-zinc-950/80 transition-colors placeholder:text-zinc-600 hover:border-zinc-600 focus:border-zinc-500; }
+  .auth-submit { @apply mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 text-sm font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60; }
+  .auth-error { @apply mb-0 mt-4 w-full rounded-lg border border-red-900/70 bg-red-950/30 px-3 py-2.5 text-left text-sm text-red-300; }
+  .auth-divider { @apply mt-6 flex w-full items-center gap-3 text-xs text-zinc-600; }
+  .auth-divider::before, .auth-divider::after { content: ''; @apply h-px flex-1 bg-zinc-800; }
+  .auth-google-area { @apply mt-4 flex min-h-11 w-full flex-col items-center justify-center; }
+  .auth-google-button { @apply min-h-11; }
+  .auth-loading { @apply mt-3 text-zinc-500; }
+  .auth-unavailable { @apply mt-5 text-sm text-zinc-500; }
+  .auth-private { @apply mb-0 mt-7 text-xs text-zinc-600; }
   .auth-denied > svg { @apply text-red-300; }
   .auth-denied p { @apply mb-0 mt-3 text-sm leading-6 text-zinc-400; }
   .auth-denied a { @apply mt-6 text-sm font-medium text-zinc-200 underline underline-offset-4 hover:text-white; }

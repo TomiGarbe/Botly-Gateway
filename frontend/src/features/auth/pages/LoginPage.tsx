@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react'
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/app/providers/AuthProvider'
 
@@ -51,25 +51,49 @@ export function LoginPage() {
   }, [googleClientId, signInWithGoogle])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(null)
+    event.preventDefault()
+    setError(null)
     try { await signInWithEmail(email, password) } catch { setError('Email o contraseña incorrectos.') }
   }
 
   if (user) return <Navigate to={user.role === 'meta_reviewer' ? '/clients' : '/dashboard'} replace />
   if (accessDenied) return <Navigate to="/access-denied" replace />
+
   return <main className="auth-page">
     <section className="auth-login" aria-label="Acceso a Botly Gateway">
-      <img className="auth-logo" src="/logo-gateway-mark.svg" alt="" />
-      <h1>Botly Gateway</h1>
+      <div className="auth-brand">
+        <div className="auth-logo-frame">
+          <img className="auth-logo" src="/logo-gateway-mark.svg" alt="" />
+        </div>
+        <span className="auth-eyebrow">BOTLY · GATEWAY</span>
+        <h1>Ingresá a tu cuenta</h1>
+        <p>Gestioná tus conexiones de WhatsApp desde un solo lugar.</p>
+      </div>
+
       <form className="auth-password-form" onSubmit={(event) => void submit(event)}>
-        <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-        <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>
-        <button type="submit" disabled={isLoading}>Ingresar</button>
+        <div className="auth-field">
+          <label htmlFor="login-email">Email</label>
+          <input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="tu@email.com" required />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="login-password">Contraseña</label>
+          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="••••••••" required />
+        </div>
+        <button className="auth-submit" type="submit" disabled={isLoading}>
+          {isLoading ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : null}
+          <span>{isLoading ? 'Ingresando…' : 'Ingresar'}</span>
+        </button>
       </form>
-      {error ? <p className="auth-unavailable" role="alert">{error}</p> : null}
-      <div ref={host} className="auth-google-button" aria-label="Continuar con Google" />
-      {isLoading || (!isGoogleReady && !!googleClientId) ? <LoaderCircle size={18} className="auth-loading animate-spin" aria-label="Cargando" /> : null}
-      {!googleClientId ? <span className="auth-unavailable">Google no está configurado.</span> : null}
+
+      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      {googleClientId ? <>
+        <div className="auth-divider" aria-hidden="true"><span>o continuar con</span></div>
+        <div className="auth-google-area">
+          <div ref={host} className="auth-google-button" aria-label="Continuar con Google" />
+          {!isGoogleReady && !isLoading ? <LoaderCircle size={18} className="auth-loading animate-spin" aria-label="Cargando Google" /> : null}
+        </div>
+      </> : <p className="auth-unavailable">Google no está configurado.</p>}
+      <p className="auth-private">Acceso privado · no hay registro público</p>
     </section>
   </main>
 }
