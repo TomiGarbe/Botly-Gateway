@@ -208,6 +208,13 @@ class ConnectionService:
             raise ConnectionClientNotFoundError(client.id)
         return self._stored_connection(record)
 
+    async def get_connection_by_runtime_name(self, instance_name: str) -> Connection:
+        """Resolve a legacy runtime name through the product ownership registry."""
+        for connection in await self.list_connections():
+            if self._runtime_name(self._registry.connection_record_by_id(connection.id) or {}) == instance_name:
+                return connection
+        raise ConnectionNotFoundError(instance_name)
+
     async def start_evolution_connection(self, connection_id: str) -> Connection:
         record = self._registry.connection_record_by_id(connection_id)
         if record is None:

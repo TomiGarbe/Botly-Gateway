@@ -8,10 +8,13 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 
 
 _LOCK = threading.Lock()
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+_LEGACY_CONNECTION_REGISTRY_PATH = Path("/tmp/botly_connection_registry.json")
+logger = get_logger(__name__)
 
 
 class ConnectionRegistry:
@@ -23,13 +26,16 @@ class ConnectionRegistry:
     """
 
     def __init__(self, path: str | Path | None = None) -> None:
+        self._allow_legacy_migration = path is None
         self._path = Path(path) if path is not None else Path(get_settings().connection_registry_path)
+        self._migrate_legacy_registry_if_needed()
 
     @staticmethod
     def _empty() -> dict[str, Any]:
-        return {"schema_version": _SCHEMA_VERSION, "clients": {}, "connections": {}}
+        return {"schema_version": _SCHEMA_VERSION, "clients": {}, "connections": {}, "setups": {}}
 
     def _read_unlocked(self) -> dict[str, Any]:
+        self._ensure_private_storage_unlocked()
         if not self._path.exists():
             return self._empty()
         try:
@@ -40,13 +46,60 @@ class ConnectionRegistry:
             return self._empty()
         clients = raw.get("clients") if isinstance(raw.get("clients"), dict) else {}
         connections = raw.get("connections") if isinstance(raw.get("connections"), dict) else {}
-        return {"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections}
+        setups = raw.get("setups") if isinstance(raw.get("setups"), dict) else {}
+        return {"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": setups}
 
     def _write_unlocked(self, store: dict[str, Any]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_private_storage_unlocked()
         temporary = self._path.with_suffix(f"{self._path.suffix}.tmp")
         temporary.write_text(json.dumps(store, ensure_ascii=True, indent=2, sort_keys=True), encoding="utf-8")
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
         os.replace(temporary, self._path)
+
+    def _ensure_private_storage_unlocked(self) -> None:
+        """Keep the durable registry private even when its directory pre-exists."""
+        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            os.chmod(self._path.parent, 0o700)
+        except OSError:
+            pass
+        if self._path.exists():
+            try:
+                os.chmod(self._path, 0o600)
+            except OSError:
+                pass
+
+    def _migrate_legacy_registry_if_needed(self) -> None:
+        """Copy the pre-persistence registry once without deleting its source.
+
+        Earlier Gateway images used /tmp for this store.  On the first startup
+        with a configured persistent location, preserve that data by copying it
+        only when the destination does not exist.  An unreadable or malformed
+        legacy file keeps the existing empty/corrupt-file behaviour: it is left
+        untouched and is not promoted to the durable location.
+        """
+        legacy_path = _LEGACY_CONNECTION_REGISTRY_PATH
+        if not self._allow_legacy_migration or self._path == legacy_path or self._path.exists() or not legacy_path.exists():
+            return
+        try:
+            raw = json.loads(legacy_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("connection_registry_legacy_migration_skipped", source=str(legacy_path), error=str(exc))
+            return
+        if not isinstance(raw, dict):
+            logger.warning("connection_registry_legacy_migration_skipped", source=str(legacy_path), error="invalid_store")
+            return
+
+        clients = raw.get("clients") if isinstance(raw.get("clients"), dict) else {}
+        connections = raw.get("connections") if isinstance(raw.get("connections"), dict) else {}
+        with _LOCK:
+            if self._path.exists():
+                return
+            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": {}})
+        logger.info("connection_registry_legacy_migrated", source=str(legacy_path), destination=str(self._path))
 
     def snapshot(self) -> dict[str, Any]:
         with _LOCK:
@@ -56,8 +109,9 @@ class ConnectionRegistry:
         """Administrative rollback primitive; no runtime/provider data is touched."""
         clients = store.get("clients") if isinstance(store.get("clients"), dict) else {}
         connections = store.get("connections") if isinstance(store.get("connections"), dict) else {}
+        setups = store.get("setups") if isinstance(store.get("setups"), dict) else {}
         with _LOCK:
-            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections})
+            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": setups})
 
     def list_clients(self) -> list[dict[str, Any]]:
         with _LOCK:
@@ -88,6 +142,56 @@ class ConnectionRegistry:
     def connection_records(self) -> list[dict[str, Any]]:
         with _LOCK:
             return [deepcopy(item) for item in self._read_unlocked()["connections"].values() if isinstance(item, dict)]
+
+    def setup_record_by_id(self, setup_id: str) -> dict[str, Any] | None:
+        with _LOCK:
+            item = self._read_unlocked()["setups"].get(setup_id)
+            return deepcopy(item) if isinstance(item, dict) else None
+
+    def setup_record_by_idempotency_key(self, client_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        with _LOCK:
+            for item in self._read_unlocked()["setups"].values():
+                if isinstance(item, dict) and str(item.get("client_id")) == client_id and str(item.get("idempotency_key") or "") == idempotency_key:
+                    return deepcopy(item)
+            return None
+
+    def save_setup_record_for_client(self, setup: dict[str, Any]) -> dict[str, Any] | None:
+        client_id = str(setup.get("client_id") or "")
+        setup_id = str(setup.get("id") or "")
+        if not client_id or not setup_id:
+            return None
+        with _LOCK:
+            store = self._read_unlocked()
+            if client_id not in store["clients"]:
+                return None
+            store["setups"][setup_id] = deepcopy(setup)
+            self._write_unlocked(store)
+        return deepcopy(setup)
+
+    def update_setup_record(self, setup_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        with _LOCK:
+            store = self._read_unlocked()
+            record = store["setups"].get(setup_id)
+            if not isinstance(record, dict):
+                return None
+            record.update(deepcopy(changes))
+            store["setups"][setup_id] = record
+            self._write_unlocked(store)
+            return deepcopy(record)
+
+    def promote_setup_to_connection(self, setup_id: str, connection: dict[str, Any], setup_changes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Atomically publish a ready setup and its operational connection."""
+        legacy_name = str(connection.get("legacy_name") or "")
+        with _LOCK:
+            store = self._read_unlocked()
+            setup = store["setups"].get(setup_id)
+            if not isinstance(setup, dict) or not legacy_name or setup.get("client_id") not in store["clients"]:
+                return None
+            setup.update(deepcopy(setup_changes))
+            store["setups"][setup_id] = setup
+            store["connections"][legacy_name] = deepcopy(connection)
+            self._write_unlocked(store)
+            return deepcopy(setup), deepcopy(connection)
 
     def connection_record_by_id(self, connection_id: str) -> dict[str, Any] | None:
         with _LOCK:

@@ -14,18 +14,24 @@ from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import alerts, auth, automations, channels, clients, connections, dashboard, instances, messages, operations, webhooks, media, instance_webhooks, meta_signup, meta_webhook, provisioning, settings as settings_router
+from app.routers import alerts, analytics, auth, automations, channels, clients, connections, connection_setups, dashboard, instances, messages, operations, provider_deliveries, webhooks, webhook_center, media, instance_webhooks, meta_signup, meta_webhook, provisioning, settings as settings_router
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
 from app.services.automations import AutomationScheduler
 from app.services.operations import OperationWorker
 from app.services.connections import get_connection_service
+from app.services.connection_setups import get_connection_setup_service
+from app.services.connection_setup_cleanup import ConnectionSetupCleanupWorker
+from app.services.instance_webhooks import protect_stored_webhook_secrets
+from app.services.users import bootstrap_initial_admin, bootstrap_meta_reviewer, ensure_meta_review_business
 
 settings = get_settings()
 setup_logging(settings.log_level)
 logger = get_logger(__name__)
 _connection_manager = get_connection_manager()
 _connection_service = get_connection_service()
+_connection_setup_service = get_connection_setup_service()
+_connection_setup_cleanup_worker = ConnectionSetupCleanupWorker()
 
 
 async def _automation_instances() -> list[dict]:
@@ -87,8 +93,15 @@ async def lifespan(app: FastAPI):
         operations_path=settings.operations_path,
         media_cache_dir=settings.media_cache_dir,
     )
+    bootstrap_initial_admin()
+    ensure_meta_review_business()
+    bootstrap_meta_reviewer()
     migrated_connections = await _connection_service.migrate_legacy_connections()
     logger.info("connection_domain_migration_complete", inserted=migrated_connections, storage_path=settings.connection_registry_path)
+    expired_setups = _connection_setup_service.expire_active()
+    logger.info("connection_setup_expiration_complete", expired=expired_setups)
+    protected_webhooks = protect_stored_webhook_secrets()
+    logger.info("instance_webhook_secret_protection_complete", migrated=protected_webhooks, storage_path=settings.instance_webhooks_path)
     logger.info("[BOOT][WEBHOOKS] instance webhook registry bootstrap", storage_path=settings.instance_webhooks_path)
     await _connection_manager.open_default()
     try:
@@ -98,7 +111,9 @@ async def lifespan(app: FastAPI):
         raise
     _automation_scheduler.start()
     _operation_worker.start()
+    _connection_setup_cleanup_worker.start()
     yield
+    await _connection_setup_cleanup_worker.stop()
     await _operation_worker.stop()
     await _automation_scheduler.stop()
     await webhooks.shutdown_forward_workers()
@@ -125,13 +140,17 @@ api.include_router(instances.router)
 api.include_router(auth.router)
 api.include_router(clients.router)
 api.include_router(connections.router)
+api.include_router(connection_setups.router)
 api.include_router(dashboard.router)
 api.include_router(channels.router)
 api.include_router(settings_router.router)
 api.include_router(provisioning.router)
 api.include_router(messages.router)
+api.include_router(provider_deliveries.router)
+api.include_router(analytics.router)
 api.include_router(webhooks.router)
 api.include_router(meta_webhook.router)
+api.include_router(webhook_center.router)
 api.include_router(media.router)
 api.include_router(instance_webhooks.router)
 api.include_router(meta_signup.router)

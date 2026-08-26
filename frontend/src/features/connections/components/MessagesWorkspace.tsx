@@ -1,5 +1,6 @@
 import { Check, CheckCheck, FileText, Image, MessageCircle, Mic, RefreshCw, Send, Video, X } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { MessageKind, TimelineMessage } from '../api/messagesApi'
 import { listTimelineMessages, sendWorkspaceMessage } from '../api/messagesApi'
 import { EmptyState } from '@/shared/components/EmptyState'
@@ -43,7 +44,8 @@ function MessageStatus({ status }: { status: string | null }) {
   return <span className={`workspace-message-status ${isError ? 'is-error' : 'is-success'}`}><Icon size={13} aria-hidden="true" /> {label}</span>
 }
 
-export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null }) {
+export function MessagesWorkspace({ runtimeName, connectionId, messageId }: { runtimeName: string | null; connectionId?: string; messageId?: string | null }) {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<TimelineMessage[]>([])
   const [number, setNumber] = useState('')
   const [text, setText] = useState('')
@@ -79,9 +81,8 @@ export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null 
 
   const visibleMessages = useMemo(() => {
     const target = phone(number)
-    if (!target) return messages
-    return messages.filter((message) => phone(message.sender) === target || phone(message.recipient) === target)
-  }, [messages, number])
+    return messages.filter((message) => (!target || phone(message.sender) === target || phone(message.recipient) === target) && (!messageId || message.messageId === messageId))
+  }, [messages, messageId, number])
 
   function chooseFile(next: File | null) {
     setError(null)
@@ -135,7 +136,7 @@ export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null 
 
   return (
     <section className="connection-section workspace-messages">
-      <div className="connection-section-heading"><div><h3>Mensajes</h3><p>Verificá el envío, la recepción y los estados de esta conexión.</p></div><button type="button" className="client-button-secondary" onClick={() => void load()} disabled={isLoading}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div>
+      <div className="connection-section-heading"><div><h3>Mensajes</h3><p>Verificá el envío, la recepción y los estados de esta conexión.</p></div><div className="connection-inline-actions workspace-message-actions">{connectionId ? <button type="button" className="client-button-secondary" onClick={() => navigate(`/connections/${connectionId}/message-logs`)}>Logs del provider</button> : null}<button type="button" className="client-button-secondary" onClick={() => void load()} disabled={isLoading}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
       <Toast message={error} tone="error" onDismiss={() => setError(null)} />
       <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
       <div className="workspace-thread" aria-live="polite">
@@ -146,7 +147,7 @@ export function MessagesWorkspace({ runtimeName }: { runtimeName: string | null 
             {message.media ? <div className="workspace-media-summary">{typeIcon(message.kind)}<span>{message.media.fileName || (message.kind === 'document' ? 'Documento' : `Archivo ${message.kind}`)}</span></div> : null}
             {message.text ? <p>{message.text}</p> : !message.media ? <p>Mensaje sin contenido legible.</p> : null}
           </div>
-          <footer><time dateTime={new Date(message.timestamp).toISOString()}>{time(message.timestamp)}</time>{message.direction === 'outbound' ? <MessageStatus status={message.status} /> : <span className="workspace-message-type">{message.kind}</span>}</footer>
+          <footer><time dateTime={new Date(message.timestamp).toISOString()}>{time(message.timestamp)}</time>{message.direction === 'outbound' ? <MessageStatus status={message.status} /> : <span className="workspace-message-type">{message.kind}</span>}{connectionId && message.messageId ? <button type="button" className="workspace-message-log-link" onClick={() => navigate(`/connections/${connectionId}/message-logs?message_id=${encodeURIComponent(message.messageId || '')}`)}>Ver logs del proveedor</button> : null}</footer>
         </article>)}
       </div>
       <form className="workspace-composer" onSubmit={submit}>

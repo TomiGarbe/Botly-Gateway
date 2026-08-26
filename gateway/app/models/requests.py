@@ -81,8 +81,12 @@ class CreateConnectionRequest(BaseModel):
 
     client_id: str = Field(..., min_length=1, max_length=128)
     channel: str = Field(..., min_length=1, max_length=64)
-    name: str = Field(..., min_length=1, max_length=160)
+    name: str = Field(default="WhatsApp", min_length=1, max_length=160)
     provider: Literal["meta", "evolution"] = "meta"
+
+
+class CreateConnectionSetupRequest(CreateConnectionRequest):
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ChannelSettingsUpdate(BaseModel):
@@ -242,3 +246,26 @@ class WebhookConfigRequest(BaseModel):
 
 class WebhookEnabledRequest(BaseModel):
     enabled: bool
+
+
+class WebhookCenterCreateRequest(WebhookConfigRequest):
+    connection_id: str = Field(..., min_length=1, max_length=128)
+
+
+class WebhookCenterPatchRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    url: str | None = Field(default=None, min_length=8, max_length=2048)
+    enabled: bool | None = None
+    authType: WebhookAuthType | None = None
+    authConfig: dict[str, str] | None = None
+    customHeaders: dict[str, str] | None = None
+    eventFilters: dict[str, bool] | None = None
+
+
+class ManualWebhookActionRequest(BaseModel):
+    """Optional operator context for a manual delivery action; never request identity."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    reason: str | None = Field(default=None, max_length=500)
+    confirm_current_target: bool = Field(default=False, alias="confirmCurrentTarget")

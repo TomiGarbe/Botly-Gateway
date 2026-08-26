@@ -7,7 +7,7 @@ import os
 import secrets
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.core.config import Settings, get_settings
+from app.services.authorization import role_for_email
+from app.services.users import META_REVIEW_BUSINESS_ID, GatewayUser, UserRepository, get_user_repository, password_matches
 
 
 _GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
@@ -39,6 +41,8 @@ class AuthenticatedUser:
     name: str
     email: str
     avatar_url: str | None = None
+    role: str = "operator"
+    business_id: str | None = None
 
     def public_dict(self) -> dict[str, str | None]:
         return asdict(self)
@@ -188,6 +192,7 @@ class SessionStore:
                 return None
             return AuthenticatedUser(
                 id=str(user["id"]), name=str(user.get("name") or user["email"]), email=str(user["email"]), avatar_url=str(user["avatar_url"]) if user.get("avatar_url") else None,
+                role=role_for_email(str(user["email"])),
             )
 
     def delete(self, token: str) -> None:
@@ -196,6 +201,16 @@ class SessionStore:
         with _LOCK:
             payload = self._read_unlocked()
             if payload["sessions"].pop(self._hash(token), None) is not None:
+                self._write_unlocked(payload)
+
+    def delete_user(self, email: str) -> None:
+        normalized = email.strip().lower()
+        with _LOCK:
+            payload = self._read_unlocked()
+            expired = [key for key, record in payload["sessions"].items() if isinstance(record, dict) and str((record.get("user") or {}).get("email") or "").lower() == normalized]
+            for key in expired:
+                payload["sessions"].pop(key, None)
+            if expired:
                 self._write_unlocked(payload)
 
     @staticmethod
@@ -211,24 +226,61 @@ class SessionStore:
 
 
 class AuthService:
-    def __init__(self, settings: Settings | None = None, validator: GoogleIdentityTokenValidator | None = None, store: SessionStore | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, validator: GoogleIdentityTokenValidator | None = None, store: SessionStore | None = None, users: UserRepository | None = None) -> None:
         self._settings = settings or get_settings()
         self._validator = validator or GoogleIdentityTokenValidator(self._settings)
         self._store = store or SessionStore()
+        # Kept optional only for legacy unit tests that construct a tiny settings
+        # object. The deployed service always has a persistent account database.
+        self._users = users
+        if self._users is None and getattr(self._settings, "gateway_users_database_url", ""):
+            self._users = get_user_repository()
+
+    @staticmethod
+    def _authenticated(user: GatewayUser) -> AuthenticatedUser:
+        business_id = META_REVIEW_BUSINESS_ID if user.role == "meta_reviewer" else user.business_id
+        return AuthenticatedUser(id=user.id, name=user.name, email=user.email, role=user.role, business_id=business_id)
 
     async def sign_in(self, credential: str) -> tuple[AuthenticatedUser, str, int]:
         user = await self._validator.verify(credential)
-        if user.email not in self._settings.allowed_google_users_list:
+        if self._users is not None:
+            account = self._users.by_email(user.email)
+            if account is None or not account.active:
+                raise GoogleAccessDeniedError("Access denied")
+            user = self._authenticated(account)
+        elif user.email not in self._settings.allowed_google_users_list:
             raise GoogleAccessDeniedError("Access denied")
+        else:
+            user = AuthenticatedUser(**{**asdict(user), "role": role_for_email(user.email, self._settings)})
         ttl = max(60, self._settings.auth_session_ttl_seconds)
         token = self._store.create(user, datetime.now(timezone.utc) + timedelta(seconds=ttl))
         return user, token, ttl
 
     def current_user(self, token: str) -> AuthenticatedUser | None:
-        return self._store.get(token)
+        user = self._store.get(token)
+        if user is None:
+            return None
+        if self._users is None:
+            return replace(user, role=role_for_email(user.email, self._settings))
+        account = self._users.by_email(user.email)
+        return self._authenticated(account) if account and account.active else None
+
+    def sign_in_with_password(self, email: str, password: str) -> tuple[AuthenticatedUser, str, int]:
+        if self._users is None:
+            raise GoogleTokenValidationError("Local login is not configured")
+        account = self._users.by_email(email.strip().lower())
+        if account is None or not account.active or not password_matches(password, account.password_hash):
+            raise GoogleAccessDeniedError("Invalid credentials")
+        user = self._authenticated(account)
+        ttl = max(60, self._settings.auth_session_ttl_seconds)
+        token = self._store.create(user, datetime.now(timezone.utc) + timedelta(seconds=ttl))
+        return user, token, ttl
 
     def sign_out(self, token: str) -> None:
         self._store.delete(token)
+
+    def sign_out_email(self, email: str) -> None:
+        self._store.delete_user(email)
 
 
 def get_auth_service() -> AuthService:

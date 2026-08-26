@@ -26,7 +26,7 @@ def test_gateway_api_key_authenticates_machine_requests(monkeypatch) -> None:
 def test_query_param_webhook_security_keeps_secret_out_of_public_configuration(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.instance_webhooks.get_settings",
-        lambda: SimpleNamespace(instance_webhooks_path=str(tmp_path / "webhooks.json"), webhook_dispatch_history_limit=30),
+        lambda: SimpleNamespace(instance_webhooks_path=str(tmp_path / "webhooks.json"), webhook_dispatch_history_limit=30, gateway_api_key="test-gateway-key", instance_webhooks_encryption_key="test-webhook-encryption-key"),
     )
     created = create_webhook(
         "botly_connection",
@@ -44,14 +44,14 @@ def test_query_param_webhook_security_keeps_secret_out_of_public_configuration(m
     assert build_auth_headers(internal) == {}
     assert build_auth_query_params(internal) == {"token": "secret-value"}
     assert public["authConfig"]["queryParamName"] == "token"
-    assert public["authConfig"]["queryParamValue"] == ""
+    assert public["authConfig"]["queryParamValue"] == "[REDACTED]"
     assert public["authConfig"]["hasQueryParamValue"] is True
 
 
 def test_custom_header_webhook_security_keeps_value_out_of_public_configuration(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.instance_webhooks.get_settings",
-        lambda: SimpleNamespace(instance_webhooks_path=str(tmp_path / "webhooks.json"), webhook_dispatch_history_limit=30),
+        lambda: SimpleNamespace(instance_webhooks_path=str(tmp_path / "webhooks.json"), webhook_dispatch_history_limit=30, gateway_api_key="test-gateway-key", instance_webhooks_encryption_key="test-webhook-encryption-key"),
     )
     create_webhook(
         "botly_connection",
@@ -65,5 +65,5 @@ def test_custom_header_webhook_security_keeps_value_out_of_public_configuration(
 
     public = list_instance_webhooks("botly_connection", reveal_secrets=False)[0]
 
-    assert public["customHeaders"] == {"X-Bot-Secret": ""}
+    assert public["customHeaders"] == {"X-Bot-Secret": "[REDACTED]"}
     assert public["hasCustomHeaders"] is True

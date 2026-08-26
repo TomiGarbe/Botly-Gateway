@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { environment } from '../config/environment'
 import { GatewayRequestError } from '@/shared/lib/gatewayClient'
-import { getCurrentUser, getGoogleClientId, signInWithGoogleCredential, signOutCurrentUser, type AuthUser } from './authApi'
+import { getCurrentUser, getGoogleClientId, signInWithGoogleCredential, signInWithPassword, signOutCurrentUser, type AuthUser } from './authApi'
 
 export type { AuthUser } from './authApi'
 
@@ -11,6 +11,7 @@ interface AuthContextValue {
   isLoading: boolean
   accessDenied: boolean
   signInWithGoogle: (credential: string) => Promise<void>
+  signInWithEmail: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   clearAccessDenied: () => void
 }
@@ -58,15 +59,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    setIsLoading(true); setAccessDenied(false)
+    try { setUser(await signInWithPassword(email, password)) } finally { setIsLoading(false) }
+  }, [])
+
   const value = useMemo<AuthContextValue>(() => ({
     user,
     googleClientId,
     isLoading,
     accessDenied,
     signInWithGoogle,
+    signInWithEmail,
     signOut,
     clearAccessDenied: () => setAccessDenied(false),
-  }), [accessDenied, googleClientId, isLoading, signInWithGoogle, signOut, user])
+  }), [accessDenied, googleClientId, isLoading, signInWithEmail, signInWithGoogle, signOut, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

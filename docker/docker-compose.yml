@@ -132,6 +132,13 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       ALLOWED_GOOGLE_USERS: ${ALLOWED_GOOGLE_USERS:-}
       AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-28800}
+      GATEWAY_USERS_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:-Botly Administrator}
+      META_REVIEW_EMAIL: ${META_REVIEW_EMAIL:-}
+      META_REVIEW_PASSWORD: ${META_REVIEW_PASSWORD:-}
+      META_REVIEW_NAME: ${META_REVIEW_NAME:-Meta Review}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://gateway-server.botly.com.ar}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://gateway.botly.com.ar,http://localhost:5174,http://127.0.0.1:5174}
       CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-https?://(localhost|127\.0\.0\.1)(:\d+)?}
@@ -151,10 +158,17 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       INSTANCE_API_KEYS_PATH: /var/lib/botly/instance_api_keys.json
       INSTANCE_WEBHOOKS_PATH: /var/lib/botly/instance_webhooks.json
+      INSTANCE_WEBHOOKS_ENCRYPTION_KEY: ${INSTANCE_WEBHOOKS_ENCRYPTION_KEY:-}
+      WEBHOOK_DELIVERIES_PATH: /var/lib/botly/webhooks/deliveries.json
+      WEBHOOK_DELIVERY_RETENTION: ${WEBHOOK_DELIVERY_RETENTION:-250}
+      WEBHOOK_DELIVERY_MAX_PAYLOAD_BYTES: ${WEBHOOK_DELIVERY_MAX_PAYLOAD_BYTES:-16384}
       MEDIA_CACHE_DIR: /var/lib/botly/media_cache
       # Deben vivir en el volumen persistente: los defaults apuntan a /tmp y las
       # credenciales oficiales se perderian al recrear el contenedor.
       CONNECTION_METADATA_PATH: /var/lib/botly/connection_metadata.json
+      CONNECTION_REGISTRY_PATH: ${CONNECTION_REGISTRY_PATH:-/var/lib/botly/connections/connection_registry.json}
+      CONNECTION_SETUP_TTL_SECONDS: ${CONNECTION_SETUP_TTL_SECONDS:-3600}
+      CONNECTION_SETUP_CLEANUP_INTERVAL_SECONDS: ${CONNECTION_SETUP_CLEANUP_INTERVAL_SECONDS:-60}
       AUTH_SESSIONS_PATH: /var/lib/botly/gateway_sessions.json
       OFFICIAL_CREDENTIALS_PATH: /var/lib/botly/official_credentials.json
       WEBHOOK_EVENTS_PATH: /var/lib/botly/webhook_events.json

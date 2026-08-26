@@ -20,11 +20,27 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 _LOCK = threading.Lock()
-OPERATION_TYPES = {
-    "smoke_test", "reconnect", "provisioning_retry", "credentials_revalidate",
-    "health_refresh", "reindex", "synchronize", "export", "import", "retry",
-}
+ACTIVE_OPERATION_TYPES = frozenset({"reconnect"})
+LEGACY_OPERATION_TYPES = frozenset({
+    "smoke_test", "provisioning_retry", "credentials_revalidate", "health_refresh",
+    "reindex", "synchronize", "sync_meta", "export", "import", "retry",
+})
+# Compatibility name: it now advertises only operations with real executors.
+OPERATION_TYPES = ACTIVE_OPERATION_TYPES
 JOB_STATUSES = {"pending", "running", "completed", "error", "cancelled", "retrying"}
+
+
+class DeprecatedOperationError(ValueError):
+    """Raised when a former operation did not have a real executor."""
+
+
+def retired_operation_message(operation_type: str) -> str:
+    kind = str(operation_type or "").lower()
+    if kind in {"synchronize", "sync_meta"}:
+        return "sync_meta was retired: Gateway has no real Meta resource synchronization. Use diagnostics."
+    if kind == "health_refresh":
+        return "health_refresh was retired: use diagnostics or availability for a real diagnostic."
+    return f"{kind} was retired because Gateway has no real executor for it."
 
 
 def _now() -> int: return int(time.time() * 1000)
@@ -75,6 +91,10 @@ def _public(job: dict[str, Any]) -> dict[str, Any]:
 
 def create_job(*, operation_type: str, targets: list[str], operator: str | None = None, policy: dict[str, Any] | None = None, source_job_id: str | None = None) -> dict[str, Any]:
     kind = str(operation_type or "").lower()
+    if kind in LEGACY_OPERATION_TYPES:
+        raise DeprecatedOperationError(retired_operation_message(kind))
+    if kind not in ACTIVE_OPERATION_TYPES:
+        raise ValueError("Unsupported operation type")
     if kind not in OPERATION_TYPES: raise ValueError("Tipo de operación no soportado")
     unique = list(dict.fromkeys(str(item).strip() for item in targets if str(item).strip()))
     if not unique: raise ValueError("La operación requiere al menos una conexión")
@@ -167,6 +187,17 @@ def _mark_retrying(job_id: str) -> bool:
 async def _execute_target(operation: str, connection: str, instance: dict[str, Any] | None, job_id: str) -> dict[str, Any]:
     started = _now()
     try:
+        if operation in LEGACY_OPERATION_TYPES:
+            raise DeprecatedOperationError(retired_operation_message(operation))
+        if operation not in ACTIVE_OPERATION_TYPES:
+            raise ValueError("Unsupported operation type")
+        if instance and (
+            str(instance.get("connectionType") or "").lower() == "cloud"
+            or str(instance.get("integration") or "") == "WHATSAPP-BUSINESS"
+        ):
+            raise DeprecatedOperationError(
+                "reconnect is unavailable for stateless Meta Cloud API connections; use verify_availability diagnostics"
+            )
         if not instance: raise RuntimeError("La conexión ya no está disponible")
         if operation == "reconnect":
             from app.connections import get_connection_manager

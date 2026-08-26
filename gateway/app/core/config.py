@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     allowed_google_users: str = ""
     auth_sessions_path: str = "/tmp/botly_gateway_sessions.json"
     auth_session_ttl_seconds: int = 28800
+    gateway_users_database_url: str = ""
+    initial_admin_email: str = ""
+    initial_admin_password: str = ""
+    initial_admin_name: str = "Botly Administrator"
+    meta_review_email: str = ""
+    meta_review_password: str = ""
+    meta_review_name: str = "Meta Review"
+    # Comma-separated email=role assignments. Roles are evaluated on each request.
+    authorization_role_assignments_raw: str = Field(default="", validation_alias="AUTHORIZATION_ROLE_ASSIGNMENTS")
     gateway_port: int = 9000
     # PUBLIC_BASE_URL se conserva como alias de lectura para no interrumpir
     # despliegues existentes durante la migracion del dominio.
@@ -71,10 +80,21 @@ class Settings(BaseSettings):
     # Gateway API key is used as backwards-compatible key material.
     instance_api_keys_encryption_key: str = ""
     instance_webhooks_path: str = "/tmp/botly_instance_webhooks.json"
+    # Optional dedicated material for encrypting outbound webhook secrets at
+    # rest. The Gateway API key remains a backwards-compatible fallback.
+    instance_webhooks_encryption_key: str = ""
     connection_metadata_path: str = "/tmp/botly_connection_metadata.json"
     # Product-domain ownership registry. It is additive and intentionally
     # separate from provider/runtime persistence during the Instance migration.
-    connection_registry_path: str = "/tmp/botly_connection_registry.json"
+    # Docker mounts /var/lib/botly on a named volume, so this default survives
+    # normal container recreation. Non-Docker deployments can override it with
+    # CONNECTION_REGISTRY_PATH.
+    connection_registry_path: str = "/var/lib/botly/connections/connection_registry.json"
+    # Active setup lifetime. Expired records remain for diagnosis and any
+    # manual compensation; they are never silently deleted.
+    connection_setup_ttl_seconds: int = 3600
+    connection_setup_cleanup_interval_seconds: int = 60
+    connection_setup_cleanup_batch_size: int = 25
     official_credentials_path: str = "/tmp/botly_official_credentials.json"
     # Timeline business events shown by /webhooks/events.  It must survive a
     # Gateway restart so a received first message is not lost before the UI
@@ -101,6 +121,16 @@ class Settings(BaseSettings):
     instance_webhook_timeout: int = 8
     webhook_debug: bool = False
     webhook_dispatch_history_limit: int = 30
+    # Delivery evidence is deliberately independent from webhook configuration.
+    # Existing dispatchHistory data remains readable as legacy compatibility.
+    webhook_deliveries_path: str = "/var/lib/botly/webhooks/deliveries.json"
+    webhook_delivery_retention: int = 250
+    webhook_delivery_max_payload_bytes: int = 16_384
+    # Outbound provider attempts are persisted before the provider side effect.
+    # This store contains only redacted/reconstructibility metadata, never raw
+    # authorization headers or media payloads.
+    outbound_provider_attempts_path: str = "/var/lib/botly/provider-deliveries/outbound_attempts.json"
+    outbound_provider_attempt_retention: int = 2_000
     allow_insecure_evolution_webhooks: bool = False
     evolution_auth_cache_ttl_seconds: int = 45
 
@@ -136,6 +166,15 @@ class Settings(BaseSettings):
     @property
     def allowed_google_users_list(self) -> set[str]:
         return {item.strip().lower() for item in self.allowed_google_users.split(",") if item.strip()}
+
+    @property
+    def authorization_role_assignments(self) -> dict[str, str]:
+        assignments: dict[str, str] = {}
+        for item in self.authorization_role_assignments_raw.split(","):
+            email, separator, role = item.partition("=")
+            if separator and email.strip() and role.strip():
+                assignments[email.strip().lower()] = role.strip().lower()
+        return assignments
 
     def is_cors_origin_allowed(self, origin: str | None) -> bool:
         value = str(origin or "").strip().rstrip("/")

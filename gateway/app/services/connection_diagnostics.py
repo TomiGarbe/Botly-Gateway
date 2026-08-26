@@ -117,6 +117,32 @@ class ConnectionDiagnosticsService:
             },
         }
 
+    async def verify_availability(self, connection_id: str) -> dict[str, Any]:
+        """Return an honest, read-only availability diagnostic for a connection."""
+        snapshot = await self.snapshot(connection_id)
+        record = self._registry.connection_record_by_id(connection_id) or {}
+        technical = snapshot.get("technical") if isinstance(snapshot.get("technical"), dict) else {}
+        summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+        provider = str(technical.get("provider") or "unknown").lower()
+        runtime_check = next(
+            (item for item in snapshot.get("checks", []) if isinstance(item, dict) and item.get("code") == "gateway"),
+            {},
+        )
+        return {
+            "diagnostic": "verify_availability",
+            "provider": provider,
+            "available": summary.get("status") in {"healthy", "degraded"},
+            "runtime_available": runtime_check.get("status") in {"healthy", "degraded"},
+            "last_activity_at": record.get("last_activity_at"),
+            "deep_provider_health_checked": provider != "meta",
+            "limitation": (
+                "Meta Cloud API is stateless: credentials and Gateway runtime were checked, but this diagnostic does not make a Graph API request."
+                if provider == "meta"
+                else None
+            ),
+            "diagnostics": snapshot,
+        }
+
     @staticmethod
     def _check(code: str, label: str, status: str, last_verified_at: str | None, message: str, action: str | None = None) -> dict[str, Any]:
         return {"code": code, "label": label, "status": status, "last_verified_at": last_verified_at, "message": message, "action": action}

@@ -21,7 +21,7 @@ export async function getMetaSignupConfig(): Promise<MetaSignupConfig> {
 }
 
 export async function completeMetaSignup(
-  connectionId: string,
+  setupId: string,
   code: string,
   session: EmbeddedSignupSession,
   coexistenceRequested: boolean,
@@ -32,7 +32,7 @@ export async function completeMetaSignup(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      connection_id: connectionId,
+      setup_id: setupId,
       code,
       phone_number_id: session.phoneNumberId,
       business_account_id: session.businessAccountId,

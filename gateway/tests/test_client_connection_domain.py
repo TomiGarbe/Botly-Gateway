@@ -9,12 +9,78 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.models.requests import CreateClientRequest, UpdateClientRequest
+from app.core.config import Settings
 from app.routers import clients as clients_router
 from app.routers import connections as connections_router
+from app.services import connection_registry as connection_registry_module
 from app.services.clients import ClientHasConnectionsError, ClientService
 from app.services.connection_registry import ConnectionRegistry
 from app.services.connections import ConnectionService
 from app.services.connection_operations import ConnectionOperationsService
+
+
+def test_connection_registry_default_path_is_persistent() -> None:
+    settings = Settings(gateway_api_key="test-gateway-key", evolution_api_key="test-evolution-key")
+
+    assert settings.connection_registry_path == "/var/lib/botly/connections/connection_registry.json"
+
+
+def test_connection_registry_uses_configured_path_and_reloads_data(monkeypatch, tmp_path) -> None:
+    persistent_path = tmp_path / "nested" / "connections" / "connection_registry.json"
+    monkeypatch.setattr(
+        connection_registry_module,
+        "get_settings",
+        lambda: SimpleNamespace(connection_registry_path=str(persistent_path)),
+    )
+
+    first = ConnectionRegistry()
+    client = first.save_client({"id": "client-01", "name": "Global Tech"})
+    second = ConnectionRegistry()
+
+    assert persistent_path.exists()
+    assert persistent_path.parent.is_dir()
+    assert second.get_client(client["id"]) == client
+    assert str(second._path) == str(persistent_path)
+    assert "/tmp/botly_connection_registry.json" not in str(second._path)
+
+
+def test_connection_registry_keeps_data_when_reinitialized_at_another_configured_path(monkeypatch, tmp_path) -> None:
+    first_path = tmp_path / "first" / "connection_registry.json"
+    second_path = tmp_path / "second" / "connection_registry.json"
+    configured_path = {"value": first_path}
+    monkeypatch.setattr(
+        connection_registry_module,
+        "get_settings",
+        lambda: SimpleNamespace(connection_registry_path=str(configured_path["value"])),
+    )
+
+    first = ConnectionRegistry()
+    first.save_client({"id": "client-01", "name": "Global Tech"})
+    configured_path["value"] = second_path
+    second = ConnectionRegistry()
+    second.save_client({"id": "client-02", "name": "Another client"})
+
+    assert ConnectionRegistry(first_path).get_client("client-01") is not None
+    assert ConnectionRegistry(second_path).get_client("client-02") is not None
+
+
+def test_connection_registry_copies_legacy_tmp_store_without_deleting_it(monkeypatch, tmp_path) -> None:
+    legacy_path = tmp_path / "legacy" / "botly_connection_registry.json"
+    persistent_path = tmp_path / "durable" / "connections" / "connection_registry.json"
+    legacy = ConnectionRegistry(legacy_path)
+    legacy.save_client({"id": "client-01", "name": "Global Tech"})
+    monkeypatch.setattr(connection_registry_module, "_LEGACY_CONNECTION_REGISTRY_PATH", legacy_path)
+    monkeypatch.setattr(
+        connection_registry_module,
+        "get_settings",
+        lambda: SimpleNamespace(connection_registry_path=str(persistent_path)),
+    )
+
+    migrated = ConnectionRegistry()
+
+    assert legacy_path.exists()
+    assert persistent_path.exists()
+    assert migrated.get_client("client-01") == {"id": "client-01", "name": "Global Tech"}
 
 
 class _LegacyRuntime:
@@ -233,6 +299,7 @@ def test_connection_operations_are_scoped_to_the_connection(monkeypatch, tmp_pat
         instance_webhooks_path=str(tmp_path / "webhooks.json"),
         instance_api_keys_path=str(tmp_path / "api_keys.json"),
         gateway_api_key="test-gateway-key",
+        instance_webhooks_encryption_key="test-webhook-encryption-key",
         webhook_dispatch_history_limit=30,
     )
     monkeypatch.setattr("app.services.instance_webhooks.get_settings", lambda: settings)

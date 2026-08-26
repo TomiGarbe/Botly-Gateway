@@ -5,6 +5,8 @@ interface ApiUser {
   name: string
   email: string
   avatar_url: string | null
+  role: string
+  business_id: string | null
 }
 
 export interface AuthUser {
@@ -12,10 +14,12 @@ export interface AuthUser {
   name: string
   email: string
   avatarUrl?: string
+  role: string
+  businessId?: string
 }
 
 function toUser(payload: ApiUser): AuthUser {
-  return { id: payload.id, name: payload.name, email: payload.email, avatarUrl: payload.avatar_url || undefined }
+  return { id: payload.id, name: payload.name, email: payload.email, avatarUrl: payload.avatar_url || undefined, role: payload.role || 'operator', businessId: payload.business_id || undefined }
 }
 
 export async function getCurrentUser(): Promise<AuthUser> {
@@ -33,6 +37,13 @@ export async function signInWithGoogleCredential(credential: string): Promise<Au
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ credential }),
+  })
+  return toUser(payload.user)
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<AuthUser> {
+  const payload = await gatewayRequest<{ user: ApiUser }>('/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
   })
   return toUser(payload.user)
 }

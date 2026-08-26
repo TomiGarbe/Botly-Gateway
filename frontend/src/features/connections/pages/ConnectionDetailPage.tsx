@@ -1,6 +1,6 @@
-import { ArrowLeft, ChevronDown, Clipboard, Eye, EyeOff, MessageCircle, Pencil, RefreshCw, RotateCw, Trash2, Webhook, X } from 'lucide-react'
+import { ArrowLeft, Clipboard, Eye, EyeOff, MessageCircle, Pencil, RefreshCw, Trash2, X } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { Connection } from '@/domain/connection'
 import { StatusBadge, type StatusTone } from '@/shared/components/StatusBadge'
 import { LoadingState } from '@/shared/components/LoadingState'
@@ -12,22 +12,16 @@ import {
   ConnectionApiKey,
   ConnectionIntegrationEndpoints,
   ConnectionStatusSummary,
-  ConnectionWebhook,
-  WebhookSecurityType,
   getConnectionApiKey,
   getConnectionIntegrationEndpoints,
   getConnectionStatusSummary,
-  getConnectionWebhook,
   listConnectionActivity,
   reconnectConnection,
   regenerateConnectionApiKey,
-  testConnectionWebhook,
-  updateConnectionWebhook,
 } from '../api/connectionOperationsApi'
 import { deleteConnection, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
-import { WebhookDeliveryLog } from '../components/WebhookDeliveryLog'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
 
@@ -36,14 +30,6 @@ const tabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: 'security', label: 'Seguridad' },
   { id: 'messages', label: 'Mensajes' },
   { id: 'webhooks', label: 'Webhooks' },
-]
-
-const webhookSecurityOptions: Array<{ id: WebhookSecurityType; label: string }> = [
-  { id: 'NONE', label: 'Sin seguridad' },
-  { id: 'API_KEY', label: 'API key por header' },
-  { id: 'BEARER', label: 'Bearer token' },
-  { id: 'CUSTOM_HEADERS', label: 'Header personalizado' },
-  { id: 'QUERY_PARAM', label: 'Query param' },
 ]
 
 function workspaceState(connection: Connection, status: ConnectionStatusSummary | null): { label: string; tone: StatusTone } {
@@ -64,15 +50,11 @@ function eventTime(value: number): string {
   return new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
-function isWebhookActivity(activity: ConnectionActivity): boolean {
-  return `${activity.description} ${activity.technical.Componente || ''} ${activity.technical.Evento || ''}`.toLowerCase().includes('webhook')
-}
-
 export function ConnectionDetailPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { connectionId } = useParams()
   const [connection, setConnection] = useState<Connection | null>(null)
-  const [webhook, setWebhook] = useState<ConnectionWebhook | null>(null)
   const [integrationEndpoints, setIntegrationEndpoints] = useState<ConnectionIntegrationEndpoints | null>(null)
   const [apiKey, setApiKey] = useState<ConnectionApiKey | null>(null)
   const [statusSummary, setStatusSummary] = useState<ConnectionStatusSummary | null>(null)
@@ -84,12 +66,6 @@ export function ConnectionDetailPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [isEditingName, setIsEditingName] = useState(false)
   const [name, setName] = useState('')
-  const [isEditingWebhook, setIsEditingWebhook] = useState(false)
-  const [webhookUrl, setWebhookUrl] = useState('')
-  const [webhookSecurityType, setWebhookSecurityType] = useState<WebhookSecurityType>('NONE')
-  const [webhookSecurityName, setWebhookSecurityName] = useState('')
-  const [webhookSecuritySecret, setWebhookSecuritySecret] = useState('')
-  const [isSecurityPickerOpen, setIsSecurityPickerOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -113,14 +89,9 @@ export function ConnectionDetailPage() {
   const loadOperations = useCallback(async () => {
     if (!connectionId) return
     try {
-      const [nextWebhook, nextApiKey, nextStatus, nextActivity, nextIntegrationEndpoints] = await Promise.all([
-        getConnectionWebhook(connectionId), getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), listConnectionActivity(connectionId), getConnectionIntegrationEndpoints(connectionId),
+      const [nextApiKey, nextStatus, nextActivity, nextIntegrationEndpoints] = await Promise.all([
+        getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), listConnectionActivity(connectionId), getConnectionIntegrationEndpoints(connectionId),
       ])
-      setWebhook(nextWebhook)
-      setWebhookUrl(nextWebhook.url || '')
-      setWebhookSecurityType(nextWebhook.authType)
-      setWebhookSecurityName(nextWebhook.authType === 'API_KEY' ? (nextWebhook.authHeaderName || 'x-api-key') : nextWebhook.authType === 'QUERY_PARAM' ? (nextWebhook.queryParamName || '') : nextWebhook.authType === 'CUSTOM_HEADERS' ? (nextWebhook.customHeaderName || '') : '')
-      setWebhookSecuritySecret('')
       setApiKey(nextApiKey)
       setStatusSummary(nextStatus)
       setActivity(nextActivity)
@@ -132,6 +103,9 @@ export function ConnectionDetailPage() {
 
   useEffect(() => { void loadConnection() }, [loadConnection])
   useEffect(() => { void loadOperations() }, [loadOperations])
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('tab') === 'messages') setActiveTab('messages')
+  }, [location.search])
 
   async function refreshWorkspace() { await Promise.all([loadConnection(), loadOperations()]) }
 
@@ -140,41 +114,6 @@ export function ConnectionDetailPage() {
     if (!connection) return
     setError(null); setIsSaving(true)
     try { setConnection(await updateConnectionName(connection.id, name)); setIsEditingName(false) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo actualizar la conexión.') } finally { setIsSaving(false) }
-  }
-
-  async function saveWebhook(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!connection) return
-    setError(null); setIsSaving(true)
-    const authConfig: Record<string, string> = {}
-    let customHeaders: Record<string, string> | undefined
-    if (webhookSecurityType === 'BEARER' && webhookSecuritySecret) authConfig.token = webhookSecuritySecret
-    if (webhookSecurityType === 'API_KEY') { authConfig.headerName = webhookSecurityName || 'x-api-key'; if (webhookSecuritySecret) authConfig.apiKey = webhookSecuritySecret }
-    if (webhookSecurityType === 'QUERY_PARAM') { authConfig.queryParamName = webhookSecurityName; if (webhookSecuritySecret) authConfig.queryParamValue = webhookSecuritySecret }
-    if (webhookSecurityType === 'CUSTOM_HEADERS' && webhookSecuritySecret) customHeaders = { [webhookSecurityName]: webhookSecuritySecret }
-    if (webhookSecurityType === 'NONE') customHeaders = {}
-    try { const updated = await updateConnectionWebhook(connection.id, webhookUrl, { authType: webhookSecurityType, authConfig, customHeaders }); setWebhook(updated); setWebhookUrl(updated.url || ''); setIsEditingWebhook(false); setNotice('Webhook actualizado.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el webhook.') } finally { setIsSaving(false) }
-  }
-
-  function startEditingWebhook() {
-    setWebhookSecurityType(webhook?.authType || 'NONE')
-    setWebhookSecurityName(webhook?.authType === 'API_KEY' ? (webhook.authHeaderName || 'x-api-key') : webhook?.authType === 'QUERY_PARAM' ? (webhook.queryParamName || '') : webhook?.authType === 'CUSTOM_HEADERS' ? (webhook.customHeaderName || '') : '')
-    setWebhookSecuritySecret('')
-    setIsSecurityPickerOpen(false)
-    setIsEditingWebhook(true)
-  }
-
-  function selectWebhookSecurity(type: WebhookSecurityType) {
-    setWebhookSecurityType(type)
-    setWebhookSecurityName(type === 'API_KEY' ? 'x-api-key' : '')
-    setWebhookSecuritySecret('')
-    setIsSecurityPickerOpen(false)
-  }
-
-  async function runWebhookTest() {
-    if (!connection) return
-    setError(null)
-    try { const result = await testConnectionWebhook(connection.id); setNotice(result.ok ? 'Webhook probado correctamente.' : result.error || 'El webhook respondió con un error.'); await refreshWorkspace() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo probar el webhook.') }
   }
 
   async function regenerateKey() {
@@ -215,7 +154,7 @@ export function ConnectionDetailPage() {
   async function reconnect() {
     if (!connection) return
     setError(null)
-    try { await reconnectConnection(connection.id); setNotice('Reconexión iniciada.'); await refreshWorkspace() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo iniciar la reconexión.') }
+    try { await reconnectConnection(connection.id); await refreshWorkspace() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo iniciar la reconexión.') }
   }
 
   async function removeConnection() {
@@ -224,8 +163,7 @@ export function ConnectionDetailPage() {
     try { await deleteConnection(connection.id); navigate(`/clients/${connection.clientId}`) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo eliminar la conexión.') } finally { setIsDeleting(false) }
   }
 
-  const channelActivity = useMemo(() => activity.filter((item) => !isWebhookActivity(item)), [activity])
-  const webhookActivity = useMemo(() => activity.filter(isWebhookActivity), [activity])
+  const channelActivity = useMemo(() => activity, [activity])
 
   if (isLoading) return <LoadingState label="Cargando conexión…" />
   if (!connection) return <div className="clients-state clients-state-error" role="alert"><p>{error || 'Conexión no encontrada.'}</p><button type="button" onClick={() => void loadConnection()}>Reintentar</button></div>
@@ -236,27 +174,26 @@ export function ConnectionDetailPage() {
   return <section className="connection-detail workspace-detail">
     <header className="workspace-header">
       <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button>
-      <div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void reconnect()}><RotateCw size={15} aria-hidden="true" /> Reconectar</button><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
+      <div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
     </header>
     <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
 
     <div className="workspace-tab-content">
-      {activeTab === 'webhooks' ? <WebhookDeliveryLog connectionId={connection.id} /> : null}
+      {activeTab === 'webhooks' ? <section className="connection-section workspace-webhook-center"><div><h3>Webhooks de la conexión</h3><p>La gestión de destinos y entregas se realiza desde el Webhooks Center.</p></div><button type="button" className="client-button-primary" onClick={() => navigate(`/webhooks?connectionId=${encodeURIComponent(connection.id)}`)}>Administrar webhooks</button></section> : null}
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><label><span>Nombre</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
         <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
-        <OperationsDiagnostics connectionId={connection.id} runtimeName={connection.runtimeName} onReconnect={reconnect} onTestWebhook={runWebhookTest} onRefreshConnection={refreshWorkspace} />
+        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} connectionState={connection.status.state} connectionLifecycle={connection.status.lifecycle} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => setActiveTab('webhooks')} />
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
 
       {activeTab === 'security' ? <section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl>{apiKey?.hasApiKey && !apiKey.canRevealApiKey ? <p className="connection-endpoint-note">Esta clave fue creada antes de habilitar la visualización. Regenerala una vez para poder mostrarla y copiarla luego.</p> : null}<div className="connection-inline-actions">{apiKey?.canRevealApiKey ? <button type="button" className="client-button-secondary" onClick={() => void toggleKeyVisibility()}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!apiKey?.canRevealApiKey && !apiKey?.apiKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section> : null}
 
-      {activeTab === 'messages' ? <><MessagesWorkspace runtimeName={connection.runtimeName} /><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del canal</h3><p>Gateway · Meta · Canal</p></div></div>{channelActivity.length === 0 ? <EmptyState icon={MessageCircle} title="No hay actividad del canal." description="La actividad de mensajería aparecerá aquí cuando se produzca." /> : <ol className="connection-activity-list">{channelActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
+      {activeTab === 'messages' ? <><MessagesWorkspace runtimeName={connection.runtimeName} connectionId={connection.id} messageId={new URLSearchParams(location.search).get('message_id')} /><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del canal</h3><p>Gateway · Meta · Canal</p></div></div>{channelActivity.length === 0 ? <EmptyState icon={MessageCircle} title="No hay actividad del canal." description="La actividad de mensajería aparecerá aquí cuando se produzca." /> : <ol className="connection-activity-list">{channelActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
 
-      {activeTab === 'webhooks' ? <><section className="connection-section workspace-webhooks"><div className="connection-section-heading"><div><h3>Webhook</h3><p>{webhook?.configured ? (webhook.enabled ? 'Activo' : 'Desactivado') : 'Sin configurar'}</p></div><button type="button" className="client-button-secondary" onClick={startEditingWebhook}>Editar</button></div><div className="connection-endpoint"><span>Webhook para envío de mensajes</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p>{webhook?.url && !isEditingWebhook ? <p className="connection-section-value">{webhook.url}</p> : null}{isEditingWebhook ? <form className="connection-inline-form connection-webhook-form" onSubmit={saveWebhook}><label><span>URL de destino</span><input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://…" required autoFocus /></label><label><span>Tipo de seguridad</span><span className="connection-security-picker"><button type="button" className="connection-security-trigger" aria-expanded={isSecurityPickerOpen} onClick={() => setIsSecurityPickerOpen((value) => !value)}><strong>{webhookSecurityOptions.find((option) => option.id === webhookSecurityType)?.label}</strong><ChevronDown size={16} aria-hidden="true" /></button>{isSecurityPickerOpen ? <span className="connection-security-options" role="listbox" aria-label="Tipo de seguridad">{webhookSecurityOptions.map((option) => <button key={option.id} type="button" role="option" aria-selected={option.id === webhookSecurityType} className={option.id === webhookSecurityType ? 'is-selected' : ''} onClick={() => selectWebhookSecurity(option.id)}><strong>{option.label}</strong></button>)}</span> : null}</span></label>{webhookSecurityType === 'API_KEY' || webhookSecurityType === 'CUSTOM_HEADERS' || webhookSecurityType === 'QUERY_PARAM' ? <label><span>{webhookSecurityType === 'QUERY_PARAM' ? 'Nombre del parámetro' : 'Nombre del header'}</span><input value={webhookSecurityName} onChange={(event) => setWebhookSecurityName(event.target.value)} placeholder={webhookSecurityType === 'QUERY_PARAM' ? 'api_key' : 'x-api-key'} required /></label> : null}{webhookSecurityType !== 'NONE' ? <label><span>{webhookSecurityType === 'BEARER' ? 'Bearer token' : webhookSecurityType === 'QUERY_PARAM' ? 'Valor del parámetro' : 'Valor secreto'}</span><input type="password" value={webhookSecuritySecret} onChange={(event) => setWebhookSecuritySecret(event.target.value)} placeholder={webhook?.hasAuthSecret ? 'Dejá vacío para conservar el valor actual' : 'Ingresá el valor secreto'} required={!webhook?.hasAuthSecret} /></label> : null}<div><button type="button" className="client-button-secondary" onClick={() => { setWebhookUrl(webhook?.url || ''); setIsEditingWebhook(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}<dl className="connection-webhook-summary"><div><dt>Seguridad</dt><dd>{webhook?.authType === 'NONE' ? 'Sin seguridad' : `${webhook?.authType || 'Sin seguridad'}${webhook?.hasAuthSecret ? ' · configurada' : ''}`}</dd></div><div><dt>Último envío</dt><dd>{dateTime(webhook?.lastDeliveryAt, 'Sin envíos')}</dd></div><div><dt>Último error</dt><dd>{webhook?.lastError || 'Sin errores'}</dd></div><div><dt>Envíos exitosos</dt><dd>{webhook?.successfulDeliveries || 0}</dd></div><div><dt>Errores</dt><dd>{webhook?.failedDeliveries || 0}</dd></div></dl><button type="button" className="connection-text-action" onClick={() => void runWebhookTest()} disabled={!webhook?.configured}>Probar webhook</button></section><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del webhook</h3><p>Gateway · Webhook del cliente</p></div></div>{webhookActivity.length === 0 ? <EmptyState icon={Webhook} title="No hay actividad de webhook." description="Las entregas y pruebas del webhook aparecerán aquí." /> : <ol className="connection-activity-list">{webhookActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
     </div>
 
     {selectedActivity ? <div className="activity-panel-backdrop" role="presentation" onMouseDown={() => setSelectedActivity(null)}><aside className="activity-panel" role="dialog" aria-modal="true" aria-label="Detalle técnico de actividad" onMouseDown={(event) => event.stopPropagation()}><div className="activity-panel-heading"><div><h3>{selectedActivity.description}</h3><p>{eventTime(selectedActivity.occurredAt)}</p></div><button type="button" onClick={() => setSelectedActivity(null)} aria-label="Cerrar detalle"><X size={18} /></button></div><dl>{Object.entries(selectedActivity.technical).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></aside></div> : null}

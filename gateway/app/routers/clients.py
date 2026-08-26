@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.models.requests import CreateClientRequest, UpdateClientRequest
 from app.services.clients import ClientHasConnectionsError, ClientNotFoundError, get_client_service
+from app.services.authorization import is_meta_reviewer, require_reviewer_client_access
+from app.core.config import get_settings
 
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -11,12 +13,17 @@ _service = get_client_service()
 
 
 @router.get("")
-async def list_clients():
-    return [client.public_dict() for client in _service.list_client_overviews()]
+async def list_clients(request: Request):
+    clients = _service.list_client_overviews()
+    if is_meta_reviewer(getattr(request.state, "user", None)):
+        allowed = str(getattr(request.state.user, "business_id", ""))
+        clients = [client for client in clients if client.client.id == allowed]
+    return [client.public_dict() for client in clients]
 
 
 @router.get("/{client_id}")
-async def get_client(client_id: str):
+async def get_client(client_id: str, request: Request):
+    require_reviewer_client_access(request, client_id)
     try:
         return _service.get_client_overview(client_id).public_dict()
     except ClientNotFoundError:

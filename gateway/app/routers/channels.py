@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.domain import ChannelId, get_default_domain_registry
 from app.services.features import get_feature_service
@@ -9,14 +9,14 @@ router = APIRouter(prefix="/channels", tags=["channels"])
 
 
 @router.get("/")
-async def list_channels():
+async def list_channels(request: Request = None):
     domain = get_default_domain_registry()
     features = get_feature_service()
     return {"items": features.public_channels(domain), **features.public_dict()}
 
 
 @router.get("/{channel_id}")
-async def get_channel(channel_id: ChannelId):
+async def get_channel(channel_id: ChannelId, request: Request = None):
     domain = get_default_domain_registry()
     for channel in get_feature_service().public_channels(domain):
         if channel["id"] == channel_id.value:
