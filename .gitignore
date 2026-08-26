@@ -36,5 +36,3 @@ Thumbs.db
 # Extras
 tmp/
 docs/
-!docs/
-!docs/meta-review-access.md

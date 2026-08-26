@@ -23,6 +23,11 @@ from app.models.requests import (
 from app.services.media import consume_uploaded_file, file_to_base64, get_uploaded_file
 from app.services.normalization import save_business_event, save_event, save_pipeline_event
 from app.services.reliability import mark_outbound
+from app.services.outbound_provider_attempts import (
+    OutboundAttemptPersistenceError,
+    execute_outbound_attempt,
+    get_outbound_provider_attempt_store,
+)
 from app.platforms.meta import MetaPlatformError
 from app.providers.whatsapp_official import get_official_whatsapp_provider
 from app.services.credential_manager import get_credential_manager
@@ -130,6 +135,9 @@ def _persist_local_outbound_event(
     media: dict[str, Any] | None = None,
     evolution_result: dict[str, Any] | None = None,
     correlation_id: str | None = None,
+    provider: str = "evolution",
+    outbound_attempt_id: str | None = None,
+    provider_message_id: str | None = None,
 ) -> None:
     content_text = (text or caption or "").strip()
     result = evolution_result if isinstance(evolution_result, dict) else {}
@@ -165,7 +173,12 @@ def _persist_local_outbound_event(
         "meta": {"requestId": correlation_id} if correlation_id else {},
         "message": {"id": message_id, "from": f"{number}@s.whatsapp.net", "fromMe": True, "kind": msg_type, "text": content_text},
         "media": media,
-        "raw": {"source": "gateway_send_api", "providerResult": result},
+        "raw": {
+            "source": "gateway_send_api", "provider": provider,
+            "providerMessageId": provider_message_id or message_id,
+            "outboundAttemptId": outbound_attempt_id,
+            "providerResult": result,
+        },
     }
     save_event(event)
     logger.info("[OUTBOUND][PERSIST] local outbound persisted", instance=instance_name, number=number, message_type=msg_type, message_id=message_id)
@@ -186,6 +199,25 @@ def _received_json_log(data: Any) -> dict[str, Any]:
 
 def _is_official_instance(instance_name: str) -> bool:
     return get_credential_manager().get_official_credentials_info(instance_name) is not None
+
+
+async def _run_outbound_attempt(
+    *, instance_name: str, provider: str, number: str, msg_type: str,
+    text: str | None = None, caption: str | None = None, correlation_id: str | None = None,
+    media: dict[str, Any] | None = None, provider_operation: str | None = None,
+    sender,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Persist evidence before invoking an existing provider call."""
+    try:
+        attempt = get_outbound_provider_attempt_store().create(
+            instance=instance_name, provider=provider, message_type=msg_type, recipient=number,
+            text=text, caption=caption, correlation_id=correlation_id, request_id=correlation_id,
+            provider_operation=provider_operation, media=media,
+        )
+    except Exception as exc:
+        logger.error("outbound_attempt_persist_failed", instance=instance_name, provider=provider, error=str(exc))
+        raise OutboundAttemptPersistenceError("No se pudo persistir el intento outbound antes del envío.") from exc
+    return await execute_outbound_attempt(attempt=attempt, sender=sender)
 
 
 async def _send_message_unified(instance_name: str, request: Request):
@@ -226,10 +258,12 @@ async def _send_message_unified(instance_name: str, request: Request):
                     instance=instance_name,
                     details={"kind": "text", "number": number, "outboundFingerprint": outbound_fp},
                 )
-                result = (
-                    await get_official_whatsapp_provider().send_text(instance_name=instance_name, number=number, text=text.strip())
-                    if _is_official_instance(instance_name)
-                    else await _connection_manager.send_text(instance_name, number, text.strip())
+                provider = "meta" if _is_official_instance(instance_name) else "evolution"
+                result, attempt = await _run_outbound_attempt(
+                    instance_name=instance_name, provider=provider, number=number, msg_type="text", text=text.strip(),
+                    provider_operation="messages.sendText",
+                    sender=lambda: get_official_whatsapp_provider().send_text(instance_name=instance_name, number=number, text=text.strip())
+                    if provider == "meta" else _connection_manager.send_text(instance_name, number, text.strip()),
                 )
                 _persist_local_outbound_event(
                     instance_name=instance_name,
@@ -237,6 +271,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                     msg_type="text",
                     text=text.strip(),
                     evolution_result=result if isinstance(result, dict) else {},
+                    provider=provider, outbound_attempt_id=attempt["id"], provider_message_id=attempt.get("providerMessageId"),
                 )
                 save_pipeline_event(
                     stage="send_whatsapp",
@@ -263,26 +298,13 @@ async def _send_message_unified(instance_name: str, request: Request):
                 logger.error("upload_fail", instance=instance_name, error=str(exc))
                 raise HTTPException(status_code=413, detail=str(exc)) from exc
 
-            result = (
-                await get_official_whatsapp_provider().send_media(
-                    instance_name=instance_name,
-                    number=number,
-                    media_base64=media_base64,
-                    media_type=normalized_media_type,
-                    mime_type=(file.content_type or "application/octet-stream"),
-                    file_name=(file.filename or "file.bin"),
-                    caption=caption.strip(),
-                )
-                if _is_official_instance(instance_name)
-                else await _connection_manager.send_media(
-                    instance_name=instance_name,
-                    number=number,
-                    media_payload=media_base64,
-                    mediatype=normalized_media_type,
-                    mimetype=(file.content_type or "application/octet-stream"),
-                    file_name=(file.filename or "file.bin"),
-                    caption=caption.strip(),
-                )
+            provider = "meta" if _is_official_instance(instance_name) else "evolution"
+            media_reference = {"kind": normalized_media_type, "mimeType": file.content_type or "application/octet-stream", "fileName": file.filename or "file.bin", "source": "multipart"}
+            result, attempt = await _run_outbound_attempt(
+                instance_name=instance_name, provider=provider, number=number, msg_type=normalized_media_type,
+                caption=caption.strip(), media=media_reference, provider_operation="messages.sendMedia",
+                sender=lambda: get_official_whatsapp_provider().send_media(instance_name=instance_name, number=number, media_base64=media_base64, media_type=normalized_media_type, mime_type=(file.content_type or "application/octet-stream"), file_name=(file.filename or "file.bin"), caption=caption.strip())
+                if provider == "meta" else _connection_manager.send_media(instance_name=instance_name, number=number, media_payload=media_base64, mediatype=normalized_media_type, mimetype=(file.content_type or "application/octet-stream"), file_name=(file.filename or "file.bin"), caption=caption.strip()),
             )
             _persist_local_outbound_event(
                 instance_name=instance_name,
@@ -297,6 +319,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                     "caption": caption.strip() or None,
                 },
                 evolution_result=result if isinstance(result, dict) else {},
+                provider=provider, outbound_attempt_id=attempt["id"], provider_message_id=attempt.get("providerMessageId"),
             )
             _log_message_success(instance_name, normalized_media_type, number)
             return result
@@ -328,14 +351,12 @@ async def _send_message_unified(instance_name: str, request: Request):
                 request_id=correlation_id,
                 details={"kind": "text", "number": number, "outboundFingerprint": outbound_fp},
             )
-            result = (
-                await get_official_whatsapp_provider().send_text(
-                    instance_name=instance_name,
-                    number=number,
-                    text=(payload.text or "").strip(),
-                )
-                if _is_official_instance(instance_name)
-                else await _connection_manager.send_text(instance_name, number, (payload.text or "").strip())
+            provider = "meta" if _is_official_instance(instance_name) else "evolution"
+            result, attempt = await _run_outbound_attempt(
+                instance_name=instance_name, provider=provider, number=number, msg_type="text", text=(payload.text or "").strip(), correlation_id=correlation_id,
+                provider_operation="messages.sendText",
+                sender=lambda: get_official_whatsapp_provider().send_text(instance_name=instance_name, number=number, text=(payload.text or "").strip())
+                if provider == "meta" else _connection_manager.send_text(instance_name, number, (payload.text or "").strip()),
             )
             _persist_local_outbound_event(
                 instance_name=instance_name,
@@ -344,6 +365,7 @@ async def _send_message_unified(instance_name: str, request: Request):
                 text=(payload.text or "").strip(),
                 evolution_result=result if isinstance(result, dict) else {},
                 correlation_id=correlation_id,
+                provider=provider, outbound_attempt_id=attempt["id"], provider_message_id=attempt.get("providerMessageId"),
             )
             save_pipeline_event(
                 stage="send_whatsapp",
@@ -362,26 +384,13 @@ async def _send_message_unified(instance_name: str, request: Request):
         normalized_media_type = _normalize_media_type(msg_type, "application/octet-stream")
         media_payload = (payload.mediaUrl or "").strip() or (payload.base64 or "").strip()
         _log_message_start(instance_name, normalized_media_type, number, payload.metadata)
-        result = (
-            await get_official_whatsapp_provider().send_media(
-                instance_name=instance_name,
-                number=number,
-                media_base64=media_payload,
-                media_type=normalized_media_type,
-                mime_type="application/octet-stream",
-                file_name="file.bin",
-                caption=(payload.caption or "").strip(),
-            )
-            if _is_official_instance(instance_name)
-            else await _connection_manager.send_media(
-                instance_name=instance_name,
-                number=number,
-                media_payload=media_payload,
-                mediatype=normalized_media_type,
-                mimetype="application/octet-stream",
-                file_name="file.bin",
-                caption=(payload.caption or "").strip(),
-            )
+        provider = "meta" if _is_official_instance(instance_name) else "evolution"
+        media_reference = {"kind": normalized_media_type, "mimeType": "application/octet-stream", "fileName": "file.bin", "source": "inline"}
+        result, attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider=provider, number=number, msg_type=normalized_media_type,
+            caption=(payload.caption or "").strip(), correlation_id=correlation_id, media=media_reference, provider_operation="messages.sendMedia",
+            sender=lambda: get_official_whatsapp_provider().send_media(instance_name=instance_name, number=number, media_base64=media_payload, media_type=normalized_media_type, mime_type="application/octet-stream", file_name="file.bin", caption=(payload.caption or "").strip())
+            if provider == "meta" else _connection_manager.send_media(instance_name=instance_name, number=number, media_payload=media_payload, mediatype=normalized_media_type, mimetype="application/octet-stream", file_name="file.bin", caption=(payload.caption or "").strip()),
         )
         _persist_local_outbound_event(
             instance_name=instance_name,
@@ -396,6 +405,8 @@ async def _send_message_unified(instance_name: str, request: Request):
                 "caption": (payload.caption or "").strip() or None,
             },
             evolution_result=result if isinstance(result, dict) else {},
+            correlation_id=correlation_id,
+            provider=provider, outbound_attempt_id=attempt["id"], provider_message_id=attempt.get("providerMessageId"),
         )
         _log_message_success(instance_name, normalized_media_type, number)
         return result
@@ -413,6 +424,12 @@ async def _send_message_unified(instance_name: str, request: Request):
                 "reason": first.get("msg", "Formato invalido"),
             },
         ) from exc
+    except OutboundAttemptPersistenceError as exc:
+        save_pipeline_event(
+            stage="send_whatsapp", status="failed", instance=instance_name,
+            details={"cause": "outbound_attempt_persist_failed", "action": "Revisar el almacenamiento de intentos outbound."},
+        )
+        raise HTTPException(status_code=503, detail="No se pudo registrar el intento de envío de forma segura.") from exc
     except MetaPlatformError as exc:
         save_pipeline_event(
             stage="send_whatsapp",
@@ -461,7 +478,10 @@ async def send_text(instance_name: str, body: SendTextRequest):
         details={"kind": "text", "number": body.number, "outboundFingerprint": payload_fp},
     )
     try:
-        result = await _connection_manager.send_text(instance_name, body.number, body.text)
+        result, _attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider="evolution", number=body.number, msg_type="text", text=body.text,
+            provider_operation="messages.sendText", sender=lambda: _connection_manager.send_text(instance_name, body.number, body.text),
+        )
         save_business_event(
             {
                 "id": str(uuid.uuid4())[:16],
@@ -511,8 +531,10 @@ async def send_media(instance_name: str, body: SendMediaRequest):
         details={"kind": body.mediatype, "number": body.number, "outboundFingerprint": payload_fp},
     )
     try:
-        result = await _connection_manager.send_media(
-            instance_name, body.number, body.media_url, body.mediatype, body.mimetype, body.file_name, body.caption
+        result, _attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider="evolution", number=body.number, msg_type=body.mediatype, caption=body.caption,
+            media={"kind": body.mediatype, "mimeType": body.mimetype, "fileName": body.file_name, "source": "url"}, provider_operation="messages.sendMedia",
+            sender=lambda: _connection_manager.send_media(instance_name, body.number, body.media_url, body.mediatype, body.mimetype, body.file_name, body.caption),
         )
         save_business_event(
             {
@@ -598,14 +620,10 @@ async def send_uploaded_media(instance_name: str, body: SendUploadedMediaRequest
             instance=instance_name,
             details={"kind": normalized_media_type, "number": body.number, "outboundFingerprint": payload_fp},
         )
-        result = await _connection_manager.send_media(
-            instance_name=instance_name,
-            number=body.number,
-            media_payload=media_base64,
-            mediatype=normalized_media_type,
-            mimetype=mime_type,
-            file_name=file_name,
-            caption=body.caption,
+        result, _attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider="evolution", number=body.number, msg_type=normalized_media_type, caption=body.caption,
+            media={"kind": normalized_media_type, "mimeType": mime_type, "fileName": file_name, "source": "uploaded"}, provider_operation="messages.sendMedia",
+            sender=lambda: _connection_manager.send_media(instance_name=instance_name, number=body.number, media_payload=media_base64, mediatype=normalized_media_type, mimetype=mime_type, file_name=file_name, caption=body.caption),
         )
         consume_uploaded_file(body.file_id)
         save_business_event(
@@ -691,7 +709,10 @@ async def send_buttons(instance_name: str, body: SendButtonsRequest):
         ],
     }
     try:
-        result = await _connection_manager.send_buttons(instance_name, payload)
+        result, _attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider="evolution", number=body.number, msg_type="buttons", text=body.description,
+            provider_operation="messages.sendButtons", sender=lambda: _connection_manager.send_buttons(instance_name, payload),
+        )
         save_pipeline_event(stage="send_whatsapp", status="ok", instance=instance_name, details={"kind": "buttons"})
         return result
     except Exception as exc:
@@ -731,7 +752,10 @@ async def send_list(instance_name: str, body: SendListRequest):
         ],
     }
     try:
-        result = await _connection_manager.send_list(instance_name, payload)
+        result, _attempt = await _run_outbound_attempt(
+            instance_name=instance_name, provider="evolution", number=body.number, msg_type="list", text=body.description,
+            provider_operation="messages.sendList", sender=lambda: _connection_manager.send_list(instance_name, payload),
+        )
         save_pipeline_event(stage="send_whatsapp", status="ok", instance=instance_name, details={"kind": "list"})
         return result
     except Exception as exc:

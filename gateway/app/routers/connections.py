@@ -136,6 +136,15 @@ async def get_connection_webhook_deliveries(connection_id: str, limit: int = Que
         raise HTTPException(status_code=404, detail="Connection not found")
 
 
+@router.get("/{connection_id}/webhook/configuration")
+async def verify_connection_webhook_configuration(connection_id: str):
+    """Read-only verification; this route never sends a webhook request."""
+    try:
+        return _operations.verify_webhook_configuration(connection_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+
 @router.get("/{connection_id}/integration-endpoints")
 async def get_connection_integration_endpoints(connection_id: str):
     try:
@@ -191,8 +200,8 @@ async def regenerate_connection_api_key(connection_id: str):
 @router.post("/{connection_id}/reconnect")
 async def reconnect_connection(connection_id: str):
     try:
-        await _operations.reconnect(connection_id)
-        return {"ok": True}
+        result = await _operations.reconnect(connection_id)
+        return {"ok": True, **result}
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found")
     except ConnectionOperationUnavailableError as exc:
@@ -203,9 +212,29 @@ async def reconnect_connection(connection_id: str):
 async def get_connection_status(connection_id: str, request: Request):
     try:
         require_reviewer_connection_access(request, await _service.get_connection(connection_id))
-        return await _operations.status(connection_id)
+        availability = await _diagnostics.verify_availability(connection_id)
+        summary = availability["diagnostics"]["summary"]
+        return {
+            "connected": bool(availability["runtime_available"]),
+            "last_activity_at": availability.get("last_activity_at"),
+            "last_heartbeat_at": summary.get("last_heartbeat_at"),
+            "deprecated": True,
+            "diagnostic": "verify_availability",
+        }
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/{connection_id}/availability")
+async def verify_connection_availability(connection_id: str):
+    try:
+        return await _diagnostics.verify_availability(connection_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/{connection_id}/diagnostics")

@@ -71,7 +71,7 @@ def test_connection_creation_requires_enabled_providers(tmp_path, provider_id: s
     settings.update_providers({provider_id: False})
 
     with pytest.raises(ProviderDisabledError, match=provider_id):
-        service.create_connection(client_id=client.id, channel="whatsapp")
+        service.create_connection(client_id=client.id, channel="whatsapp", provider=provider_id)
 
 
 def test_evolution_connection_keeps_initial_name_and_starts_qr_runtime(tmp_path) -> None:

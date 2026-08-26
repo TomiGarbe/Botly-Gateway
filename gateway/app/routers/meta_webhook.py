@@ -483,7 +483,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                 received["statuses"] += 1
                 await _process_cloud_event(
                     instance=instance,
-                    event={"event": "MESSAGES_UPDATE", "instance": instance, "data": {"key": {"id": str(item.get("id") or ""), "remoteJid": str(item.get("recipient_id") or ""), "fromMe": True}, "status": item.get("status"), "timestamp": item.get("timestamp")}, "metaCloud": payload},
+                    event={"event": "MESSAGES_UPDATE", "instance": instance, "provider": "meta", "data": {"key": {"id": str(item.get("id") or ""), "remoteJid": str(item.get("recipient_id") or ""), "fromMe": True}, "status": item.get("status"), "timestamp": item.get("timestamp")}, "metaCloud": payload},
                     trace_started_at=started_at,
                     trace_request_id=request_id,
                     trace_phone_number_id=phone_id,

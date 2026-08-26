@@ -229,6 +229,22 @@ class EvolutionAdapter:
             retries=0,
         )
 
+    async def find_message_by_id(self, instance_name: str, provider_message_id: str) -> dict[str, Any]:
+        """Read Evolution's persisted message store by its exact Baileys key ID.
+
+        ``/chat/findMessages`` is the documented v2 query endpoint.  This is a
+        read-only lookup and deliberately performs no transport retry.
+        """
+        message_id = str(provider_message_id or "").strip()
+        if not message_id:
+            raise EvolutionError(message="Falta provider message id para la consulta", status_code=422, retryable=False)
+        return await self._client.request(
+            "POST",
+            f"/chat/findMessages/{instance_name}",
+            json={"where": {"key": {"id": message_id}}, "take": 2},
+            retries=0,
+        )
+
     async def get_base64_from_media_message(
         self,
         instance_name: str,

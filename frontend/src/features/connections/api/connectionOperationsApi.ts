@@ -123,6 +123,24 @@ export interface ConnectionDiagnostics {
   }
 }
 
+export interface ConnectionAvailability {
+  diagnostic: 'verify_availability'
+  provider: string
+  available: boolean
+  runtimeAvailable: boolean
+  deepProviderHealthChecked: boolean
+  limitation: string | null
+  diagnostics: ConnectionDiagnostics
+}
+
+export interface WebhookConfigurationVerification {
+  diagnostic: 'verify_webhook_configuration'
+  connectivity_checked: false
+  configuration_valid: boolean
+  webhook: Record<string, unknown>
+  checks: Array<{ code: string; ok: boolean; message: string }>
+}
+
 interface ApiConnectionApiKey {
   enabled: boolean
   has_api_key: boolean
@@ -174,6 +192,10 @@ export async function getConnectionWebhook(connectionId: string): Promise<Connec
     customHeaderName: payload.custom_header_name,
     hasAuthSecret: payload.has_auth_secret,
   }
+}
+
+export async function verifyConnectionWebhookConfiguration(connectionId: string): Promise<WebhookConfigurationVerification> {
+  return gatewayRequest<WebhookConfigurationVerification>(`/connections/${encodeURIComponent(connectionId)}/webhook/configuration`)
 }
 
 export async function listConnectionWebhookDeliveries(connectionId: string): Promise<{ items: WebhookDelivery[]; metrics: WebhookDeliveryMetrics }> {
@@ -274,12 +296,33 @@ export async function getConnectionDiagnostics(connectionId: string): Promise<Co
   }
 }
 
-export async function enqueueConnectionOperation(runtimeName: string, type: 'synchronize' | 'health_refresh'): Promise<void> {
-  await gatewayRequest('/operations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, targets: [runtimeName], scope: 'selected' }),
-  })
+export async function getConnectionAvailability(connectionId: string): Promise<ConnectionAvailability> {
+  const payload = await gatewayRequest<{
+    diagnostic: 'verify_availability'
+    provider: string
+    available: boolean
+    runtime_available: boolean
+    deep_provider_health_checked: boolean
+    limitation: string | null
+    diagnostics: {
+      summary: { status: ConnectionDiagnosticCheck['status']; last_verified_at: string | null; last_heartbeat_at: string | null; last_message_sent_at: number | null; last_message_received_at: number | null; last_webhook_success_at: string | null; last_error: string | null }
+      checks: Array<{ code: string; label: string; status: ConnectionDiagnosticCheck['status']; last_verified_at: string | null; message: string; action: string | null }>
+      technical: { phone_number_id: string | null; business_id: string | null; waba_id: string | null; provider: string | null; channel: string | null; api_version: string | null; last_synchronized_at: string | null }
+    }
+  }>(`/connections/${encodeURIComponent(connectionId)}/availability`)
+  return {
+    diagnostic: payload.diagnostic,
+    provider: payload.provider,
+    available: payload.available,
+    runtimeAvailable: payload.runtime_available,
+    deepProviderHealthChecked: payload.deep_provider_health_checked,
+    limitation: payload.limitation,
+    diagnostics: {
+      summary: { status: payload.diagnostics.summary.status, lastVerifiedAt: payload.diagnostics.summary.last_verified_at, lastHeartbeatAt: payload.diagnostics.summary.last_heartbeat_at, lastMessageSentAt: payload.diagnostics.summary.last_message_sent_at, lastMessageReceivedAt: payload.diagnostics.summary.last_message_received_at, lastWebhookSuccessAt: payload.diagnostics.summary.last_webhook_success_at, lastError: payload.diagnostics.summary.last_error },
+      checks: payload.diagnostics.checks.map((item) => ({ code: item.code, label: item.label, status: item.status, lastVerifiedAt: item.last_verified_at, message: item.message, action: item.action })),
+      technical: { phoneNumberId: payload.diagnostics.technical.phone_number_id, businessId: payload.diagnostics.technical.business_id, wabaId: payload.diagnostics.technical.waba_id, provider: payload.diagnostics.technical.provider, channel: payload.diagnostics.technical.channel, apiVersion: payload.diagnostics.technical.api_version, lastSynchronizedAt: payload.diagnostics.technical.last_synchronized_at },
+    },
+  }
 }
 
 export async function sendConnectionQuickMessage(connectionId: string, number: string, text: string): Promise<void> {

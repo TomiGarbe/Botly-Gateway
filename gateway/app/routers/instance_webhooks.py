@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from app.core.logging import get_logger
+from app.core.secret_protection import SecretRedactor
 from app.models.requests import WebhookConfigRequest, WebhookEnabledRequest
 from app.services.audit import audit_event
 from app.services.instance_webhooks import (
@@ -24,7 +25,10 @@ from app.services.webhook_delivery import dispatch_webhook_with_retry
 from app.services.webhook_delivery import diagnose_webhook_target
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/instances/{instance_name}/webhooks", tags=["instance-webhooks"])
+# Compatibility API used by the existing connection screen. New callers should
+# use the connection-owned /webhooks contract, which does not trust a supplied
+# instance name for ownership.
+router = APIRouter(prefix="/instances/{instance_name}/webhooks", tags=["instance-webhooks"], deprecated=True)
 
 
 def _validate_instance_name(instance_name: str) -> str:
@@ -193,12 +197,12 @@ async def test_webhook_route(instance_name: str, webhook_id: str, request: Reque
             "[WEBHOOK_TEST][PAYLOAD] payload ready",
             instance=name,
             webhook_id=webhook_id,
-            url=url,
+            url=SecretRedactor.redact_url(url),
             payload_event=payload.get("event"),
             payload_type=payload.get("type"),
         )
 
-        logger.info("[WEBHOOK_TEST][SEND] dispatch start", instance=name, webhook_id=webhook_id, url=url)
+        logger.info("[WEBHOOK_TEST][SEND] dispatch start", instance=name, webhook_id=webhook_id, url=SecretRedactor.redact_url(url))
         result = await dispatch_webhook_with_retry(
             payload=payload,
             request_id=f"test-{webhook_id[:6]}",
@@ -228,7 +232,7 @@ async def test_webhook_route(instance_name: str, webhook_id: str, request: Reque
                     "authType": item.get("authType"),
                     "masked": mask_headers_for_log({"Content-Type": "application/json", **build_auth_headers(item)}),
                 },
-                "url": url,
+                "url": SecretRedactor.redact_url(url),
             },
         }
     except HTTPException:
@@ -238,14 +242,14 @@ async def test_webhook_route(instance_name: str, webhook_id: str, request: Reque
             "[WEBHOOK_TEST][ERROR] unhandled exception during webhook test",
             instance=name,
             webhook_id=webhook_id,
-            error=str(exc),
+            error=SecretRedactor.redact_url(str(exc)),
         )
         raise HTTPException(
             status_code=500,
             detail={
                 "code": "WEBHOOK_TEST_INTERNAL_ERROR",
                 "message": "Fallo interno ejecutando test de webhook",
-                "error": str(exc),
+                "error": SecretRedactor.redact_url(str(exc)),
             },
         ) from exc
 
@@ -288,7 +292,7 @@ async def diagnose_webhook_route(instance_name: str, webhook_id: str, request: R
     if not item:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
     url = _validate_url(str(item.get("url") or ""))
-    logger.info("webhook_network_diagnose_start", instance=name, webhook_id=webhook_id, url=url)
+    logger.info("webhook_network_diagnose_start", instance=name, webhook_id=webhook_id, url=SecretRedactor.redact_url(url))
     result = await diagnose_webhook_target(url=url, timeout_s=8.0)
     logger.info(
         "webhook_network_diagnose_result",

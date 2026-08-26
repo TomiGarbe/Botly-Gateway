@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 class MetaSignupCompleteRequest(BaseModel):
     instance_name: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
     connection_id: str | None = Field(default=None, min_length=1, max_length=128)
+    setup_id: str | None = Field(default=None, min_length=1, max_length=128)
     code: str = Field(..., min_length=8)
     phone_number_id: str = Field(..., min_length=2)
     business_account_id: str = Field(..., min_length=2)
@@ -20,8 +21,8 @@ class MetaSignupCompleteRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_connection_target(self) -> "MetaSignupCompleteRequest":
-        if not self.instance_name and not self.connection_id:
-            raise ValueError("instance_name or connection_id is required")
+        if not self.instance_name and not self.connection_id and not self.setup_id:
+            raise ValueError("instance_name, connection_id or setup_id is required")
         return self
 
 

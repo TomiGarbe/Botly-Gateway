@@ -7,7 +7,14 @@ import { ClientsPage } from '../../features/clients/pages/ClientsPage'
 import { ConnectionDetailPage } from '../../features/connections/pages/ConnectionDetailPage'
 import { NewConnectionPage } from '../../features/connections/pages/NewConnectionPage'
 import { DashboardPage } from '../../features/dashboard/pages/DashboardPage'
+import { AnalyticsPage } from '../../features/analytics/pages/AnalyticsPage'
 import { SettingsPage } from '../../features/settings/pages/SettingsPage'
+import { WebhooksPage } from '../../features/webhooks/pages/WebhooksPage'
+import { WebhookDetailPage } from '../../features/webhooks/pages/WebhookDetailPage'
+import { WebhookDeliveriesPage } from '../../features/webhooks/pages/WebhookDeliveriesPage'
+import { WebhookDeliveryDetailPage } from '../../features/webhooks/pages/WebhookDeliveryDetailPage'
+import { ProviderDeliveriesPage } from '../../features/provider-deliveries/pages/ProviderDeliveriesPage'
+import { ProviderDeliveryDetailPage } from '../../features/provider-deliveries/pages/ProviderDeliveryDetailPage'
 import { AccessDeniedPage } from '../../features/auth/pages/AccessDeniedPage'
 import { LoginPage } from '../../features/auth/pages/LoginPage'
 import { useAuth } from '../providers/AuthProvider'
@@ -33,10 +40,17 @@ export function AppRouter() {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<ReviewerRoute><DashboardPage /></ReviewerRoute>} />
+          <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="clients" element={<ClientsPage />} />
           <Route path="clients/:clientId" element={<ClientDetailPage />} />
           <Route path="clients/:clientId/connections/new" element={<NewConnectionPage />} />
           <Route path="connections/:connectionId" element={<ConnectionDetailPage />} />
+          <Route path="connections/:connectionId/message-logs" element={<ProviderDeliveriesPage />} />
+          <Route path="connections/:connectionId/message-logs/:deliveryId" element={<ProviderDeliveryDetailPage />} />
+          <Route path="webhooks" element={<WebhooksPage />} />
+          <Route path="webhooks/:webhookId" element={<WebhookDetailPage />} />
+          <Route path="webhooks/:webhookId/deliveries" element={<WebhookDeliveriesPage />} />
+          <Route path="webhooks/:webhookId/deliveries/:deliveryId" element={<WebhookDeliveryDetailPage />} />
           <Route path="alerts" element={<ReviewerRoute><AlertsPage /></ReviewerRoute>} />
           <Route path="settings" element={<ReviewerRoute><SettingsPage /></ReviewerRoute>} />
         </Route>

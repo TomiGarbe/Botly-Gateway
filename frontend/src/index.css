@@ -212,10 +212,10 @@
   .settings-channel-toggle:not(:disabled) { @apply cursor-pointer; }
   .settings-channel-toggle-label { @apply leading-none; }
   .settings-channel-toggle.is-enabled .settings-channel-toggle-label { @apply text-emerald-400; }
-  .settings-channel-toggle-track { @apply relative flex h-7 w-12 items-center rounded-full border border-zinc-700 bg-zinc-800 p-0.5 shadow-inner transition-all duration-200; }
+  .settings-channel-toggle-track { @apply relative h-7 w-12 rounded-full border border-zinc-700 bg-zinc-800 shadow-inner transition-all duration-200; }
   .settings-channel-toggle.is-enabled .settings-channel-toggle-track { @apply border-emerald-400/50 bg-emerald-500; }
-  .settings-channel-toggle-thumb { @apply flex h-5 w-5 items-center justify-center rounded-full bg-zinc-300 text-zinc-600 shadow-sm transition-all duration-200; }
-  .settings-channel-toggle.is-enabled .settings-channel-toggle-thumb { @apply translate-x-5 bg-white text-emerald-600; }
+  .settings-channel-toggle-thumb { @apply absolute left-0.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full bg-zinc-300 text-zinc-600 shadow-sm transition-all duration-200; }
+  .settings-channel-toggle.is-enabled .settings-channel-toggle-thumb { @apply translate-x-5 -translate-y-1/2 bg-white text-emerald-600; }
   .settings-error { @apply mt-8 flex items-center justify-between gap-4 rounded-xl border border-red-900/70 bg-red-950/30 p-4 text-sm text-red-200; }
   .settings-error p { @apply m-0; }
   .settings-error button { @apply shrink-0 text-sm font-medium text-red-100 underline underline-offset-4; }
@@ -225,6 +225,14 @@
   .meta-signup-card p { @apply mb-0 mt-1 text-sm text-zinc-400; }
   .meta-signup-card .client-button-primary { @apply ml-auto; }
   .connection-provisioning { @apply mt-8 max-w-xl; }
+  .connection-setup-state { @apply mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-blue-900/60 bg-blue-950/20 px-4 py-3 text-sm; }
+  .connection-setup-state strong { @apply text-blue-200; }
+  .connection-setup-state span { @apply text-zinc-400; }
+  .connection-setup-state-cleanup_pending, .connection-setup-state-failed, .connection-setup-state-expired { @apply border-amber-900/60 bg-amber-950/20; }
+  .connection-setup-state-cleanup_pending strong, .connection-setup-state-failed strong, .connection-setup-state-expired strong { @apply text-amber-200; }
+  .connection-setup-notice { @apply mt-5 rounded-xl border border-amber-900/60 bg-amber-950/20 p-4; }
+  .connection-setup-notice p { @apply m-0 text-sm leading-6 text-amber-100; }
+  .connection-setup-notice button { @apply mt-4; }
   .connection-provisioning ol { @apply m-0 list-none space-y-4 border-l border-zinc-800 p-0 pl-5; }
   .connection-provisioning li { @apply relative flex items-center gap-3 text-sm text-zinc-600; }
   .connection-provisioning li > svg, .connection-provisioning li > span { @apply -ml-[1.89rem] box-content h-4 w-4 rounded-full border border-zinc-800 bg-zinc-950 p-0.5; }
@@ -351,6 +359,43 @@
   .connection-operations-grid { @apply mt-5 grid gap-2 sm:grid-cols-2; }
   .connection-operation { @apply flex min-h-11 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2.5 text-left text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50; }
   .connection-operation span { @apply min-w-0; }
+  .operations-console { @apply mt-6 space-y-4; }
+  .operations-console-heading { @apply border-b border-zinc-800 pb-4; }
+  .operations-console-heading p, .operation-section-heading p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .operations-console-heading h3 { @apply mb-0 mt-2 text-lg font-semibold text-zinc-100; }
+  .operations-console-heading span, .operation-section-heading span { @apply mt-1 block text-sm leading-6 text-zinc-500; }
+  .operation-section { @apply rounded-xl border border-zinc-800 bg-zinc-900/25 p-4 sm:p-5; }
+  .operation-status-card { @apply border-zinc-700 bg-zinc-900/45; }
+  .operation-section-heading { @apply flex flex-wrap items-start justify-between gap-4; }
+  .operation-section-heading h4 { @apply mb-0 mt-1 text-base font-medium text-zinc-100; }
+  .operation-section-heading > div { @apply min-w-0; }
+  .operation-status-grid { @apply mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4; }
+  .operation-status-grid div { @apply rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-3; }
+  .operation-status-grid dt { @apply text-xs font-medium uppercase tracking-wide text-zinc-500; }
+  .operation-status-grid dd { @apply mb-0 mt-1 text-sm font-medium text-zinc-200; }
+  .operation-diagnostics-grid, .operation-actions-grid { @apply mt-5 grid gap-3 lg:grid-cols-2; }
+  .operation-diagnostic-card, .operation-action-card { @apply flex min-w-0 items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/30 p-4; }
+  .operation-diagnostic-card > svg { @apply mt-0.5 shrink-0 text-blue-300; }
+  .operation-action-card > svg { @apply mt-0.5 shrink-0 text-amber-300; }
+  .operation-diagnostic-card > div, .operation-action-card > div { @apply min-w-0 flex-1; }
+  .operation-diagnostic-card strong, .operation-action-card strong { @apply block text-sm font-medium text-zinc-200; }
+  .operation-diagnostic-card span, .operation-action-card span { @apply mt-1 block text-sm leading-5 text-zinc-400; }
+  .operation-diagnostic-card small { @apply mt-2 block text-xs leading-5 text-zinc-500; }
+  .operation-action-card.is-muted { @apply bg-zinc-950/20 opacity-80; }
+  .operation-button { @apply inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50; }
+  .operation-button-diagnostic { @apply border border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:border-zinc-500 hover:text-zinc-100; }
+  .operation-button-action { @apply bg-blue-600 text-white hover:bg-blue-500; }
+  .operation-link { @apply shrink-0 text-sm font-medium text-zinc-300 underline-offset-4 hover:text-white hover:underline disabled:cursor-not-allowed disabled:opacity-50; }
+  .operation-last-error { @apply mt-4 flex items-start gap-2 rounded-lg border border-red-950/70 bg-red-950/20 px-3 py-3 text-sm leading-6 text-red-200; }
+  .operation-last-error svg { @apply mt-1 shrink-0; }
+  .operation-result { @apply mt-4 flex items-start gap-3 rounded-lg border p-4; }
+  .operation-result > svg { @apply mt-0.5 shrink-0; }
+  .operation-result strong, .operation-result span { @apply block; }
+  .operation-result strong { @apply text-sm font-medium; }
+  .operation-result span { @apply mt-1 text-sm; }
+  .operation-result.is-success { @apply border-emerald-900/70 bg-emerald-950/25 text-emerald-200; }
+  .operation-result.is-error { @apply border-red-900/70 bg-red-950/25 text-red-200; }
+  .workspace-webhooks > .connection-text-action { @apply hidden; }
   .connection-activity-list { @apply mt-5 list-none space-y-4 p-0; }
   .connection-activity-list li { @apply border-b border-zinc-900 pb-4; }
   .connection-activity-list li button { @apply flex w-full items-start justify-between gap-4 border-0 bg-transparent p-0 text-left; }
@@ -417,6 +462,160 @@
   .toast button { @apply ml-auto rounded-md p-1 text-current opacity-70 hover:bg-white/10 hover:opacity-100; }
 
   .clients-list { @apply gap-4; }
+  .webhooks-page, .webhook-detail, .webhook-delivery-detail, .provider-deliveries-page, .provider-delivery-detail { @apply mx-auto max-w-5xl; }
+  .webhooks-heading, .webhook-detail-heading { @apply flex items-start justify-between gap-5; }
+  .webhooks-heading > div > p { @apply m-0 text-xs font-medium uppercase tracking-wider text-zinc-500; }
+  .webhooks-heading h2, .webhook-detail-heading h2 { @apply mb-0 mt-2 text-2xl font-semibold tracking-tight text-zinc-100; }
+  .webhooks-heading span, .webhook-detail-heading p { @apply mt-2 block text-sm leading-6 text-zinc-500; }
+  .webhooks-list { @apply mt-8 grid gap-4; }
+  .webhook-card { @apply rounded-xl border border-zinc-800 bg-zinc-900/30 p-5 transition-colors hover:border-zinc-700 hover:bg-zinc-900/55; }
+  .webhook-card-heading { @apply flex items-start justify-between gap-4; }
+  .webhook-card-heading > div { @apply min-w-0; }
+  .webhook-card-title { @apply flex flex-wrap items-center gap-3; }
+  .webhook-card h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .webhook-card-heading p { @apply mb-0 mt-2 text-sm text-zinc-500; }
+  .webhook-enabled { @apply inline-flex rounded-full bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-400; }
+  .webhook-enabled.is-active { @apply bg-emerald-950/70 text-emerald-300; }
+  .webhook-card > code { @apply mt-5 block truncate text-sm text-zinc-300; }
+  .webhook-card-meta { @apply mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-500; }
+  .webhook-last-result { @apply mt-5 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2.5 text-sm text-zinc-400; }
+  .webhook-last-result strong { @apply font-medium text-zinc-200; }
+  .webhook-last-result small { @apply ml-auto inline-flex items-center gap-1 text-xs text-red-300; }
+  .webhook-last-result.is-success { @apply border-emerald-900/50 bg-emerald-950/15 text-emerald-300; }
+  .webhook-last-result.is-error { @apply border-red-900/50 bg-red-950/15 text-red-300; }
+  .webhook-form { @apply max-w-2xl; }
+  .webhook-enabled-control { @apply flex items-center gap-2 !space-y-0; }
+  .webhook-enabled-control input { @apply h-4 w-4; }
+  .webhook-enabled-control span { @apply text-sm text-zinc-300; }
+  .webhook-form-fieldset { @apply grid gap-3 rounded-lg border border-zinc-800 p-4; }
+  .webhook-form-fieldset legend { @apply px-1 text-sm font-medium text-zinc-300; }
+  .webhook-detail > .client-back-link, .webhook-delivery-detail > .client-back-link { @apply mt-1; }
+  .webhook-detail-heading { @apply mt-6 border-b border-zinc-800 pb-7; }
+  .webhook-detail-heading > div:first-child { @apply min-w-0; }
+  .webhook-detail-grid { @apply mt-8 grid gap-4 md:grid-cols-2; }
+  .webhook-detail-section, .webhook-actions, .webhook-diagnosis, .webhook-deliveries-preview, .webhook-delivery-data { @apply rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .webhook-detail-section h3, .webhook-actions h3, .webhook-diagnosis h3, .webhook-deliveries-preview h3, .webhook-delivery-data h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .webhook-detail-section > p, .webhook-actions p, .webhook-diagnosis > p, .webhook-deliveries-preview p { @apply mb-0 mt-2 text-sm leading-6 text-zinc-500; }
+  .webhook-detail-section dl { @apply mt-5 grid gap-4; }
+  .webhook-detail-section dl div { @apply grid gap-1; }
+  .webhook-detail-section dt, .webhook-summary-grid dt { @apply text-xs font-medium uppercase tracking-wide text-zinc-500; }
+  .webhook-detail-section dd, .webhook-summary-grid dd { @apply m-0 break-words text-sm text-zinc-300; }
+  .webhook-inline-result { @apply mt-4 rounded-lg border border-blue-900/60 bg-blue-950/20 px-3 py-2 text-sm text-blue-200; }
+  .webhook-actions, .webhook-deliveries-preview { @apply mt-5 flex flex-wrap items-center justify-between gap-5; }
+  .webhook-actions > div:last-child { @apply flex flex-wrap gap-2; }
+  .webhook-operation-result { @apply mt-5 flex items-start gap-3 rounded-xl border p-4; }
+  .webhook-operation-result strong, .webhook-operation-result span { @apply block; }
+  .webhook-operation-result span { @apply mt-1 text-sm; }
+  .webhook-operation-result.is-success { @apply border-emerald-900/60 bg-emerald-950/20 text-emerald-200; }
+  .webhook-operation-result.is-error { @apply border-red-900/60 bg-red-950/20 text-red-200; }
+  .webhook-diagnosis, .webhook-delivery-data { @apply mt-5; }
+  .webhook-json-viewer { @apply mt-4; }
+  .webhook-json-viewer > button { @apply mb-3; }
+  .webhook-json-viewer pre { @apply m-0 max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-xs leading-5 text-zinc-300; }
+  .webhook-json-empty { @apply mb-0 mt-4 text-sm text-zinc-500; }
+  .webhook-safe-error { @apply mb-0 mt-4 whitespace-pre-wrap break-words rounded-lg border border-red-900/60 bg-red-950/20 p-3 text-sm leading-6 text-red-200; }
+  .webhook-deliveries-heading { @apply mt-6; }
+  .webhook-delivery-filters { @apply mt-6 flex flex-wrap gap-3; }
+  .webhook-delivery-filters label { @apply grid gap-1 text-xs font-medium text-zinc-400; }
+  .webhook-delivery-filters input, .webhook-delivery-filters select { @apply min-h-9 min-w-44; }
+  .observability-search { @apply mt-6 flex max-w-2xl items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 p-3 text-zinc-400; }
+  .observability-search input { @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-zinc-100 outline-none placeholder:text-zinc-500; }
+  .observability-active-filters { @apply mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500; }
+  .observability-filter-chip { @apply rounded-full bg-zinc-800 px-2.5 py-1 text-zinc-300; }
+  .observability-timezone { @apply mb-0 mt-3 text-xs text-zinc-500; }
+  .webhook-pagination { @apply mt-6 flex flex-wrap items-center justify-end gap-3 text-sm text-zinc-500; }
+  .webhook-center-deliveries { @apply mt-8 list-none space-y-3 p-0; }
+  .webhook-center-deliveries > li { @apply grid gap-3 rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center; }
+  .delivery-result { @apply flex h-9 w-9 items-center justify-center rounded-full bg-red-950/60 text-red-300; }
+  .delivery-result.is-success { @apply bg-emerald-950/60 text-emerald-300; }
+  .webhook-center-deliveries li > div:nth-child(2) { @apply min-w-0; }
+  .webhook-center-deliveries strong { @apply flex items-center gap-1.5 text-sm font-medium text-zinc-100; }
+  .webhook-center-deliveries strong + span { @apply mt-1 block text-xs text-zinc-500; }
+  .webhook-center-deliveries small { @apply mt-2 block truncate text-xs text-red-300; }
+  .delivery-meta { @apply flex flex-wrap gap-2 text-xs text-zinc-400; }
+  .delivery-meta span { @apply rounded-full bg-zinc-800 px-2 py-1; }
+  .webhook-delivery-detail { @apply pb-8; }
+  .delivery-heading-icon { @apply shrink-0; }
+  .delivery-heading-icon.is-success { @apply text-emerald-300; }
+  .delivery-heading-icon.is-error { @apply text-red-300; }
+  .webhook-delivery-detail > .webhook-detail-section { @apply mt-8; }
+  .webhook-summary-grid { @apply mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4; }
+  .webhook-summary-grid div { @apply min-w-0; }
+  .provider-deliveries-heading { @apply mt-6; }
+  .provider-delivery-filters { @apply mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4; }
+  .provider-delivery-filters label { @apply grid min-w-0 gap-1 text-xs font-medium text-zinc-400; }
+  .provider-delivery-filters input, .provider-delivery-filters select { @apply min-h-9 w-full; }
+  .provider-delivery-list { @apply mt-8 list-none space-y-3 p-0; }
+  .provider-delivery-list > li { @apply grid gap-3 rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center; }
+  .provider-delivery-main { @apply min-w-0; }
+  .provider-delivery-main > strong { @apply block break-words text-sm font-medium text-zinc-100; }
+  .provider-delivery-main > span { @apply mt-1 block break-words text-xs text-zinc-500; }
+  .provider-delivery-main > div { @apply mt-2 flex flex-wrap items-center gap-2; }
+  .provider-delivery-main code { @apply max-w-full truncate rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400; }
+  .provider-delivery-status, .observability-status, .provider-delivery-direction { @apply inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium; }
+  .provider-delivery-status, .observability-status { @apply bg-red-950/60 text-red-300; }
+  .provider-delivery-status.is-success, .observability-status.is-success { @apply bg-emerald-950/60 text-emerald-300; }
+  .provider-delivery-status.is-timeout, .provider-delivery-status.is-network_error, .provider-delivery-status.is-configuration_error, .observability-status.is-timeout, .observability-status.is-network_error, .observability-status.is-configuration_error { @apply bg-amber-950/60 text-amber-300; }
+  .provider-delivery-direction { @apply bg-zinc-800 text-zinc-300; }
+  .provider-delivery-detail { @apply pb-8; }
+  .provider-delivery-detail > .client-back-link { @apply mt-1; }
+  .provider-delivery-detail > .webhook-detail-section { @apply mt-5; }
+  .provider-delivery-flow > div { @apply mt-4 flex flex-wrap items-center gap-3 text-sm text-zinc-300; }
+  .observability-flow { @apply mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500; }
+  .observability-flow strong { @apply rounded bg-zinc-800 px-2 py-1 text-zinc-200; }
+  .observability-flow small { @apply text-zinc-500; }
+  .provider-delivery-flow strong { @apply rounded-lg bg-zinc-800 px-3 py-2 text-zinc-100; }
+  .provider-delivery-flow span, .provider-delivery-flow small { @apply text-zinc-500; }
+  .provider-delivery-navigation { @apply mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .provider-delivery-navigation h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .provider-delivery-navigation p { @apply mb-0 mt-1 text-sm text-zinc-500; }
+  .observability-related-links { @apply flex flex-wrap gap-2; }
+  .provider-delivery-error { @apply border-red-900/60; }
+  .analytics-page { @apply mx-auto max-w-6xl pb-8; }
+  .analytics-page > .webhooks-heading { @apply mt-1; }
+  .analytics-filters { @apply mt-6 flex flex-wrap gap-3; }
+  .analytics-filters label { @apply grid gap-1 text-xs font-medium text-zinc-400; }
+  .analytics-filters input, .analytics-filters select { @apply min-h-9 min-w-40; }
+  .analytics-cards { @apply mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-3; }
+  .analytics-card { @apply flex items-start justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .analytics-card span, .analytics-card small { @apply block text-xs text-zinc-500; }
+  .analytics-card strong { @apply mt-2 block text-2xl font-semibold text-zinc-100; }
+  .analytics-card small { @apply mt-2; }
+  .analytics-card > svg { @apply text-zinc-500; }
+  .analytics-card.is-success { @apply border-emerald-900/50; }
+  .analytics-card.is-success > svg { @apply text-emerald-300; }
+  .analytics-card.is-error { @apply border-red-900/50; }
+  .analytics-card.is-error > svg { @apply text-red-300; }
+  .analytics-card.is-warning { @apply border-amber-900/50; }
+  .analytics-card.is-warning > svg { @apply text-amber-300; }
+  .analytics-section { @apply mt-5 rounded-xl border border-zinc-800 bg-zinc-900/30 p-5; }
+  .analytics-section h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .analytics-section > p { @apply mb-0 mt-2 text-sm text-zinc-500; }
+  .analytics-table-wrap { @apply mt-5 overflow-x-auto; }
+  .analytics-table-wrap table { @apply w-full min-w-[42rem] border-collapse text-left text-sm; }
+  .analytics-table-wrap th { @apply border-b border-zinc-800 pb-3 pr-4 text-xs font-medium uppercase tracking-wide text-zinc-500; }
+  .analytics-table-wrap td { @apply border-b border-zinc-800/70 py-3 pr-4 text-zinc-300; }
+  .analytics-table-wrap td:first-child { @apply font-medium text-zinc-100; }
+  .analytics-table-wrap small { @apply mt-1 block text-xs text-zinc-500; }
+  .analytics-grid { @apply grid gap-5 lg:grid-cols-2; }
+  .analytics-definition { @apply mt-5 grid gap-3 sm:grid-cols-2; }
+  .analytics-definition div { @apply rounded-lg bg-zinc-950/50 px-3 py-2; }
+  .analytics-definition dt { @apply text-xs text-zinc-500; }
+  .analytics-definition dd { @apply mb-0 mt-1 text-sm font-medium text-zinc-200; }
+  .analytics-series { @apply mt-5 flex min-h-48 items-end gap-2 overflow-x-auto rounded-lg bg-zinc-950/50 p-4; }
+  .analytics-series-item { @apply grid min-w-12 flex-1 gap-2 text-center; }
+  .analytics-bars { @apply flex h-36 items-end justify-center gap-1; }
+  .analytics-bars span { @apply block w-2 min-h-0 rounded-t; }
+  .analytics-bars .is-messages { @apply bg-blue-400; }
+  .analytics-bars .is-failures { @apply bg-red-400; }
+  .analytics-bars .is-unknown { @apply bg-amber-400; }
+  .analytics-bars .is-webhooks { @apply bg-violet-400; }
+  .analytics-series-item small { @apply truncate text-[10px] text-zinc-500; }
+  .workspace-message-actions { @apply mt-0; }
+  .workspace-message-log-link { @apply ml-auto text-xs font-medium text-blue-300 underline underline-offset-4 hover:text-blue-200; }
+  .workspace-webhook-center { @apply mt-8 flex flex-wrap items-center justify-between gap-5; }
+  .workspace-webhook-center h3 { @apply m-0 text-base font-medium text-zinc-100; }
+  .workspace-webhook-center p { @apply mb-0 mt-2 text-sm text-zinc-500; }
   .client-card { @apply flex min-h-52 flex-col justify-between gap-6 p-5; }
   .client-card-content { @apply min-w-0; }
   .client-card h2 { @apply text-lg; }

@@ -12,6 +12,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.secret_protection import SecretRedactor
 from app.services.instance_webhooks import append_dispatch_history, build_auth_headers, build_auth_query_params, mask_headers_for_log
 
 logger = get_logger(__name__)
@@ -64,7 +65,7 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     message_text = message.get("text") or message.get("caption")
     text = str(payload.get("text") or content_text or message_text or "")
     media = payload.get("media") if isinstance(payload.get("media"), dict) else {}
-    return {
+    return SecretRedactor.redact_json({
         "event": payload.get("event"),
         "type": payload.get("type"),
         "subtype": payload.get("subtype"),
@@ -76,7 +77,7 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "textPreview": text[:120] if text else "",
         "mediaKind": media.get("kind"),
         "mediaCaption": str(media.get("caption") or "")[:120],
-    }
+    })
 
 
 def _looks_binary_blob(key: str, value: str) -> bool:
@@ -104,7 +105,7 @@ def _truncate_payload_value(value: Any, *, key: str = "") -> Any:
 
 
 def _serialize_payload_preview(payload: dict[str, Any]) -> tuple[str, bool]:
-    sanitized = _truncate_payload_value(payload)
+    sanitized = _truncate_payload_value(SecretRedactor.redact_json(payload))
     encoded = json.dumps(sanitized, ensure_ascii=True, default=str)
     truncated = len(encoded) > _MAX_PAYLOAD_PREVIEW_CHARS
     return encoded[:_MAX_PAYLOAD_PREVIEW_CHARS], truncated
@@ -113,7 +114,8 @@ def _serialize_payload_preview(payload: dict[str, Any]) -> tuple[str, bool]:
 def _response_headers_summary(headers: httpx.Headers | dict[str, str]) -> dict[str, str]:
     raw = dict(headers)
     interesting = {"content-type", "content-length", "date", "server", "retry-after", "location", "x-request-id", "x-correlation-id"}
-    return {key: value for key, value in raw.items() if key.lower() in interesting or key.lower().startswith("x-")}
+    selected = {key: value for key, value in raw.items() if key.lower() in interesting or key.lower().startswith("x-")}
+    return SecretRedactor.redact_headers(selected)
 
 
 def _classify_dispatch_error(exc: Exception) -> str:
@@ -140,7 +142,7 @@ def _classify_dispatch_error(exc: Exception) -> str:
 
 
 def _safe_traceback(exc: Exception) -> str:
-    return "".join(traceback.format_exception_only(type(exc), exc)).strip()[:500]
+    return SecretRedactor.redact_url("".join(traceback.format_exception_only(type(exc), exc)).strip())[:500]
 
 
 def _pick_payload_by_filter(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -158,7 +160,10 @@ def _pick_payload_by_filter(item: dict[str, Any], payload: dict[str, Any]) -> di
     return payload if allow_business else None
 
 
-async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: str, item: dict[str, Any], test_mode: bool = False) -> dict[str, Any]:
+async def dispatch_webhook_with_retry(
+    *, payload: dict[str, Any], request_id: str, item: dict[str, Any], test_mode: bool = False,
+    manual_action_id: str | None = None, bypass_filters: bool = False,
+) -> dict[str, Any]:
     instance_name = str(payload.get("instance") or "")
     webhook_id = str(item.get("id") or "")
     webhook_name = str(item.get("name") or webhook_id or "webhook")
@@ -166,9 +171,11 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
     message_id = str(((payload.get("message") or {}).get("id") or payload.get("messageId") or ""))
     conversation_id = str(((payload.get("meta") or {}).get("conversationId") or (payload.get("trace") or {}).get("conversationId") or ""))
     event_type = str(payload.get("event") or payload.get("subtype") or payload.get("type") or "UNKNOWN")
+    event_id = str(payload.get("id") or "").strip() or None
+    dispatch_started_at = int(time.time() * 1000)
     url = str(item.get("url") or "")
     if not url.startswith(("http://", "https://")):
-        append_dispatch_history(
+        delivery = append_dispatch_history(
             instance_name,
             webhook_id,
             {
@@ -179,6 +186,11 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                 "instanceName": instance_name,
                 "destinationUrl": url,
                 "eventType": event_type,
+                "eventId": event_id,
+                "requestId": request_id,
+                "firstAttemptAt": dispatch_started_at,
+                "lastAttemptAt": int(time.time() * 1000),
+                "isTest": test_mode,
                 "messageId": message_id or None,
                 "conversationId": conversation_id or None,
                 "status": "invalid_url",
@@ -190,14 +202,18 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                 "retryCount": 0,
                 "error": "invalid webhook url",
                 "errorType": "invalid_url",
-                "request": {"method": "POST", "headers": {}, "payloadSummary": _payload_summary(payload), "payloadSizeBytes": 0, "payloadPreview": "", "payloadTruncated": False},
+                "request": {"method": "POST", "url": url, "query": {}, "headers": {}, "payloadSummary": _payload_summary(payload), "payloadSizeBytes": 0, "payloadPreview": "", "payloadTruncated": False},
                 "response": {"headers": {}, "bodyPreview": ""},
                 "attempts": [{"attempt": 1, "success": False, "statusCode": 0, "errorType": "invalid_url", "error": "invalid webhook url", "durationMs": 0.0}],
+                "metadata": {"manualActionId": manual_action_id} if manual_action_id else {},
             },
         )
-        return {"ok": False, "status": "invalid_url", "statusCode": 0, "retriesUsed": 0, "latencyMs": 0.0}
+        return {"ok": False, "status": "invalid_url", "statusCode": 0, "retriesUsed": 0, "latencyMs": 0.0, "deliveryId": delivery.get("id") if delivery else None}
 
-    target_payload = _pick_payload_by_filter(item, payload)
+    # A deliberate operator test or redelivery validates the current endpoint
+    # regardless of event subscriptions. Normal production deliveries remain
+    # filter-bound.
+    target_payload = payload if test_mode or bypass_filters else _pick_payload_by_filter(item, payload)
     if target_payload is None:
         return {"ok": True, "status": "skipped_by_filter", "statusCode": 204, "retriesUsed": 0, "latencyMs": 0.0}
 
@@ -215,7 +231,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
         instance=instance_name,
         webhook_id=webhook_id,
         message_id=message_id or None,
-        url=url,
+        url=SecretRedactor.redact_url(url),
         method="POST",
         timeout_s=float(settings.instance_webhook_timeout),
         payload_summary=_payload_summary(target_payload),
@@ -270,7 +286,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                     )
                 resp = await client.post(url, json=target_payload, headers=headers, params=query_params)
             code = int(resp.status_code)
-            response_snippet = (resp.text or "")[:_MAX_RESPONSE_PREVIEW_CHARS]
+            response_snippet = SecretRedactor.redact_json_preview(resp.text or "", max_chars=_MAX_RESPONSE_PREVIEW_CHARS)
             response_headers = _response_headers_summary(resp.headers)
             attempt_duration_ms = round((time.perf_counter() - attempt_started) * 1000, 2)
             attempt_error_type = _classify_http_error(code)
@@ -307,7 +323,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                     latency_ms=latency_ms,
                     test_mode=test_mode,
                 )
-                append_dispatch_history(
+                delivery = append_dispatch_history(
                     instance_name,
                     webhook_id,
                     {
@@ -317,6 +333,11 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                         "instanceName": instance_name,
                         "destinationUrl": url,
                         "eventType": event_type,
+                        "eventId": event_id,
+                        "requestId": request_id,
+                        "firstAttemptAt": dispatch_started_at,
+                        "lastAttemptAt": int(time.time() * 1000),
+                        "isTest": test_mode,
                         "status": "success",
                         "success": True,
                         "failure": False,
@@ -331,6 +352,8 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                         "durationMs": latency_ms,
                         "request": {
                             "method": "POST",
+                            "url": url,
+                            "query": query_params,
                             "headers": mask_headers_for_log(headers),
                             "payloadSummary": _payload_summary(target_payload),
                             "payloadSizeBytes": payload_size,
@@ -342,12 +365,13 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                             "bodyPreview": response_snippet,
                         },
                         "attempts": attempts_log,
+                        "metadata": {"manualActionId": manual_action_id} if manual_action_id else {},
                     },
                 )
-                return {"ok": True, "status": f"ok_{code}", "statusCode": code, "retriesUsed": retries_used, "latencyMs": latency_ms}
+                return {"ok": True, "status": f"ok_{code}", "statusCode": code, "retriesUsed": retries_used, "latencyMs": latency_ms, "deliveryId": delivery.get("id") if delivery else None}
         except Exception as caught:
             exc = caught
-            response_snippet = str(caught)[:_MAX_RESPONSE_PREVIEW_CHARS]
+            response_snippet = SecretRedactor.redact_url(str(caught))[:_MAX_RESPONSE_PREVIEW_CHARS]
             error_type = _classify_dispatch_error(caught)
             attempt_duration_ms = round((time.perf_counter() - attempt_started) * 1000, 2)
             logger.error(
@@ -417,7 +441,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     status_name = _status_name(last_code, last_exc)
     last_error_type = _classify_http_error(last_code) if last_code is not None else (_classify_dispatch_error(last_exc) if last_exc is not None else None)
-    append_dispatch_history(
+    delivery = append_dispatch_history(
         instance_name,
         webhook_id,
         {
@@ -428,6 +452,11 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
             "instanceName": instance_name,
             "destinationUrl": url,
             "eventType": event_type,
+            "eventId": event_id,
+            "requestId": request_id,
+            "firstAttemptAt": dispatch_started_at,
+            "lastAttemptAt": int(time.time() * 1000),
+            "isTest": test_mode,
             "messageId": message_id or None,
             "conversationId": conversation_id or None,
             "status": status_name,
@@ -443,6 +472,8 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
             "retryable": retryable,
             "request": {
                 "method": "POST",
+                "url": url,
+                "query": query_params,
                 "headers": mask_headers_for_log(headers),
                 "payloadSummary": _payload_summary(target_payload),
                 "payloadSizeBytes": payload_size,
@@ -454,6 +485,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
                 "bodyPreview": last_error if last_code is None else response_snippet,
             },
             "attempts": attempts_log,
+            "metadata": {"manualActionId": manual_action_id} if manual_action_id else {},
         },
     )
     if str(status_name).startswith("http_"):
@@ -486,7 +518,7 @@ async def dispatch_webhook_with_retry(*, payload: dict[str, Any], request_id: st
             error=last_error,
             test_mode=test_mode,
         )
-    return {"ok": False, "status": status_name, "statusCode": int(last_code or 0), "retriesUsed": retries_used, "latencyMs": latency_ms, "error": last_error}
+    return {"ok": False, "status": status_name, "statusCode": int(last_code or 0), "retriesUsed": retries_used, "latencyMs": latency_ms, "error": last_error, "deliveryId": delivery.get("id") if delivery else None}
 
 
 async def diagnose_webhook_target(url: str, timeout_s: float) -> dict[str, Any]:
@@ -523,19 +555,19 @@ async def diagnose_webhook_target(url: str, timeout_s: float) -> dict[str, Any]:
         http_result = {
             "ok": True,
             "statusCode": int(resp.status_code),
-            "headers": dict(resp.headers),
-            "bodyPreview": (resp.text or "")[:240],
+            "headers": SecretRedactor.redact_headers(dict(resp.headers)),
+            "bodyPreview": SecretRedactor.redact_json_preview(resp.text or "", max_chars=240),
         }
     except Exception as exc:
         http_result = {
             "ok": False,
             "errorType": _classify_dispatch_error(exc),
-            "error": str(exc),
+            "error": SecretRedactor.redact_url(str(exc)),
             "traceback": _safe_traceback(exc),
         }
 
     return {
-        "target": {"host": host, "port": port, "url": url},
+        "target": {"host": host, "port": port, "url": SecretRedactor.redact_url(url)},
         "dns": {"resolved": bool(dns_result), "addresses": dns_result},
         "tcp": {"ok": tcp_ok, "error": tcp_error},
         "http": http_result,

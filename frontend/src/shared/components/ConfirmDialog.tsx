@@ -5,6 +5,7 @@ interface ConfirmDialogProps {
   title: string
   description: string
   confirmLabel: string
+  submittingLabel?: string
   isOpen: boolean
   isSubmitting?: boolean
   onCancel: () => void
@@ -12,7 +13,7 @@ interface ConfirmDialogProps {
   tone?: 'danger' | 'default'
 }
 
-export function ConfirmDialog({ title, description, confirmLabel, isOpen, isSubmitting = false, onCancel, onConfirm, tone = 'danger' }: ConfirmDialogProps) {
+export function ConfirmDialog({ title, description, confirmLabel, submittingLabel = 'Procesando…', isOpen, isSubmitting = false, onCancel, onConfirm, tone = 'danger' }: ConfirmDialogProps) {
   const cancelButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function ConfirmDialog({ title, description, confirmLabel, isOpen, isSubm
       <p id="confirm-dialog-description">{description}</p>
       <div className="confirm-dialog-actions">
         <button ref={cancelButton} type="button" className="client-button-secondary" onClick={onCancel} disabled={isSubmitting}>Cancelar</button>
-        <button type="button" className={tone === 'danger' ? 'client-button-danger' : 'client-button-primary'} onClick={onConfirm} disabled={isSubmitting}>{isSubmitting ? 'Procesando…' : confirmLabel}</button>
+        <button type="button" className={tone === 'danger' ? 'client-button-danger' : 'client-button-primary'} onClick={onConfirm} disabled={isSubmitting}>{isSubmitting ? submittingLabel : confirmLabel}</button>
       </div>
     </section>
   </div>

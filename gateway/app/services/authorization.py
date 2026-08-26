@@ -31,6 +31,29 @@ def require_reviewer_connection_access(request: Request, connection: Any) -> Non
         require_reviewer_client_access(request, str(getattr(connection, "client_id", "")))
 
 
+def require_webhook_delivery_manual_action_access(request: Request, connection: Any) -> None:
+    """Explicit write capability for an operator-triggered webhook action.
+
+    It intentionally requires a signed-in actor in addition to the existing
+    connection ownership policy; an API key or a read-only lookup cannot cause
+    an external test dispatch.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None or not str(getattr(user, "id", "") or "").strip():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Manual webhook actions require an authenticated operator")
+    require_reviewer_connection_access(request, connection)
+
+
+def require_webhook_delivery_repeat_test_access(request: Request, connection: Any) -> None:
+    """Backward-compatible name for the repeat-test capability."""
+    require_webhook_delivery_manual_action_access(request, connection)
+
+
+def require_provider_delivery_resend_access(request: Request, connection: Any) -> None:
+    """Explicit actor-bound capability for an outbound provider side effect."""
+    require_webhook_delivery_manual_action_access(request, connection)
+
+
 def reviewer_endpoint_allowed(request: Request) -> bool:
     """Small global surface; ownership is enforced for each connection."""
     if not is_meta_reviewer(getattr(request.state, "user", None)):
@@ -39,7 +62,8 @@ def reviewer_endpoint_allowed(request: Request) -> bool:
     simple = {
         ("GET", "/auth/session"), ("POST", "/auth/logout"), ("GET", "/channels"),
         ("GET", "/clients"), ("GET", "/connections"), ("POST", "/connections"),
-        ("GET", "/meta/signup/config"), ("POST", "/meta/signup/complete"),
+        ("POST", "/connection-setups"),
+        ("GET", "/meta/signup/config"), ("POST", "/meta/signup/complete"), ("GET", "/analytics"),
     }
     if (method, path) in simple:
         return True
@@ -47,4 +71,14 @@ def reviewer_endpoint_allowed(request: Request) -> bool:
         return method == "GET" and path.count("/") == 2
     if path.startswith("/meta/signup/onboarding/"):
         return method == "GET"
+    if path.startswith("/connection-setups/"):
+        return method in {"GET", "POST"}
+    if path == "/webhooks" or path.startswith("/webhooks/"):
+        # The Webhooks Center router resolves each stable webhook ID back to
+        # its connection before exposing or mutating it.
+        return True
+    if path == "/provider-deliveries" or path.startswith("/provider-deliveries/"):
+        # The router resolves both list and detail records back to a connection
+        # before exposing any delivery evidence.
+        return method == "GET" or (method == "POST" and path.endswith("/resend"))
     return path.startswith("/connections/")
