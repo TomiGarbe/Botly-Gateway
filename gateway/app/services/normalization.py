@@ -12,6 +12,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.secret_protection import SecretRedactor
 
 MEDIA_MESSAGE_KEYS = (
     "imageMessage",
@@ -134,6 +135,7 @@ STATUS_ALIASES = {
     "read_ack": "read",
     "played": "played",
     "playedback": "played",
+    "failed": "failed",
 }
 
 
@@ -376,7 +378,7 @@ def _normalize_message_update(payload: dict[str, Any], base: dict[str, Any]) -> 
     return {
         **base,
         "layer": "business",
-        "direction": "system",
+        "direction": "status",
         "type": "event",
         "subtype": "message_status",
         "originalType": "messages.update",
@@ -947,14 +949,14 @@ def save_business_event(event: dict[str, Any]) -> bool:
     if event.get("layer") != "business":
         return True
     _enrich_business_activity(event)
-    _business_events.appendleft(event)
+    _business_events.appendleft(SecretRedactor.redact_json(event))
     return _persist_business_events()
 
 
 def save_raw_event(event: dict[str, Any]) -> None:
     if not _settings.debug:
         return
-    _raw_events.appendleft(event)
+    _raw_events.appendleft(SecretRedactor.redact_json(event))
 
 
 def save_event(normalized: dict[str, Any]) -> bool:
@@ -970,7 +972,31 @@ def save_event(normalized: dict[str, Any]) -> bool:
         while len(_business_event_keys_order) > _business_event_keys_max:
             old = _business_event_keys_order.popleft()
             _business_event_keys.discard(old)
-    _business_events.appendleft(normalized)
+    if str(normalized.get("direction") or "").lower() == "status":
+        # Matching and durable state updates belong to the dedicated service;
+        # this module remains responsible only for shaping Timeline events.
+        delivery = normalized.get("providerDelivery") if isinstance(normalized.get("providerDelivery"), dict) else None
+        if delivery is not None:
+            try:
+                from app.services.provider_status_correlation import correlate_provider_status
+
+                correlation = correlate_provider_status(normalized)
+                metadata = delivery.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["statusCorrelation"] = correlation.public_dict()
+                if correlation.delivery_state:
+                    delivery["deliveryState"] = correlation.delivery_state
+                if correlation.outcome == "matched":
+                    delivery["outboundAttemptId"] = correlation.attempt_id
+                    delivery["reconciliationState"] = "not_required"
+            except Exception as exc:
+                # A local observability write must not turn an otherwise valid
+                # provider webhook into a failed receipt or invent a match.
+                logger.warning("provider_status_correlation_failed", instance=normalized.get("instance"), error=str(exc))
+                metadata = delivery.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["statusCorrelation"] = {"outcome": "invalid", "reason": "local_store_unavailable", "attempt_id": None, "delivery_state": None}
+    _business_events.appendleft(SecretRedactor.redact_json(normalized))
     persisted = _persist_business_events()
     media = normalized.get("media")
     message = normalized.get("message") or {}
@@ -1027,7 +1053,11 @@ def _event_dedupe_key(normalized: dict[str, Any]) -> str | None:
     event = str(normalized.get("event") or "").strip()
     direction = str(normalized.get("direction") or "").strip()
     subtype = str(normalized.get("subtype") or normalized.get("messageType") or "").strip()
-    return "|".join([instance, event, msg_id, direction, subtype])
+    # Status updates for the same provider message form a progression (sent,
+    # delivered, read, ...).  They are separate evidence, while an exact repeat
+    # of the same status remains deduplicable.
+    status = str(normalized.get("status") or "").strip() if direction == "status" else ""
+    return "|".join([instance, event, msg_id, direction, subtype, status])
 
 
 def _enrich_business_activity(event: dict[str, Any]) -> None:
@@ -1050,6 +1080,47 @@ def _enrich_business_activity(event: dict[str, Any]) -> None:
     event.setdefault("durationMs", None)
     event.setdefault("description", "Mensaje enviado" if direction == "outbound" else "Mensaje recibido")
     event.setdefault("correlationId", meta.get("requestId") or pipeline.get("requestId") or pipeline.get("conversationId") or message.get("id"))
+    # A provider interaction references this message event; it never creates a
+    # second message or preserves the provider's raw body.  This gives inbound
+    # and outbound activity the same vocabulary as WebhookDelivery.
+    direction_value = "outbound" if direction == "outbound" else "status" if direction == "status" else "inbound"
+    raw = event.get("raw") if isinstance(event.get("raw"), dict) else {}
+    provider = str(raw.get("provider") or raw.get("providerName") or event.get("provider") or ("evolution" if raw else "unknown"))
+    error_message = str(error.get("message") or error.get("error") or "").strip() or None
+    if error_message and any(token in error_message.lower() for token in ("token=", "secret=", "authorization:", "api_key=")):
+        error_message = "[REDACTED]"
+    error_code = str(error.get("code") or error.get("type") or "").strip() or None
+    lowered_error = f"{error_code or ''} {error_message or ''}".lower()
+    semantic_status = "success" if not error else ("timeout" if "timeout" in lowered_error else "network_error" if any(token in lowered_error for token in ("network", "dns", "connect", "transport", "ssl")) else "configuration_error" if any(token in lowered_error for token in ("config", "credential", "token")) else "failed")
+    media = event.get("media") if isinstance(event.get("media"), dict) else {}
+    event.setdefault("providerDelivery", SecretRedactor.redact_json({
+        "id": str(event.get("id") or "") or None,
+        "timestamp": event.get("timestamp"),
+        "operation": "provider.message.status" if direction_value == "status" else f"provider.message.{direction_value}",
+        "direction": direction_value,
+        "semanticStatus": semantic_status,
+        "deliveryState": None,
+        "reconciliationState": None,
+        "provider": provider,
+        "source": {"kind": "gateway" if direction_value == "outbound" else "provider", "instance": event.get("instance")},
+        "destination": {"kind": "provider" if direction_value == "outbound" else "gateway", "instance": event.get("instance")},
+        "messageId": message.get("id") or event.get("messageId"),
+        "conversationId": meta.get("conversationId") or pipeline.get("conversationId"),
+        "channelId": meta.get("channelId"),
+        "connectionId": meta.get("connectionId"),
+        "providerMessageId": raw.get("providerMessageId") or message.get("id"),
+        "outboundAttemptId": raw.get("outboundAttemptId"),
+        "requestId": meta.get("requestId") or pipeline.get("requestId"),
+        "eventId": event.get("eventId"),
+        "correlationId": event.get("correlationId"),
+        "durationMs": event.get("durationMs"),
+        "attemptCount": 1,
+        "retryCount": 0,
+        "request": {"method": "PROVIDER_SEND" if direction_value == "outbound" else "PROVIDER_WEBHOOK", "body": {"messageType": event.get("messageType") or message.get("kind"), "media": {key: media.get(key) for key in ("id", "kind", "mimeType", "fileName") if media.get(key) is not None}}},
+        "response": {"status": None, "headers": {}, "body": {}},
+        "error": {"code": error_code, "category": error_code or semantic_status, "message": error_message, "retryable": None} if error_message or error_code else None,
+        "metadata": {"event": event.get("event"), "messageType": event.get("messageType") or message.get("kind")},
+    }))
     if error and not event.get("action"):
         event["action"] = "Revisa el detalle del error y vuelve a intentar cuando corresponda."
 
@@ -1077,7 +1148,7 @@ def save_pipeline_event(
 ) -> None:
     stage_value = str(stage or "pipeline")
     status_value = str(status or "unknown")
-    details_value = details or {}
+    details_value = SecretRedactor.redact_json(details or {})
     lowered = f"{stage_value} {status_value} {event}".lower()
     inferred_component = component or (
         "Meta" if "meta" in lowered or "oauth" in lowered or "discovery" in lowered or "subscription" in lowered or "phone" in lowered
@@ -1149,10 +1220,42 @@ def list_events(instance: str | None = None, limit: int = 100) -> list[dict[str,
             tracked = _media_index.get(media_id) if media_id else None
             if isinstance(tracked, dict) and tracked.get("downloadSource"):
                 event = {**event, "media": {**media, "downloadSource": tracked.get("downloadSource"), "decryptedSize": tracked.get("decryptedSize")}}
-        items.append(event)
+        items.append(SecretRedactor.redact_json(event))
         if len(items) >= limit:
             break
     return items
+
+
+def list_provider_deliveries(
+    *,
+    instance: str | None = None,
+    limit: int = 100,
+    provider: str | None = None,
+    direction: str | None = None,
+    status: str | None = None,
+    message_id: str | None = None,
+    conversation_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Lightweight, compatible view over persisted message activity."""
+    records: list[dict[str, Any]] = []
+    for event in list_events(instance=instance, limit=max(1, min(limit * 4, 500))):
+        delivery = event.get("providerDelivery") if isinstance(event.get("providerDelivery"), dict) else None
+        if not delivery:
+            continue
+        if provider and str(delivery.get("provider")) != provider:
+            continue
+        if direction and str(delivery.get("direction")) != direction:
+            continue
+        if status and str(delivery.get("semanticStatus")) != status:
+            continue
+        if message_id and str(delivery.get("messageId") or "") != message_id:
+            continue
+        if conversation_id and str(delivery.get("conversationId") or "") != conversation_id:
+            continue
+        records.append({key: delivery.get(key) for key in ("id", "timestamp", "direction", "operation", "semanticStatus", "provider", "messageId", "conversationId", "channelId", "connectionId", "providerMessageId", "durationMs", "correlationId")})
+        if len(records) >= limit:
+            break
+    return records
 
 
 def get_media(media_id: str, *, instance: str | None = None) -> dict[str, Any] | None:

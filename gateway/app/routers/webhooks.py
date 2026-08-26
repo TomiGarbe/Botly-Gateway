@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.secret_protection import SecretRedactor
 from app.services.instance_webhooks import (
     list_enabled_webhooks_for_dispatch,
     list_instance_webhooks,
@@ -359,6 +360,7 @@ async def receive_webhook(request: Request):
     else:
         logger.info("evolution_webhook_auth_success", instance=instance, source=provided_source, mode=auth_validation["mode"])
 
+    payload.setdefault("provider", "evolution")
     logger.debug("webhook_received", request_id=request_id, source_event=payload.get("event"), instance=instance)
     logger.info("[OUTBOUND][WEBHOOK] evolution webhook received", request_id=request_id, instance=instance, source_event=payload.get("event"))
     pipeline_result = process_incoming_webhook(payload, request_id)
@@ -535,11 +537,11 @@ async def get_dispatch_metrics(instance: str | None = None):
 
 @router.get("/debug/webhook-connectivity")
 async def debug_webhook_connectivity(url: str = "http://host.docker.internal:8000/"):
-    logger.info("webhook_connectivity_debug_start", url=url)
+    logger.info("webhook_connectivity_debug_start", url=SecretRedactor.redact_url(url))
     result = await diagnose_webhook_target(url=url, timeout_s=8.0)
     logger.info(
         "webhook_connectivity_debug_result",
-        url=url,
+        url=SecretRedactor.redact_url(url),
         dns_ok=result.get("dns", {}).get("resolved"),
         tcp_ok=result.get("tcp", {}).get("ok"),
         http_ok=result.get("http", {}).get("ok"),

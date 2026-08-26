@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -20,11 +21,16 @@ from app.services.instance_webhooks import (
     update_webhook,
 )
 from app.services.normalization import list_events, save_business_event, save_pipeline_event
+from app.services.outbound_provider_attempts import execute_outbound_attempt, get_outbound_provider_attempt_store
 from app.services.webhook_delivery import dispatch_webhook_with_retry
 
 
 class ConnectionOperationUnavailableError(ValueError):
     pass
+
+
+class ConnectionOperationInProgressError(ConnectionOperationUnavailableError):
+    """The same mutating action is already executing for this connection."""
 
 
 def _now() -> str:
@@ -41,6 +47,20 @@ class ConnectionOperationsService:
     ) -> None:
         self._connection_manager = connection_manager or get_connection_manager()
         self._registry = registry or get_connection_registry()
+        self._active_operations: set[tuple[str, str]] = set()
+        self._active_operations_lock = threading.Lock()
+
+    def _begin_mutating_operation(self, connection_id: str, operation: str) -> tuple[str, str]:
+        key = (connection_id, operation)
+        with self._active_operations_lock:
+            if key in self._active_operations:
+                raise ConnectionOperationInProgressError(f"{operation} is already running for this connection")
+            self._active_operations.add(key)
+        return key
+
+    def _finish_mutating_operation(self, key: tuple[str, str]) -> None:
+        with self._active_operations_lock:
+            self._active_operations.discard(key)
 
     def _record(self, connection_id: str) -> dict[str, Any]:
         record = self._registry.connection_record_by_id(connection_id)
@@ -160,7 +180,37 @@ class ConnectionOperationsService:
             )
         return self._webhook_payload(item)
 
+    def verify_webhook_configuration(self, connection_id: str) -> dict[str, Any]:
+        """Verify local webhook configuration without attempting network delivery."""
+        webhook = self.webhook(connection_id)
+        checks: list[dict[str, Any]] = []
+        configured = bool(webhook["configured"])
+        enabled = bool(webhook["enabled"])
+        url = str(webhook.get("url") or "")
+        parsed = urlparse(url)
+        valid_url = bool(url and parsed.scheme in {"http", "https"} and parsed.netloc)
+        auth_type = str(webhook.get("auth_type") or "NONE").upper()
+        valid_auth = auth_type == "NONE" or bool(webhook.get("has_auth_secret"))
+        checks.append({"code": "configured", "ok": configured, "message": "Webhook configured." if configured else "No webhook is configured."})
+        checks.append({"code": "enabled", "ok": enabled, "message": "Webhook enabled." if enabled else "Webhook is disabled."})
+        checks.append({"code": "url", "ok": valid_url, "message": "Webhook URL is HTTP(S)." if valid_url else "Webhook URL is invalid."})
+        checks.append({"code": "authentication", "ok": valid_auth, "message": "Authentication configuration is present." if valid_auth else "Authentication is missing its secret value."})
+        return {
+            "diagnostic": "verify_webhook_configuration",
+            "connectivity_checked": False,
+            "configuration_valid": all(bool(check["ok"]) for check in checks),
+            "webhook": webhook,
+            "checks": checks,
+        }
+
     async def test_webhook(self, connection_id: str) -> dict[str, Any]:
+        key = self._begin_mutating_operation(connection_id, "webhook_test")
+        try:
+            return await self._test_webhook(connection_id)
+        finally:
+            self._finish_mutating_operation(key)
+
+    async def _test_webhook(self, connection_id: str) -> dict[str, Any]:
         runtime_name = self._runtime_name(connection_id)
         hooks = list_instance_webhooks(runtime_name, reveal_secrets=True)
         if not hooks:
@@ -185,6 +235,7 @@ class ConnectionOperationsService:
         )
         self._registry.update_connection_record(connection_id, {"last_activity_at": _now(), "updated_at": _now()})
         return {
+            "operation": "webhook_test",
             "ok": bool(result.get("ok")),
             "status": int(result.get("statusCode") or 0),
             "error": result.get("error"),
@@ -214,16 +265,20 @@ class ConnectionOperationsService:
             payload["api_key"] = value
         return payload
 
-    async def reconnect(self, connection_id: str) -> None:
+    async def reconnect(self, connection_id: str) -> dict[str, str]:
+        key = self._begin_mutating_operation(connection_id, "reconnect")
+        try:
+            return await self._reconnect(connection_id)
+        finally:
+            self._finish_mutating_operation(key)
+
+    async def _reconnect(self, connection_id: str) -> dict[str, str]:
         runtime_name = self._runtime_name(connection_id)
         # Cloud (Meta) es stateless via Graph API: no hay socket que reconectar.
         if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
-            self._registry.update_connection_record(
-                connection_id,
-                {"last_activity_at": _now(), "updated_at": _now()},
+            raise ConnectionOperationUnavailableError(
+                "Meta Cloud API is stateless and cannot reconnect. Use verify_availability diagnostics instead."
             )
-            save_pipeline_event(stage="connection_reconnect", status="skipped", instance=runtime_name, event="CONNECTION_RECONNECT", details={"reason": "cloud_stateless"})
-            return
         records = await self._connection_manager.list_instances()
         if not any(str(item.get("name") or item.get("instanceName") or "") == runtime_name for item in records if isinstance(item, dict)):
             raise ConnectionOperationUnavailableError("Connection is not ready to reconnect")
@@ -233,23 +288,11 @@ class ConnectionOperationsService:
             {"status_state": "connecting", "last_activity_at": _now(), "updated_at": _now()},
         )
         save_pipeline_event(stage="connection_reconnect", status="started", instance=runtime_name, event="CONNECTION_RECONNECT")
+        return {"operation": "reconnect", "provider": "evolution", "status": "requested"}
 
     async def status(self, connection_id: str) -> dict[str, Any]:
         record = self._record(connection_id)
         runtime_name = self._runtime_name(connection_id)
-        # Numeros WhatsApp Cloud (Meta): no hay socket vivo en Evolution; el canal
-        # esta operativo mientras existan credenciales oficiales.
-        if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
-            heartbeat_at = _now()
-            self._registry.update_connection_record(
-                connection_id,
-                {"last_heartbeat_at": heartbeat_at, "updated_at": heartbeat_at},
-            )
-            return {
-                "connected": True,
-                "last_activity_at": record.get("last_activity_at"),
-                "last_heartbeat_at": heartbeat_at,
-            }
         records = await self._connection_manager.list_instances()
         runtime = next(
             (
@@ -287,13 +330,20 @@ class ConnectionOperationsService:
             instance=runtime_name,
             details={"kind": "text", "number": clean_number},
         )
+        provider = "meta" if get_credential_manager().get_official_credentials_info(runtime_name) is not None else "evolution"
         try:
-            if get_credential_manager().get_official_credentials_info(runtime_name) is not None:
-                result = await get_official_whatsapp_provider().send_text(
-                    instance_name=runtime_name, number=clean_number, text=clean_text
-                )
-            else:
-                result = await self._connection_manager.send_text(runtime_name, clean_number, clean_text)
+            attempt = get_outbound_provider_attempt_store().create(
+                instance=runtime_name, provider=provider, message_type="text", recipient=clean_number,
+                text=clean_text, provider_operation="messages.sendText",
+            )
+        except Exception as exc:
+            raise ConnectionOperationUnavailableError("No se pudo registrar el intento outbound antes del envío") from exc
+        try:
+            result, attempt = await execute_outbound_attempt(
+                attempt=attempt,
+                sender=lambda: get_official_whatsapp_provider().send_text(instance_name=runtime_name, number=clean_number, text=clean_text)
+                if provider == "meta" else self._connection_manager.send_text(runtime_name, clean_number, clean_text),
+            )
         except Exception as exc:
             save_pipeline_event(
                 stage="send_whatsapp",
@@ -318,6 +368,7 @@ class ConnectionOperationsService:
                 "status": "sent",
                 "fromMe": True,
                 "message": {"id": None, "kind": "text", "text": clean_text},
+                "raw": {"provider": provider, "providerMessageId": attempt.get("providerMessageId"), "outboundAttemptId": attempt["id"]},
             }
         )
         self._registry.update_connection_record(connection_id, {"last_activity_at": _now(), "updated_at": _now()})

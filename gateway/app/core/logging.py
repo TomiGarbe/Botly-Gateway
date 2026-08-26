@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from app.core.config import get_settings
+from app.core.secret_protection import SecretRedactor
 
 
 def setup_logging(level: str = "info") -> None:
@@ -26,6 +27,7 @@ def setup_logging(level: str = "info") -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
+            SecretRedactor.structlog_processor,
             # add_logger_name requiere stdlib logger — lo sacamos, el nombre
             # llega como parámetro en get_logger(name) y queda en el contexto
             structlog.processors.TimeStamper(fmt="iso"),

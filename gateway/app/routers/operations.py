@@ -7,14 +7,24 @@ from pydantic import BaseModel, Field
 
 from app.connections import get_connection_manager
 from app.services.instances_contract import normalize_instance_list
-from app.services.operations import OPERATION_TYPES, cancel_job, create_job, duplicate_job, get_job, list_jobs, queue_summary, retry_job
+from app.services.operations import (
+    DeprecatedOperationError,
+    cancel_job,
+    create_job,
+    duplicate_job,
+    get_job,
+    list_jobs,
+    queue_summary,
+    retry_job,
+)
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 _manager = get_connection_manager()
 
 
 class OperationCreate(BaseModel):
-    type: Literal["smoke_test", "reconnect", "provisioning_retry", "credentials_revalidate", "health_refresh", "reindex", "synchronize", "export", "import", "retry"]
+    # Accept retired names so old callers receive a useful deprecation response.
+    type: str = Field(min_length=1, max_length=64)
     targets: list[str] = Field(default_factory=list, max_length=10_000)
     scope: Literal["selected", "all"] = "selected"
     operator: str | None = Field(default=None, max_length=120)
@@ -56,6 +66,12 @@ async def post_operation(body: OperationCreate, request: Request):
     targets = _scope(request, targets)
     try:
         return create_job(operation_type=body.type, targets=targets, operator=body.operator, policy=body.policy)
+    except DeprecatedOperationError as exc:
+        raise HTTPException(
+            status_code=410,
+            detail=str(exc),
+            headers={"Deprecation": "true", "Link": '</connections/{id}/diagnostics>; rel="alternate"'},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -81,7 +97,10 @@ async def post_retry(job_id: str, request: Request, operator: str | None = None)
     job = get_job(job_id)
     if not job: raise HTTPException(status_code=404, detail="Operación no encontrada")
     _scope(request, list(job.get("targets") or []))
-    value = retry_job(job_id, operator=operator)
+    try:
+        value = retry_job(job_id, operator=operator)
+    except DeprecatedOperationError as exc:
+        raise HTTPException(status_code=410, detail=str(exc), headers={"Deprecation": "true"}) from exc
     if not value: raise HTTPException(status_code=404, detail="Operación no encontrada")
     return value
 
@@ -91,6 +110,9 @@ async def post_duplicate(job_id: str, request: Request, operator: str | None = N
     job = get_job(job_id)
     if not job: raise HTTPException(status_code=404, detail="Operación no encontrada")
     _scope(request, list(job.get("targets") or []))
-    value = duplicate_job(job_id, operator=operator)
+    try:
+        value = duplicate_job(job_id, operator=operator)
+    except DeprecatedOperationError as exc:
+        raise HTTPException(status_code=410, detail=str(exc), headers={"Deprecation": "true"}) from exc
     if not value: raise HTTPException(status_code=404, detail="Operación no encontrada")
     return value

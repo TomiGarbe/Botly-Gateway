@@ -158,10 +158,17 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       INSTANCE_API_KEYS_PATH: /var/lib/botly/instance_api_keys.json
       INSTANCE_WEBHOOKS_PATH: /var/lib/botly/instance_webhooks.json
+      INSTANCE_WEBHOOKS_ENCRYPTION_KEY: ${INSTANCE_WEBHOOKS_ENCRYPTION_KEY:-}
+      WEBHOOK_DELIVERIES_PATH: /var/lib/botly/webhooks/deliveries.json
+      WEBHOOK_DELIVERY_RETENTION: ${WEBHOOK_DELIVERY_RETENTION:-250}
+      WEBHOOK_DELIVERY_MAX_PAYLOAD_BYTES: ${WEBHOOK_DELIVERY_MAX_PAYLOAD_BYTES:-16384}
       MEDIA_CACHE_DIR: /var/lib/botly/media_cache
       # Deben vivir en el volumen persistente: los defaults apuntan a /tmp y las
       # credenciales oficiales se perderian al recrear el contenedor.
       CONNECTION_METADATA_PATH: /var/lib/botly/connection_metadata.json
+      CONNECTION_REGISTRY_PATH: ${CONNECTION_REGISTRY_PATH:-/var/lib/botly/connections/connection_registry.json}
+      CONNECTION_SETUP_TTL_SECONDS: ${CONNECTION_SETUP_TTL_SECONDS:-3600}
+      CONNECTION_SETUP_CLEANUP_INTERVAL_SECONDS: ${CONNECTION_SETUP_CLEANUP_INTERVAL_SECONDS:-60}
       AUTH_SESSIONS_PATH: /var/lib/botly/gateway_sessions.json
       OFFICIAL_CREDENTIALS_PATH: /var/lib/botly/official_credentials.json
       WEBHOOK_EVENTS_PATH: /var/lib/botly/webhook_events.json

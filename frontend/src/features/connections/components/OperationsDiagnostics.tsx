@@ -1,8 +1,11 @@
-import { Activity, CheckCircle2, CircleAlert, CloudCog, HeartPulse, LoaderCircle, RefreshCw, RotateCw, ShieldCheck, Unplug, Webhook, X } from 'lucide-react'
+import { Activity, CheckCircle2, CircleAlert, CloudCog, LoaderCircle, RefreshCw, RotateCw, ShieldCheck, Unplug, Webhook, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import type { ConnectionDiagnostics } from '../api/connectionOperationsApi'
-import { enqueueConnectionOperation, getConnectionDiagnostics, getConnectionWebhook } from '../api/connectionOperationsApi'
+import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { Toast } from '@/shared/components/Toast'
+import type { ConnectionAvailability, ConnectionDiagnosticCheck, ConnectionDiagnostics, WebhookConfigurationVerification } from '../api/connectionOperationsApi'
+import { getConnectionAvailability, getConnectionDiagnostics, testConnectionWebhook, verifyConnectionWebhookConfiguration } from '../api/connectionOperationsApi'
+
+type DiagnosticStatus = ConnectionDiagnosticCheck['status']
 
 function dateTime(value: string | number | null, fallback = 'Sin registro'): string {
   if (!value) return fallback
@@ -10,11 +13,23 @@ function dateTime(value: string | number | null, fallback = 'Sin registro'): str
   return Number.isNaN(date.getTime()) ? fallback : new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-function statusLabel(status: ConnectionDiagnostics['summary']['status']): string {
-  return { healthy: 'Operativa', degraded: 'Atención requerida', unhealthy: 'Problema crítico', unknown: 'Sin verificar' }[status]
+function healthLabel(status: DiagnosticStatus): string {
+  return { healthy: 'Saludable', degraded: 'Atención requerida', unhealthy: 'No disponible', unknown: 'Sin verificar' }[status]
 }
 
-function StatusIcon({ status }: { status: ConnectionDiagnostics['summary']['status'] }) {
+function runtimeLabel(status: DiagnosticStatus | undefined): string {
+  if (status === 'healthy') return 'Conectado'
+  if (status === 'degraded') return 'Conectando o con atención requerida'
+  if (status === 'unhealthy') return 'Desconectado'
+  return 'Sin verificar'
+}
+
+function lifecycleLabel(state: string, lifecycle: string | null): string {
+  const value = String(lifecycle || state || '').toLowerCase()
+  return ({ ready: 'Lista', connected: 'Lista', pending: 'Pendiente', connecting: 'Configurando', disconnected: 'Desconectada', failed: 'Con atención requerida' } as Record<string, string>)[value] || 'Sin verificar'
+}
+
+function StatusIcon({ status }: { status: DiagnosticStatus }) {
   if (status === 'healthy') return <CheckCircle2 aria-hidden="true" />
   if (status === 'degraded') return <CircleAlert aria-hidden="true" />
   if (status === 'unhealthy') return <Unplug aria-hidden="true" />
@@ -23,83 +38,154 @@ function StatusIcon({ status }: { status: ConnectionDiagnostics['summary']['stat
 
 interface Props {
   connectionId: string
-  runtimeName: string | null
+  providerId: string
+  connectionState: string
+  connectionLifecycle: string | null
   onReconnect: () => Promise<void>
-  onTestWebhook: () => Promise<void>
   onRefreshConnection: () => Promise<void>
+  onManageWebhooks: () => void
 }
 
-export function OperationsDiagnostics({ connectionId, runtimeName, onReconnect, onTestWebhook, onRefreshConnection }: Props) {
+export function OperationsDiagnostics({ connectionId, providerId, connectionState, connectionLifecycle, onReconnect, onRefreshConnection, onManageWebhooks }: Props) {
   const [data, setData] = useState<ConnectionDiagnostics | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [availability, setAvailability] = useState<ConnectionAvailability | null>(null)
+  const [webhookVerification, setWebhookVerification] = useState<WebhookConfigurationVerification | null>(null)
+  const [webhookTest, setWebhookTest] = useState<{ ok: boolean; status: number; error: string | null } | null>(null)
+  const [refreshing, setRefreshing] = useState(true)
   const [running, setRunning] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false)
+  const [isWebhookTestOpen, setIsWebhookTestOpen] = useState(false)
+  const isMeta = providerId.toLowerCase() === 'meta'
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const refreshDiagnostics = useCallback(async () => {
+    setRefreshing(true)
     setError(null)
     try {
       setData(await getConnectionDiagnostics(connectionId))
     } catch {
-      setError('No se pudo obtener el diagnóstico de la conexión.')
+      setError('No se pudo actualizar el diagnóstico de la conexión. Intentá nuevamente.')
     } finally {
-      setLoading(false)
+      setRefreshing(false)
     }
   }, [connectionId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void refreshDiagnostics() }, [refreshDiagnostics])
 
-  async function run(name: string, operation: () => Promise<void>, success: string) {
-    setRunning(name)
+  async function verifyAvailability() {
+    setRunning('availability')
     setError(null)
-    setNotice(null)
     try {
-      await operation()
-      setNotice(success)
-      await Promise.all([load(), onRefreshConnection()])
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'La operación no pudo completarse.')
+      const result = await getConnectionAvailability(connectionId)
+      setAvailability(result)
+      setData(result.diagnostics)
+      setNotice(result.available ? 'Disponibilidad verificada.' : 'La conexión no está disponible. Revisá el diagnóstico.')
+    } catch {
+      setError('No se pudo verificar la disponibilidad de la conexión.')
     } finally {
       setRunning(null)
     }
   }
 
-  async function validateWebhook() {
-    const webhook = await getConnectionWebhook(connectionId)
-    if (!webhook.configured || !webhook.enabled) throw new Error('No hay un webhook activo para validar.')
+  async function verifyWebhookConfiguration() {
+    setRunning('webhook-configuration')
+    setError(null)
+    try {
+      const result = await verifyConnectionWebhookConfiguration(connectionId)
+      setWebhookVerification(result)
+      setNotice(result.configuration_valid ? 'Configuración de webhook verificada.' : 'La configuración del webhook requiere revisión.')
+    } catch {
+      setError('No se pudo verificar la configuración del webhook.')
+    } finally {
+      setRunning(null)
+    }
   }
 
-  const action = (name: string, label: string, Icon: typeof RefreshCw, operation: () => Promise<void>, success: string) => <button type="button" className="connection-operation" disabled={Boolean(running)} onClick={() => void run(name, operation, success)}><Icon size={16} aria-hidden="true" /> {running === name ? <LoaderCircle className="animate-spin" size={16} aria-hidden="true" /> : null}<span>{label}</span></button>
+  async function reconnect() {
+    setRunning('reconnect')
+    setError(null)
+    try {
+      await onReconnect()
+      setNotice('Reconexión solicitada. El runtime confirmará el nuevo estado en el próximo diagnóstico.')
+      await Promise.all([refreshDiagnostics(), onRefreshConnection()])
+    } catch {
+      setError('No se pudo solicitar la reconexión. Verificá el estado del runtime.')
+    } finally {
+      setRunning(null)
+    }
+  }
 
-  return <>
-    <section className="connection-section diagnostics-summary">
-      <div className="connection-section-heading"><div><h3>Resumen de salud</h3><p>Estado operativo verificado desde el Gateway.</p></div><button type="button" className="client-button-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div>
-      {loading ? <p className="connection-section-value">Actualizando estado…</p> : null}
-      <Toast message={error} tone="error" onDismiss={() => setError(null)} />
-      <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
-      {data ? <><div className={`diagnostics-overall diagnostics-overall-${data.summary.status}`}><StatusIcon status={data.summary.status} /><div><strong>{statusLabel(data.summary.status)}</strong><span>Última verificación: {dateTime(data.summary.lastVerifiedAt)}</span></div></div><dl className="diagnostics-summary-list"><div><dt>Último heartbeat</dt><dd>{dateTime(data.summary.lastHeartbeatAt)}</dd></div><div><dt>Último mensaje enviado</dt><dd>{dateTime(data.summary.lastMessageSentAt)}</dd></div><div><dt>Último mensaje recibido</dt><dd>{dateTime(data.summary.lastMessageReceivedAt)}</dd></div><div><dt>Último webhook exitoso</dt><dd>{dateTime(data.summary.lastWebhookSuccessAt)}</dd></div><div><dt>Último error</dt><dd>{data.summary.lastError || 'Sin errores registrados'}</dd></div></dl></> : null}
-      <button type="button" className="connection-text-action" onClick={() => setIsDiagnosticsOpen(true)} disabled={loading}>Ver diagnóstico</button>
-    </section>
+  async function sendWebhookTest() {
+    setRunning('webhook-test')
+    setError(null)
+    try {
+      const result = await testConnectionWebhook(connectionId)
+      setWebhookTest(result)
+      setNotice(result.ok ? 'Webhook respondió correctamente.' : 'El webhook no respondió correctamente.')
+      await Promise.all([refreshDiagnostics(), onRefreshConnection()])
+    } catch {
+      setWebhookTest(null)
+      setError('No se pudo enviar la prueba al webhook. Revisá su configuración y volvé a intentarlo.')
+    } finally {
+      setRunning(null)
+      setIsWebhookTestOpen(false)
+    }
+  }
 
-    <section className="connection-section">
-      <div className="connection-section-heading"><div><h3>Operaciones</h3><p>Acciones seguras sobre esta conexión.</p></div></div>
-      <div className="connection-operations-grid">
-        {action('reconnect', 'Reconectar', RotateCw, onReconnect, 'Reconexión solicitada.')}
-        {runtimeName ? action('sync', 'Sincronizar Meta', CloudCog, () => enqueueConnectionOperation(runtimeName, 'synchronize'), 'Sincronización encolada.') : null}
-        {runtimeName ? action('health', 'Actualizar estado', HeartPulse, () => enqueueConnectionOperation(runtimeName, 'health_refresh'), 'Actualización de estado encolada.') : null}
-        {action('validate', 'Validar webhook', ShieldCheck, validateWebhook, 'Webhook activo y configurado.')}
-        {action('test', 'Probar webhook', Webhook, onTestWebhook, 'Prueba de webhook completada.')}
-        {action('refresh', 'Refrescar datos', RefreshCw, async () => undefined, 'Datos de conexión actualizados.')}
+  const runtimeCheck = data?.checks.find((check) => check.code === 'gateway')
+  const webhookCheck = data?.checks.find((check) => check.code === 'webhook')
+  const canReconnect = !isMeta && runtimeCheck?.status === 'degraded'
+  const availabilityLabel = availability ? (availability.available ? 'Disponible' : 'No disponible') : healthLabel(data?.summary.status || 'unknown')
+  const webhookLabel = webhookVerification
+    ? (webhookVerification.configuration_valid ? 'Configuración válida' : 'Requiere revisión')
+    : webhookCheck?.status === 'healthy' ? 'Configurado' : webhookCheck?.status === 'degraded' ? 'Requiere revisión' : 'Sin verificar'
+
+  const operationButton = (name: string, label: string, Icon: typeof RefreshCw, onClick: () => void, kind: 'action' | 'diagnostic', disabled = false) => (
+    <button type="button" className={`operation-button operation-button-${kind}`} disabled={disabled || running === name} onClick={onClick}>
+      {running === name ? <LoaderCircle className="animate-spin" size={16} aria-hidden="true" /> : <Icon size={16} aria-hidden="true" />}
+      <span>{running === name ? ({ reconnect: 'Reconectando…', availability: 'Verificando disponibilidad…', 'webhook-configuration': 'Verificando configuración…', 'webhook-test': 'Enviando prueba…' } as Record<string, string>)[name] : label}</span>
+    </button>
+  )
+
+  return <section className="operations-console" aria-label="Operaciones de conexión">
+    <div className="operations-console-heading"><div><p>Operaciones</p><h3>Estado, diagnóstico y acciones</h3><span>Primero verificá el estado; las acciones reales se muestran por separado.</span></div></div>
+    <Toast message={error} tone="error" onDismiss={() => setError(null)} />
+    <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
+
+    <section className="operation-section operation-status-card" aria-labelledby="connection-status-heading">
+      <div className="operation-section-heading"><div><p>Estado de la conexión</p><h4 id="connection-status-heading">{refreshing ? 'Actualizando diagnóstico…' : healthLabel(data?.summary.status || 'unknown')}</h4><span>Última verificación: {dateTime(data?.summary.lastVerifiedAt || null)}</span></div>
+        {operationButton('refresh', 'Actualizar diagnóstico', RefreshCw, () => void refreshDiagnostics(), 'diagnostic', refreshing)}
       </div>
+      <dl className="operation-status-grid">
+        <div><dt>Lifecycle</dt><dd>{lifecycleLabel(connectionState, connectionLifecycle)}</dd></div>
+        <div><dt>Runtime</dt><dd>{runtimeLabel(runtimeCheck?.status)}</dd></div>
+        <div><dt>Salud</dt><dd>{healthLabel(data?.summary.status || 'unknown')}</dd></div>
+        <div><dt>Disponibilidad</dt><dd>{availabilityLabel}</dd></div>
+      </dl>
     </section>
 
-    <section className="connection-section">
-      <div className="connection-section-heading"><div><h3>Información técnica</h3><p>Datos de referencia de solo lectura.</p></div></div>
-      {data ? <dl className="diagnostics-technical-list"><div><dt>Phone Number ID</dt><dd>{data.technical.phoneNumberId || 'No disponible'}</dd></div><div><dt>Business ID</dt><dd>{data.technical.businessId || 'No disponible'}</dd></div><div><dt>WABA ID</dt><dd>{data.technical.wabaId || 'No disponible'}</dd></div><div><dt>Provider</dt><dd>{data.technical.provider || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{data.technical.channel || 'No disponible'}</dd></div><div><dt>Versión de API</dt><dd>{data.technical.apiVersion || 'No aplica'}</dd></div><div><dt>Última sincronización</dt><dd>{dateTime(data.technical.lastSynchronizedAt)}</dd></div></dl> : null}
+    <section className="operation-section" aria-labelledby="diagnostics-heading">
+      <div className="operation-section-heading"><div><p>Diagnóstico</p><h4 id="diagnostics-heading">Qué podés revisar</h4><span>Estas consultas no cambian la conexión ni envían solicitudes al webhook.</span></div></div>
+      <div className="operation-diagnostics-grid">
+        {isMeta ? <article className="operation-diagnostic-card"><CloudCog size={18} aria-hidden="true" /><div><strong>Disponibilidad</strong><span>{availability ? availabilityLabel : 'Consultá credenciales, runtime y salud disponible.'}</span>{availability?.limitation ? <small>{availability.limitation}</small> : null}</div>{operationButton('availability', 'Verificar disponibilidad', Activity, () => void verifyAvailability(), 'diagnostic')}</article> : <article className="operation-diagnostic-card"><Activity size={18} aria-hidden="true" /><div><strong>Runtime y disponibilidad</strong><span>{runtimeLabel(runtimeCheck?.status)}</span></div><button type="button" className="operation-link" onClick={() => void refreshDiagnostics()} disabled={refreshing}>Actualizar</button></article>}
+        <article className="operation-diagnostic-card"><ShieldCheck size={18} aria-hidden="true" /><div><strong>Webhook</strong><span>{webhookLabel}</span>{webhookVerification ? <small>La verificación revisa configuración local; no prueba conectividad.</small> : null}</div>{operationButton('webhook-configuration', 'Verificar configuración', ShieldCheck, () => void verifyWebhookConfiguration(), 'diagnostic')}</article>
+      </div>
+      {data?.summary.lastError ? <p className="operation-last-error"><CircleAlert size={16} aria-hidden="true" /> Último error: {data.summary.lastError}</p> : null}
+      <button type="button" className="connection-text-action" onClick={() => setIsDiagnosticsOpen(true)} disabled={!data}>Ver detalle del diagnóstico</button>
     </section>
 
-    {isDiagnosticsOpen ? <div className="activity-panel-backdrop" role="presentation" onMouseDown={() => setIsDiagnosticsOpen(false)}><aside className="activity-panel diagnostics-panel" role="dialog" aria-modal="true" aria-label="Diagnóstico de conexión" onMouseDown={(event) => event.stopPropagation()}><div className="activity-panel-heading"><div><h3>Diagnóstico</h3><p>Controles de disponibilidad y configuración.</p></div><button type="button" onClick={() => setIsDiagnosticsOpen(false)} aria-label="Cerrar diagnóstico"><X size={18} /></button></div>{data ? <ul className="diagnostics-checks">{data.checks.map((check) => <li key={check.code}><StatusIcon status={check.status} /><div><div><strong>{check.label}</strong><span className={`diagnostic-check-status diagnostic-check-status-${check.status}`}>{statusLabel(check.status)}</span></div><p>{check.message}</p><small>Verificado: {dateTime(check.lastVerifiedAt)}</small>{check.action ? <em>Acción sugerida: {check.action}</em> : null}</div></li>)}</ul> : <p className="connection-section-value">No hay datos de diagnóstico disponibles.</p>}</aside></div> : null}
-  </>
+    <section className="operation-section" aria-labelledby="actions-heading">
+      <div className="operation-section-heading"><div><p>Acciones reales</p><h4 id="actions-heading">Acciones disponibles</h4><span>Estas acciones pueden cambiar el estado o enviar una solicitud externa.</span></div></div>
+      <div className="operation-actions-grid">
+        {canReconnect ? <article className="operation-action-card"><RotateCw size={18} aria-hidden="true" /><div><strong>Reconectar</strong><span>Solicita una reconexión al runtime de Evolution. No confirma la conexión hasta el próximo diagnóstico.</span></div>{operationButton('reconnect', 'Reconectar', RotateCw, () => void reconnect(), 'action')}</article> : !isMeta ? <article className="operation-action-card is-muted"><Activity size={18} aria-hidden="true" /><div><strong>Reconectar no disponible</strong><span>{runtimeCheck?.status === 'healthy' ? 'El runtime ya está conectado.' : 'Esperá a que el runtime esté disponible y actualizá el diagnóstico.'}</span></div></article> : null}
+        <article className="operation-action-card"><Webhook size={18} aria-hidden="true" /><div><strong>Probar webhook</strong><span>Envía una solicitud de prueba al destino configurado.</span></div>{operationButton('webhook-test', 'Probar webhook', Webhook, () => setIsWebhookTestOpen(true), 'action')}</article>
+      </div>
+      {webhookTest ? <div className={`operation-result ${webhookTest.ok ? 'is-success' : 'is-error'}`} role="status"><StatusIcon status={webhookTest.ok ? 'healthy' : 'unhealthy'} /><div><strong>{webhookTest.ok ? 'Webhook respondió correctamente' : 'El webhook no respondió correctamente'}</strong><span>{webhookTest.status ? `HTTP ${webhookTest.status}` : 'Sin respuesta HTTP'}{webhookTest.error ? ` · ${webhookTest.error}` : ''}</span></div></div> : null}
+      <button type="button" className="connection-text-action" onClick={onManageWebhooks}>Administrar webhooks</button>
+    </section>
+
+    {isDiagnosticsOpen ? <div className="activity-panel-backdrop" role="presentation" onMouseDown={() => setIsDiagnosticsOpen(false)}><aside className="activity-panel diagnostics-panel" role="dialog" aria-modal="true" aria-label="Diagnóstico de conexión" onMouseDown={(event) => event.stopPropagation()}><div className="activity-panel-heading"><div><h3>Detalle del diagnóstico</h3><p>Controles de disponibilidad y configuración.</p></div><button type="button" onClick={() => setIsDiagnosticsOpen(false)} aria-label="Cerrar diagnóstico"><X size={18} /></button></div>{data ? <ul className="diagnostics-checks">{data.checks.map((check) => <li key={check.code}><StatusIcon status={check.status} /><div><div><strong>{check.label}</strong><span className={`diagnostic-check-status diagnostic-check-status-${check.status}`}>{healthLabel(check.status)}</span></div><p>{check.message}</p><small>Verificado: {dateTime(check.lastVerifiedAt)}</small>{check.action ? <em>Acción sugerida: {check.action}</em> : null}</div></li>)}</ul> : null}</aside></div> : null}
+    <ConfirmDialog isOpen={isWebhookTestOpen} title="Enviar prueba de webhook" description="Esto enviará una solicitud de prueba al destino configurado. No se mostrarán secretos ni el payload completo." confirmLabel="Enviar prueba" submittingLabel="Enviando prueba…" tone="default" isSubmitting={running === 'webhook-test'} onCancel={() => setIsWebhookTestOpen(false)} onConfirm={() => void sendWebhookTest()} />
+  </section>
 }

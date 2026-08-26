@@ -8,10 +8,20 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.secret_protection import REDACTED, SecretCipher, SecretRedactor
+from app.services.webhook_deliveries import (
+    append_webhook_delivery,
+    delivery_detail,
+    delivery_list_item,
+    filter_deliveries,
+    get_webhook_delivery as get_stored_webhook_delivery,
+    list_instance_deliveries,
+    list_webhook_deliveries,
+)
 
 logger = get_logger(__name__)
 _LOCK = threading.Lock()
@@ -33,8 +43,23 @@ def _empty_store() -> dict[str, Any]:
     return {"instances": {}}
 
 
+def _ensure_private_storage_unlocked(path: Path) -> None:
+    """Enforce private permissions even if the volume/path already existed."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    if path.exists():
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+
 def _read_store_unlocked() -> dict[str, Any]:
     path = _storage_path()
+    _ensure_private_storage_unlocked(path)
     if not path.exists():
         return _empty_store()
     try:
@@ -52,8 +77,117 @@ def _read_store_unlocked() -> dict[str, Any]:
 
 def _write_store_unlocked(store: dict[str, Any]) -> None:
     path = _storage_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(store, ensure_ascii=True, indent=2), encoding="utf-8")
+    _ensure_private_storage_unlocked(path)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(store, ensure_ascii=True, indent=2), encoding="utf-8")
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
+    temporary.replace(path)
+
+
+def _backup_legacy_store_unlocked(store: dict[str, Any]) -> None:
+    """Preserve a private, one-time rollback copy before encrypting legacy data."""
+    path = _storage_path()
+    backup = path.with_suffix(f"{path.suffix}.pre-encryption-backup")
+    if backup.exists():
+        _ensure_private_storage_unlocked(backup)
+        return
+    _ensure_private_storage_unlocked(backup)
+    temporary = backup.with_suffix(f"{backup.suffix}.tmp")
+    temporary.write_text(json.dumps(store, ensure_ascii=True, indent=2), encoding="utf-8")
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
+    temporary.replace(backup)
+
+
+def _secret_ciphers() -> tuple[SecretCipher, ...]:
+    settings = get_settings()
+    configured = str(getattr(settings, "instance_webhooks_encryption_key", "") or "").strip()
+    fallback = str(getattr(settings, "gateway_api_key", "") or "").strip()
+    materials = [item for item in (configured, fallback) if item]
+    return tuple(SecretCipher(item) for index, item in enumerate(materials) if item not in materials[:index])
+
+
+def _secret_cipher() -> SecretCipher:
+    ciphers = _secret_ciphers()
+    if not ciphers:
+        raise RuntimeError("No hay clave configurada para proteger secretos de webhook")
+    return ciphers[0]
+
+
+def _decrypt_secret_value(value: object) -> str:
+    raw = str(value or "")
+    if not SecretCipher.is_encrypted(raw):
+        return raw
+    for cipher in _secret_ciphers():
+        try:
+            return cipher.decrypt_or_legacy(raw)[0]
+        except RuntimeError:
+            continue
+    raise RuntimeError("No se pudo descifrar un secreto de webhook")
+
+
+def _decrypt_auth_config(raw: Any) -> dict[str, Any]:
+    value = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    for key in ("token", "apiKey", "password", "queryParamValue"):
+        if key in value:
+            value[key] = _decrypt_secret_value(value[key])
+    return value
+
+
+def _encrypt_auth_config(raw: Any) -> dict[str, Any]:
+    value = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    cipher = _secret_cipher()
+    for key in ("token", "apiKey", "password", "queryParamValue"):
+        if str(value.get(key) or "").strip():
+            value[key] = cipher.encrypt(str(value[key]))
+    return value
+
+
+def _decrypt_custom_headers(raw: Any) -> dict[str, Any]:
+    value = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    for key, item in value.items():
+        if SecretRedactor.is_sensitive_name(key):
+            value[key] = _decrypt_secret_value(item)
+    return value
+
+
+def _encrypt_custom_headers(raw: Any) -> dict[str, Any]:
+    value = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    cipher = _secret_cipher()
+    for key, item in value.items():
+        if SecretRedactor.is_sensitive_name(key) and str(item or "").strip():
+            value[key] = cipher.encrypt(str(item))
+    return value
+
+
+def _transform_sensitive_url_query(raw: object, transform) -> str:
+    """Transform only credential-like query values while retaining the URL shape."""
+    value = str(raw or "").strip()
+    try:
+        parsed = urlsplit(value)
+        if not parsed.query:
+            return value
+        query = [
+            (key, transform(item) if SecretRedactor.is_sensitive_name(key) and item else item)
+            for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        ]
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+    except ValueError:
+        return value
+
+
+def _decrypt_webhook_url(raw: object) -> str:
+    return _transform_sensitive_url_query(raw, _decrypt_secret_value)
+
+
+def _encrypt_webhook_url(raw: object) -> str:
+    cipher = _secret_cipher()
+    return _transform_sensitive_url_query(raw, lambda value: cipher.encrypt(str(value)))
 
 
 def _sanitize_headers(raw: Any) -> dict[str, str]:
@@ -116,7 +250,7 @@ def _sanitize_dispatch_history_entry(record: dict[str, Any]) -> dict[str, Any]:
         "webhookId": str(record.get("webhookId") or "").strip() or None,
         "webhookName": str(record.get("webhookName") or "").strip() or None,
         "instanceName": str(record.get("instanceName") or "").strip() or None,
-        "destinationUrl": str(record.get("destinationUrl") or record.get("webhookUrl") or "").strip() or None,
+        "destinationUrl": SecretRedactor.redact_url(str(record.get("destinationUrl") or record.get("webhookUrl") or "").strip()) or None,
         "eventType": str(record.get("eventType") or record.get("eventSubtype") or "").strip() or None,
         "messageId": str(record.get("messageId") or "").strip() or None,
         "conversationId": str(record.get("conversationId") or "").strip() or None,
@@ -132,17 +266,17 @@ def _sanitize_dispatch_history_entry(record: dict[str, Any]) -> dict[str, Any]:
         "errorType": str(record.get("errorType") or "").strip() or None,
         "request": {
             "method": str(request.get("method") or "POST"),
-            "headers": request.get("headers") if isinstance(request.get("headers"), dict) else {},
-            "payloadSummary": request.get("payloadSummary") if isinstance(request.get("payloadSummary"), dict) else {},
+            "headers": SecretRedactor.redact_headers(request.get("headers")),
+            "payloadSummary": SecretRedactor.redact_json(request.get("payloadSummary") if isinstance(request.get("payloadSummary"), dict) else {}),
             "payloadSizeBytes": _coerce_int(request.get("payloadSizeBytes")),
-            "payloadPreview": str(request.get("payloadPreview") or "")[:4000],
+            "payloadPreview": SecretRedactor.redact_json_preview(str(request.get("payloadPreview") or ""), max_chars=4000),
             "payloadTruncated": bool(request.get("payloadTruncated")),
         },
         "response": {
-            "headers": response.get("headers") if isinstance(response.get("headers"), dict) else {},
-            "bodyPreview": str(response.get("bodyPreview") or "")[:2000],
+            "headers": SecretRedactor.redact_headers(response.get("headers")),
+            "bodyPreview": SecretRedactor.redact_json_preview(str(response.get("bodyPreview") or ""), max_chars=2000),
         },
-        "attempts": [item for item in attempts if isinstance(item, dict)][:10],
+        "attempts": [SecretRedactor.redact_json(item) for item in attempts if isinstance(item, dict)][:10],
     }
 
 
@@ -245,6 +379,30 @@ def _sanitize_webhook(instance_name: str, record: dict[str, Any]) -> dict[str, A
     }
 
 
+def _hydrate_webhook(instance_name: str, record: dict[str, Any]) -> dict[str, Any]:
+    """Return runtime-ready webhook data, accepting legacy plaintext storage."""
+    return _sanitize_webhook(
+        instance_name,
+        {
+            **record,
+            "url": _decrypt_webhook_url(record.get("url")),
+            "authConfig": _decrypt_auth_config(record.get("authConfig")),
+            "customHeaders": _decrypt_custom_headers(record.get("customHeaders")),
+        },
+    )
+
+
+def _webhook_for_storage(instance_name: str, record: dict[str, Any]) -> dict[str, Any]:
+    """Encrypt sensitive values while retaining non-secret webhook configuration."""
+    clean = _sanitize_webhook(instance_name, record)
+    return {
+        **clean,
+        "url": _encrypt_webhook_url(clean.get("url")),
+        "authConfig": _encrypt_auth_config(clean.get("authConfig")),
+        "customHeaders": _encrypt_custom_headers(clean.get("customHeaders")),
+    }
+
+
 def _mask_secret(value: str, keep_start: int = 4, keep_end: int = 2) -> str:
     raw = str(value or "")
     if not raw:
@@ -261,7 +419,7 @@ def _public_webhook(record: dict[str, Any], reveal_secrets: bool = False) -> dic
 
     for key, value in auth.items():
         if key in {"token", "apiKey", "password", "queryParamValue"} and not reveal_secrets:
-            safe_auth[key] = ""
+            safe_auth[key] = REDACTED
             safe_auth[f"has{key[:1].upper()}{key[1:]}"] = bool(str(value or "").strip())
         else:
             safe_auth[key] = value
@@ -269,8 +427,9 @@ def _public_webhook(record: dict[str, Any], reveal_secrets: bool = False) -> dic
     item["authConfig"] = safe_auth
     custom_headers = item.get("customHeaders") if isinstance(item.get("customHeaders"), dict) else {}
     if not reveal_secrets:
-        item["customHeaders"] = {str(key): "" for key in custom_headers if str(key).strip()}
+        item["customHeaders"] = {str(key): REDACTED for key in custom_headers if str(key).strip()}
         item["hasCustomHeaders"] = bool(custom_headers)
+        item["url"] = SecretRedactor.redact_url(str(item.get("url") or ""))
     return item
 
 
@@ -299,10 +458,35 @@ def list_instance_webhooks(instance_name: str, reveal_secrets: bool = False) -> 
         raw_list = store["instances"].get(instance_name) or []
         if not isinstance(raw_list, list):
             return []
-        clean = [_sanitize_webhook(instance_name, item) for item in raw_list if isinstance(item, dict)]
-        store["instances"][instance_name] = clean
-        _write_store_unlocked(store)
+        clean = [_hydrate_webhook(instance_name, item) for item in raw_list if isinstance(item, dict)]
+        protected = [_webhook_for_storage(instance_name, item) for item in clean]
+        if protected != raw_list:
+            _backup_legacy_store_unlocked(store)
+            store["instances"][instance_name] = protected
+            _write_store_unlocked(store)
     return [_public_webhook(item, reveal_secrets=reveal_secrets) for item in clean]
+
+
+def protect_stored_webhook_secrets() -> int:
+    """Upgrade legacy plaintext webhook credentials without deleting records."""
+    with _LOCK:
+        store = _read_store_unlocked()
+        changed = 0
+        for instance_name, raw_list in list(store["instances"].items()):
+            if not isinstance(raw_list, list):
+                continue
+            clean = [_hydrate_webhook(str(instance_name), item) for item in raw_list if isinstance(item, dict)]
+            protected = [_webhook_for_storage(str(instance_name), item) for item in clean]
+            if protected != raw_list:
+                store["instances"][instance_name] = protected
+                changed += len(clean)
+        if changed:
+            # `store` still contains every unmodified instance except the ones
+            # upgraded above; read the original once more for the rollback copy.
+            original = _read_store_unlocked()
+            _backup_legacy_store_unlocked(original)
+            _write_store_unlocked(store)
+        return changed
 
 
 def get_webhook(instance_name: str, webhook_id: str, reveal_secrets: bool = False) -> dict[str, Any] | None:
@@ -361,7 +545,7 @@ def create_webhook(
         hooks = store["instances"].get(instance_name)
         if not isinstance(hooks, list):
             hooks = []
-        hooks.append(new_item)
+        hooks.append(_webhook_for_storage(instance_name, new_item))
         store["instances"][instance_name] = hooks
         _write_store_unlocked(store)
     return _public_webhook(new_item)
@@ -387,26 +571,27 @@ def update_webhook(
         for idx, item in enumerate(hooks):
             if not isinstance(item, dict) or str(item.get("id")) != webhook_id:
                 continue
+            current = _hydrate_webhook(instance_name, item)
             merged = _sanitize_webhook(
                 instance_name,
                 {
-                    **item,
-                    "name": name or item.get("name"),
+                    **current,
+                    "name": name or current.get("name"),
                     "url": url,
                     "enabled": enabled,
                     "authType": auth_type,
                     "authConfig": _merge_auth_config_update(
-                        previous_auth_type=str(item.get("authType") or "NONE").upper(),
-                        previous_auth_config=item.get("authConfig") if isinstance(item.get("authConfig"), dict) else {},
+                        previous_auth_type=str(current.get("authType") or "NONE").upper(),
+                        previous_auth_config=current.get("authConfig") if isinstance(current.get("authConfig"), dict) else {},
                         next_auth_type=str(auth_type or "NONE").upper(),
                         next_auth_config=auth_config,
                     ),
-                    "customHeaders": custom_headers if custom_headers is not None else item.get("customHeaders"),
-                    "eventFilters": event_filters if isinstance(event_filters, dict) else item.get("eventFilters"),
+                    "customHeaders": custom_headers if custom_headers is not None else current.get("customHeaders"),
+                    "eventFilters": event_filters if isinstance(event_filters, dict) else current.get("eventFilters"),
                     "updatedAt": _now_iso(),
                 },
             )
-            hooks[idx] = merged
+            hooks[idx] = _webhook_for_storage(instance_name, merged)
             store["instances"][instance_name] = hooks
             _write_store_unlocked(store)
             return _public_webhook(merged)
@@ -426,8 +611,9 @@ def set_webhook_filters(instance_name: str, webhook_id: str, event_filters: dict
         for idx, item in enumerate(hooks):
             if not isinstance(item, dict) or str(item.get("id")) != webhook_id:
                 continue
-            merged = _sanitize_webhook(instance_name, {**item, "eventFilters": normalized, "updatedAt": _now_iso()})
-            hooks[idx] = merged
+            current = _hydrate_webhook(instance_name, item)
+            merged = _sanitize_webhook(instance_name, {**current, "eventFilters": normalized, "updatedAt": _now_iso()})
+            hooks[idx] = _webhook_for_storage(instance_name, merged)
             store["instances"][instance_name] = hooks
             _write_store_unlocked(store)
             return _public_webhook(merged)
@@ -443,8 +629,9 @@ def set_webhook_enabled(instance_name: str, webhook_id: str, enabled: bool) -> d
         for idx, item in enumerate(hooks):
             if not isinstance(item, dict) or str(item.get("id")) != webhook_id:
                 continue
-            merged = _sanitize_webhook(instance_name, {**item, "enabled": enabled, "updatedAt": _now_iso()})
-            hooks[idx] = merged
+            current = _hydrate_webhook(instance_name, item)
+            merged = _sanitize_webhook(instance_name, {**current, "enabled": enabled, "updatedAt": _now_iso()})
+            hooks[idx] = _webhook_for_storage(instance_name, merged)
             store["instances"][instance_name] = hooks
             _write_store_unlocked(store)
             return _public_webhook(merged)
@@ -549,10 +736,11 @@ def mark_dispatch_result_ex(
         for idx, item in enumerate(hooks):
             if not isinstance(item, dict) or str(item.get("id")) != webhook_id:
                 continue
+            current = _hydrate_webhook(instance_name, item)
             merged = _sanitize_webhook(
                 instance_name,
                 _apply_dispatch_aggregate_fields(
-                    item,
+                    current,
                     status=status,
                     error=error,
                     status_code=status_code,
@@ -561,7 +749,7 @@ def mark_dispatch_result_ex(
                     retryable=retryable,
                 ),
             )
-            hooks[idx] = merged
+            hooks[idx] = _webhook_for_storage(instance_name, merged)
             store["instances"][instance_name] = hooks
             _write_store_unlocked(store)
             return
@@ -571,25 +759,28 @@ def append_dispatch_history(
     instance_name: str,
     webhook_id: str,
     entry: dict[str, Any],
-) -> None:
+) -> dict[str, Any] | None:
+    """Persist delivery evidence separately while retaining config aggregates.
+
+    ``dispatchHistory`` in existing configuration records is intentionally left
+    untouched so historic installations remain readable. New deliveries never
+    enlarge the configuration store.
+    """
+    delivery = append_webhook_delivery({**entry, "instanceName": instance_name, "webhookId": webhook_id})
     with _LOCK:
         store = _read_store_unlocked()
         hooks = store["instances"].get(instance_name)
         if not isinstance(hooks, list):
-            return
-        limit = max(5, int(get_settings().webhook_dispatch_history_limit or 30))
+            return delivery
         for idx, item in enumerate(hooks):
             if not isinstance(item, dict) or str(item.get("id")) != webhook_id:
                 continue
-            history = item.get("dispatchHistory") if isinstance(item.get("dispatchHistory"), list) else []
-            history.insert(0, _sanitize_dispatch_history_entry(entry))
-            history = history[:limit]
+            current = _hydrate_webhook(instance_name, item)
             merged = _sanitize_webhook(
                 instance_name,
                 _apply_dispatch_aggregate_fields(
                     {
-                        **item,
-                        "dispatchHistory": history,
+                        **current,
                         "updatedAt": _now_iso(),
                     },
                     status=str(entry.get("status") or "failed"),
@@ -600,21 +791,15 @@ def append_dispatch_history(
                     retryable=entry.get("retryable") if isinstance(entry.get("retryable"), bool) else None,
                 ),
             )
-            hooks[idx] = merged
+            hooks[idx] = _webhook_for_storage(instance_name, merged)
             store["instances"][instance_name] = hooks
             _write_store_unlocked(store)
-            return
+            return delivery
+    return delivery
 
 
 def mask_headers_for_log(headers: dict[str, str]) -> dict[str, str]:
-    safe: dict[str, str] = {}
-    for key, value in headers.items():
-        lower = key.lower()
-        if lower in {"authorization", "x-api-key", "api-key"} or "token" in lower or "secret" in lower:
-            safe[key] = _mask_secret(value)
-        else:
-            safe[key] = value
-    return safe
+    return SecretRedactor.redact_headers(headers)
 
 
 def list_webhook_dispatches(instance_name: str, webhook_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -622,12 +807,45 @@ def list_webhook_dispatches(instance_name: str, webhook_id: str, *, limit: int =
     if not item:
         return []
     history = item.get("dispatchHistory") if isinstance(item.get("dispatchHistory"), list) else []
-    return history[: max(1, min(limit, 200))]
+    legacy = [_legacy_delivery(item, row) for row in history if isinstance(row, dict)]
+    current = list_webhook_deliveries(webhook_id, limit=500)
+    return _merge_deliveries(current, legacy, limit=limit)
+
+
+def list_webhook_delivery_page(
+    instance_name: str,
+    webhook_id: str,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    operation: str | None = None,
+    event_type: str | None = None,
+    is_test: bool | None = None,
+    delivery_id: str | None = None,
+    event_id: str | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    search: str | None = None,
+    date_from: int | None = None,
+    date_to: int | None = None,
+) -> dict[str, Any]:
+    """Safe, pageable delivery summaries; legacy history remains readable."""
+    records = list_webhook_dispatches(instance_name, webhook_id, limit=500)
+    filtered = filter_deliveries(
+        records, status=status, operation=operation, event_type=event_type, is_test=is_test,
+        delivery_id=delivery_id, event_id=event_id, request_id=request_id, correlation_id=correlation_id,
+        search=search, date_from=date_from, date_to=date_to,
+    )
+    safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+    return {"items": [delivery_list_item(item) for item in filtered[safe_offset:safe_offset + safe_limit]], "total": len(filtered), "limit": safe_limit, "offset": safe_offset}
 
 
 def list_recent_dispatches(instance_name: str, *, limit: int = 50, success: bool | None = None) -> list[dict[str, Any]]:
     hooks = list_instance_webhooks(instance_name, reveal_secrets=False)
-    items: list[dict[str, Any]] = []
+    items = list_instance_deliveries(instance_name, limit=500, success=success)
+    legacy: list[dict[str, Any]] = []
     for hook in hooks:
         history = hook.get("dispatchHistory") if isinstance(hook.get("dispatchHistory"), list) else []
         for row in history:
@@ -636,17 +854,65 @@ def list_recent_dispatches(instance_name: str, *, limit: int = 50, success: bool
             row_success = bool(row.get("success"))
             if success is not None and row_success != success:
                 continue
-            items.append(
-                {
-                    **row,
-                    "webhookId": row.get("webhookId") or hook.get("id"),
-                    "webhookName": row.get("webhookName") or hook.get("name"),
-                    "instanceName": row.get("instanceName") or hook.get("instanceId") or instance_name,
-                    "destinationUrl": row.get("destinationUrl") or hook.get("url"),
-                }
-            )
-    items.sort(key=lambda value: _coerce_int(value.get("timestamp")), reverse=True)
-    return items[: max(1, min(limit, 300))]
+            legacy.append(_legacy_delivery(hook, row))
+    return _merge_deliveries(items, legacy, limit=limit)
+
+
+def get_webhook_delivery(instance_name: str, webhook_id: str, delivery_id: str) -> dict[str, Any] | None:
+    item = get_webhook(instance_name, webhook_id, reveal_secrets=False)
+    if not item:
+        return None
+    stored = get_stored_webhook_delivery(webhook_id, delivery_id)
+    if stored:
+        return delivery_detail(stored)
+    history = item.get("dispatchHistory") if isinstance(item.get("dispatchHistory"), list) else []
+    for row in history:
+        if isinstance(row, dict):
+            legacy = _legacy_delivery(item, row)
+            if legacy["id"] == delivery_id:
+                return delivery_detail(legacy)
+    return None
+
+
+def find_webhook_by_id(webhook_id: str, *, reveal_secrets: bool = False) -> tuple[str, dict[str, Any]] | None:
+    """Resolve stable webhook identity without relying on a client-supplied instance."""
+    with _LOCK:
+        store = _read_store_unlocked()
+        candidates = [(str(instance), item) for instance, hooks in store["instances"].items() if isinstance(hooks, list) for item in hooks if isinstance(item, dict) and str(item.get("id") or "") == webhook_id]
+    if not candidates:
+        return None
+    instance_name, raw = candidates[0]
+    return instance_name, _public_webhook(_hydrate_webhook(instance_name, raw), reveal_secrets=reveal_secrets)
+
+
+def _legacy_delivery(hook: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    webhook_id = str(row.get("webhookId") or hook.get("id") or "")
+    correlation = str(row.get("dispatchId") or "")
+    identifier = correlation or f"legacy_{webhook_id}_{_coerce_int(row.get('timestamp'))}"
+    return {
+        **_sanitize_dispatch_history_entry(row),
+        "id": identifier,
+        "correlationId": correlation or None,
+        "isTest": bool(row.get("isTest") or row.get("testMode")),
+        "webhookId": webhook_id,
+        "webhookName": row.get("webhookName") or hook.get("name"),
+        "instanceName": row.get("instanceName") or hook.get("instanceId"),
+        "destinationUrl": row.get("destinationUrl") or hook.get("url"),
+        "metadata": {"legacy": True},
+    }
+
+
+def _merge_deliveries(current: list[dict[str, Any]], legacy: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for item in [*current, *legacy]:
+        identifier = str(item.get("id") or item.get("dispatchId") or "")
+        if not identifier or identifier in seen:
+            continue
+        seen.add(identifier)
+        merged.append(item)
+    merged.sort(key=lambda value: _coerce_int(value.get("timestamp")), reverse=True)
+    return merged[:max(1, min(limit, 500))]
 
 
 def get_dispatch_metrics(instance_name: str) -> dict[str, Any]:
