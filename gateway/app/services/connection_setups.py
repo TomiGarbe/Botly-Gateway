@@ -16,8 +16,11 @@ TERMINAL_STATES = {"ready", "failed", "cancelled", "cleanup_pending", "expired"}
 _TRANSITIONS = {
     "draft": {"onboarding", "provisioning", "failed", "cancelled", "cleanup_pending", "expired"},
     "onboarding": {"provisioning", "failed", "cancelled", "cleanup_pending", "expired"},
-    "provisioning": {"ready", "failed", "cleanup_pending", "expired"},
-    "failed": {"cleanup_pending"},
+    # A setup can be cancelled while Graph work is running.  It must never be
+    # promoted after that point, even if the in-flight provider request later
+    # returns successfully.
+    "provisioning": {"ready", "failed", "cancelled", "cleanup_pending", "expired"},
+    "failed": {"cancelled", "cleanup_pending"},
     "cancelled": {"cleanup_pending"},
     "expired": {"cleanup_pending"},
     "cleanup_pending": set(),
@@ -145,7 +148,13 @@ class ConnectionSetupService:
             raise ConnectionSetupConflictError("This setup does not use Meta")
         return self._public(self._transition_record(record, "onboarding") if record["state"] == "draft" else record)
 
-    def begin_meta_provisioning(self, setup_id: str) -> dict[str, Any]:
+    def begin_meta_provisioning(
+        self,
+        setup_id: str,
+        *,
+        phone_number_id: str | None = None,
+        business_account_id: str | None = None,
+    ) -> dict[str, Any]:
         """Claim the callback before Graph work so retries resume one setup."""
         record = self._record(setup_id)
         if record.get("provider_id") != "meta":
@@ -154,6 +163,18 @@ class ConnectionSetupService:
             record = self._transition_record(record, "provisioning")
         if record["state"] != "provisioning":
             raise ConnectionSetupConflictError("Meta setup cannot be provisioned from its current state")
+        # Once Meta has supplied asset identifiers we have enough evidence to
+        # preserve a cancellation as cleanup_pending.  These assets can have
+        # existed before onboarding, so automatic deletion remains forbidden.
+        if phone_number_id and business_account_id:
+            resources = [
+                {"kind": "meta_phone_number", "identifier": phone_number_id, "ownership_confirmed": False},
+                {"kind": "meta_business_account", "identifier": business_account_id, "ownership_confirmed": False},
+            ]
+            record = self._registry.update_setup_record(
+                record["id"],
+                {"external_resources": resources, "updated_at": _iso(_now())},
+            ) or record
         return self._public(record)
 
     async def provision_evolution(self, setup_id: str) -> dict[str, Any]:

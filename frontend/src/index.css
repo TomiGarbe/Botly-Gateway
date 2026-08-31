@@ -241,6 +241,7 @@
   .connection-provisioning li.is-complete { @apply text-zinc-400; }
   .connection-provisioning li.is-complete > svg { @apply border-emerald-500 text-emerald-400; }
   .connection-provisioning > .client-button-primary { @apply mt-8; }
+  .connection-provisioning > .client-button-danger { @apply mt-5 block; }
   .evolution-qr-panel h3 { @apply m-0 text-lg font-semibold text-zinc-100; }
   .evolution-qr-panel > p { @apply mt-2 text-sm text-zinc-400; }
   .evolution-qr-panel > img { @apply mt-6 h-64 w-64 rounded-xl bg-white p-3; }
