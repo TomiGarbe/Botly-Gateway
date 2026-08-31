@@ -11,7 +11,7 @@ export interface MetaSignupConfig {
 }
 
 interface EmbeddedSignupSession {
-  phoneNumberId: string
+  phoneNumberId?: string
   businessAccountId: string
   raw: Record<string, unknown>
 }
@@ -34,7 +34,7 @@ export async function completeMetaSignup(
     body: JSON.stringify({
       setup_id: setupId,
       code,
-      phone_number_id: session.phoneNumberId,
+      ...(session.phoneNumberId ? { phone_number_id: session.phoneNumberId } : {}),
       business_account_id: session.businessAccountId,
       session_info: { ...session.raw, coexistenceRequested },
       ...(trimmedPin ? { registration_pin: trimmedPin } : {}),

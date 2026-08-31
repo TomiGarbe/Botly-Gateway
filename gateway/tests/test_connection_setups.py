@@ -103,6 +103,19 @@ def test_meta_cancel_during_provisioning_preserves_external_assets_for_manual_cl
         service.complete_meta(setup["id"], phone_number_id="phone-1", business_account_id="waba-1")
 
 
+def test_meta_waba_checkpoint_without_phone_requires_manual_cleanup_on_cancel(monkeypatch, tmp_path) -> None:
+    service, _registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Coexistence", provider="meta")
+
+    service.begin_meta(setup["id"])
+    provisioning = service.begin_meta_provisioning(setup["id"], business_account_id="waba-1")
+
+    assert provisioning["external_resources"] == [
+        {"kind": "meta_business_account", "identifier": "waba-1", "ownership_confirmed": False}
+    ]
+    assert service.cancel(setup["id"])["state"] == "cleanup_pending"
+
+
 def test_evolution_setup_promotes_only_after_provisioning(monkeypatch, tmp_path) -> None:
     runtime = _Runtime()
     service, registry, client = _service(tmp_path, monkeypatch, runtime)

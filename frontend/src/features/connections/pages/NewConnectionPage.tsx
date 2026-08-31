@@ -14,7 +14,7 @@ import { gatewayRequest } from '@/shared/lib/gatewayClient'
 import { useAuth } from '@/app/providers/AuthProvider'
 
 type ProviderId = 'meta' | 'evolution'
-type EmbeddedSession = { phoneNumberId: string; businessAccountId: string; raw: Record<string, unknown> }
+type EmbeddedSession = { phoneNumberId?: string; businessAccountId: string; raw: Record<string, unknown> }
 type ProvisioningStep = 'connecting' | 'authorizing' | 'creating' | 'webhook' | 'testing' | 'ready'
 
 let facebookSdkPromise: Promise<void> | null = null
@@ -49,12 +49,22 @@ function isFacebookOrigin(origin: string): boolean {
   }
 }
 
-function waitForSession(): Promise<EmbeddedSession> {
+function waitForSession(signal: AbortSignal): Promise<EmbeddedSession> {
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
+    let settled = false
+    const finish = (result: { session?: EmbeddedSession; error?: Error }) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
       window.removeEventListener('message', listener)
-      reject(new Error('signup_timeout'))
+      signal.removeEventListener('abort', abort)
+      if (result.error) reject(result.error)
+      else if (result.session) resolve(result.session)
+    }
+    const timeout = window.setTimeout(() => {
+      finish({ error: new Error('signup_timeout') })
     }, 120000)
+    const abort = () => finish({ error: new Error('signup_cancelled') })
     const listener = (event: MessageEvent) => {
       if (!isFacebookOrigin(event.origin)) return
       let raw: unknown = event.data
@@ -62,23 +72,29 @@ function waitForSession(): Promise<EmbeddedSession> {
         try { raw = JSON.parse(raw) } catch { return }
       }
       if (typeof raw !== 'object' || raw === null) return
-      const data = raw as { type?: string; event?: string; data?: Record<string, unknown> }
+      const data = raw as { type?: string; event?: string; version?: unknown; data?: Record<string, unknown> }
       if (data.type !== 'WA_EMBEDDED_SIGNUP') return
       if (['CANCEL', 'CANCELLED', 'ERROR'].includes(String(data.event || '').toUpperCase())) {
-        window.clearTimeout(timeout)
-        window.removeEventListener('message', listener)
-        reject(new Error('signup_cancelled'))
+        finish({ error: new Error('signup_cancelled') })
         return
       }
+      if (!['FINISH', 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'].includes(String(data.event || '').toUpperCase())) return
       const payload: Record<string, unknown> = data.data || data
       const phoneNumberId = String(payload.phone_number_id || payload.phoneNumberId || '')
       const businessAccountId = String(payload.waba_id || payload.business_account_id || payload.businessAccountId || '')
-      if (!phoneNumberId || !businessAccountId) return
-      window.clearTimeout(timeout)
-      window.removeEventListener('message', listener)
-      resolve({ phoneNumberId, businessAccountId, raw: payload })
+      // Coexistence completion can provide the WABA without a phone ID.  The
+      // Gateway resolves one unambiguous phone through Graph after exchanging
+      // the OAuth code; do not discard this valid completion event.
+      if (!businessAccountId) return
+      finish({ session: {
+        ...(phoneNumberId ? { phoneNumberId } : {}),
+        businessAccountId,
+        raw: { ...payload, event: String(data.event || ''), version: data.version },
+      } })
     }
     window.addEventListener('message', listener)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
   })
 }
 
@@ -300,7 +316,8 @@ export function NewConnectionPage() {
     setStep('authorizing')
     // FB.login must be called before any await so the popup remains directly
     // user initiated. The SDK and configuration are preloaded by the setup UI.
-    const sessionPromise = waitForSession()
+    const signupAbort = new AbortController()
+    const sessionPromise = waitForSession(signupAbort.signal)
     const codePromise = loginWithFacebook(metaSignupConfig.config_id!)
     void (async () => {
       try {
@@ -322,6 +339,7 @@ export function NewConnectionPage() {
       progressTimers.forEach(window.clearTimeout)
       setError(friendlyError(reason))
     } finally {
+      signupAbort.abort()
       setIsStarting(false)
     }
     })()
