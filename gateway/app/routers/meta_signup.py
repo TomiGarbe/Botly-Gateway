@@ -41,7 +41,11 @@ async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
             if setup.get("state") not in {"onboarding", "provisioning"}:
                 raise HTTPException(status_code=409, detail="Connection setup is not active")
             instance_name = str(setup["runtime_name"])
-            setup_service.begin_meta_provisioning(str(setup["id"]))
+            setup_service.begin_meta_provisioning(
+                str(setup["id"]),
+                phone_number_id=body.phone_number_id,
+                business_account_id=body.business_account_id,
+            )
         except ConnectionSetupNotFoundError:
             raise HTTPException(status_code=404, detail="Connection setup not found")
     elif body.connection_id:
