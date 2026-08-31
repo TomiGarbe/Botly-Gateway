@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import httpx
 
@@ -111,6 +111,14 @@ class MetaPlatform:
         close_client = self._client is None
         try:
             response = await client.request(method, path, **kwargs)
+            # Meta validates the Embedded Signup token via /debug_token, but
+            # some Graph endpoints reject that same token when it is supplied
+            # in the Authorization header (OAuth error 190).  Their documented
+            # query-parameter form remains accepted.  Retry only this exact
+            # case, and remove the header so credentials are never duplicated.
+            if self._should_retry_with_query_token(response, kwargs.get("headers")):
+                retry_kwargs = self._query_token_retry_kwargs(kwargs)
+                response = await client.request(method, path, **retry_kwargs)
             if log_response:
                 try:
                     logged_body: Any = response.json()
@@ -141,6 +149,38 @@ class MetaPlatform:
         finally:
             if close_client:
                 await client.aclose()
+
+    @staticmethod
+    def _bearer_token(headers: Any) -> str | None:
+        if not isinstance(headers, Mapping):
+            return None
+        for name, value in headers.items():
+            if str(name).lower() != "authorization":
+                continue
+            candidate = str(value).strip()
+            if candidate.lower().startswith("bearer "):
+                token = candidate[7:].strip()
+                return token or None
+        return None
+
+    def _should_retry_with_query_token(self, response: httpx.Response, headers: Any) -> bool:
+        if response.status_code != 401 or not self._bearer_token(headers):
+            return False
+        detail = self._extract_error(response)
+        return detail.get("code") == 190
+
+    def _query_token_retry_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        token = self._bearer_token(kwargs.get("headers"))
+        if not token:
+            return kwargs
+        headers = {
+            str(name): value
+            for name, value in (kwargs.get("headers") or {}).items()
+            if str(name).lower() != "authorization"
+        }
+        params = dict(kwargs.get("params") or {})
+        params["access_token"] = token
+        return {**kwargs, "headers": headers, "params": params}
 
     def credentials_from_embedded_signup(
         self,
