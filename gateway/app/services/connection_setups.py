@@ -166,11 +166,10 @@ class ConnectionSetupService:
         # Once Meta has supplied asset identifiers we have enough evidence to
         # preserve a cancellation as cleanup_pending.  These assets can have
         # existed before onboarding, so automatic deletion remains forbidden.
-        if phone_number_id and business_account_id:
-            resources = [
-                {"kind": "meta_phone_number", "identifier": phone_number_id, "ownership_confirmed": False},
-                {"kind": "meta_business_account", "identifier": business_account_id, "ownership_confirmed": False},
-            ]
+        if business_account_id:
+            resources = [{"kind": "meta_business_account", "identifier": business_account_id, "ownership_confirmed": False}]
+            if phone_number_id:
+                resources.insert(0, {"kind": "meta_phone_number", "identifier": phone_number_id, "ownership_confirmed": False})
             record = self._registry.update_setup_record(
                 record["id"],
                 {"external_resources": resources, "updated_at": _iso(_now())},

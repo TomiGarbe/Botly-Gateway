@@ -57,7 +57,7 @@ class MetaOnboardingOrchestrator:
         *,
         instance_name: str,
         code: str,
-        phone_number_id: str,
+        phone_number_id: str | None,
         business_account_id: str,
         session_info: dict[str, Any] | None = None,
         registration_pin: str | None = None,
@@ -90,9 +90,15 @@ class MetaOnboardingOrchestrator:
             logger.info("token_verified", instance=instance_name, warnings=len(verification.warnings))
             save_pipeline_event(stage="token_verification", status="completed", instance=instance_name, event="TOKEN_VERIFIED", component="Meta", details={"warnings": len(verification.warnings)})
 
+            resolved_phone_number_id = await self._discovery.resolve_phone_number_id(
+                business_account_id=business_account_id,
+                access_token=token,
+                requested_phone_number_id=phone_number_id,
+            )
+
             credentials = self._platform.credentials_from_embedded_signup(
                 token=token,
-                phone_number_id=phone_number_id,
+                phone_number_id=resolved_phone_number_id,
                 business_account_id=business_account_id,
                 session_info=session_info,
             )

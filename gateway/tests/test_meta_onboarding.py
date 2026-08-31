@@ -5,9 +5,12 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from app.platforms.meta import MetaPlatform
+from app.services.meta.discovery import MetaDiscoveryService
 from app.services.meta.evolution import MetaEvolutionProvisioner
+from app.services.meta.exceptions import MetaOnboardingError
 from app.services.meta.orchestrator import MetaOnboardingOrchestrator
 
 
@@ -113,5 +116,31 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         assert "secret-token" not in stored_credentials
         assert '"registrationPinCiphertext"' in stored_credentials
         assert '"pin"' not in stored_credentials
+
+    asyncio.run(run())
+
+
+def test_waba_only_callback_rejects_ambiguous_phone_selection() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/waba_456/phone_numbers")
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "phone_1"}, {"id": "phone_2"}]},
+        )
+
+    async def run() -> None:
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://graph.facebook.com/v23.0",
+        )
+        service = MetaDiscoveryService(MetaPlatform(client=client))
+        with pytest.raises(MetaOnboardingError) as error:
+            await service.resolve_phone_number_id(
+                business_account_id="waba_456",
+                access_token="token",
+                requested_phone_number_id=None,
+            )
+        await client.aclose()
+        assert error.value.code == "phone_selection_required"
 
     asyncio.run(run())
