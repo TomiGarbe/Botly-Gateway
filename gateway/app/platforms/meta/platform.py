@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from typing import Any, Callable, Mapping
 
 import httpx
@@ -110,14 +112,15 @@ class MetaPlatform:
         client = self.get_graph_client()
         close_client = self._client is None
         try:
-            response = await client.request(method, path, **kwargs)
+            request_kwargs = self._with_appsecret_proof(kwargs)
+            response = await client.request(method, path, **request_kwargs)
             # Meta validates the Embedded Signup token via /debug_token, but
             # some Graph endpoints reject that same token when it is supplied
             # in the Authorization header (OAuth error 190).  Their documented
             # query-parameter form remains accepted.  Retry only this exact
             # case, and remove the header so credentials are never duplicated.
-            if self._should_retry_with_query_token(response, kwargs.get("headers")):
-                retry_kwargs = self._query_token_retry_kwargs(kwargs)
+            if self._should_retry_with_query_token(response, request_kwargs.get("headers")):
+                retry_kwargs = self._query_token_retry_kwargs(request_kwargs)
                 response = await client.request(method, path, **retry_kwargs)
             if log_response:
                 try:
@@ -181,6 +184,19 @@ class MetaPlatform:
         params = dict(kwargs.get("params") or {})
         params["access_token"] = token
         return {**kwargs, "headers": headers, "params": params}
+
+    def _with_appsecret_proof(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Add Meta's optional server-side proof for bearer-token Graph calls."""
+        token = self._bearer_token(kwargs.get("headers"))
+        secret = str(getattr(self._settings_factory(), "meta_app_secret", "") or "").strip()
+        if not token or not secret:
+            return kwargs
+        params = dict(kwargs.get("params") or {})
+        params.setdefault(
+            "appsecret_proof",
+            hmac.new(secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest(),
+        )
+        return {**kwargs, "params": params}
 
     def credentials_from_embedded_signup(
         self,

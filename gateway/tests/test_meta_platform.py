@@ -73,8 +73,10 @@ def test_meta_platform_retries_oauth_190_with_the_graph_query_token_format() -> 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.headers.get("Authorization"):
+            assert request.url.params.get("appsecret_proof")
             return httpx.Response(401, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
         assert request.url.params.get("access_token") == "embedded-signup-token"
+        assert request.url.params.get("appsecret_proof")
         return httpx.Response(200, json={"data": []})
 
     async def run() -> None:
