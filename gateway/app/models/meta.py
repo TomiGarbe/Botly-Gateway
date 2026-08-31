@@ -10,7 +10,9 @@ class MetaSignupCompleteRequest(BaseModel):
     connection_id: str | None = Field(default=None, min_length=1, max_length=128)
     setup_id: str | None = Field(default=None, min_length=1, max_length=128)
     code: str = Field(..., min_length=8)
-    phone_number_id: str = Field(..., min_length=2)
+    # The coexistence completion event can identify only the WABA.  The
+    # Gateway resolves a single eligible phone after exchanging the OAuth code.
+    phone_number_id: str | None = Field(default=None, min_length=2)
     business_account_id: str = Field(..., min_length=2)
     session_info: dict[str, Any] = Field(default_factory=dict)
     # PIN de verificacion en dos pasos del numero de WhatsApp. Si el numero ya

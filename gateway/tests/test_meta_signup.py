@@ -92,7 +92,9 @@ def test_meta_signup_service_exchanges_code_creates_evolution_instance_discovers
         completion = await service.complete_onboarding(
             instance_name="cloud_instance",
             code="oauth-code",
-            phone_number_id="phone_123",
+            # Coexistence may finish with a WABA-only postMessage callback.
+            # The server must resolve its sole business-app phone after OAuth.
+            phone_number_id=None,
             business_account_id="waba_456",
             session_info={"event": "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"},
         )

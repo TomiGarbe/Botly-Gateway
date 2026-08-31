@@ -111,7 +111,9 @@ async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
         if setup is not None:
             try:
                 completed_setup = setup_service.complete_meta(
-                    str(setup["id"]), phone_number_id=body.phone_number_id, business_account_id=body.business_account_id
+                    str(setup["id"]),
+                    phone_number_id=completion.credentials.phone_number_id,
+                    business_account_id=completion.credentials.business_account_id,
                 )
                 return (await connection_service.get_connection(str(completed_setup["connection_id"]))).public_dict()
             except ConnectionSetupConflictError as exc:
@@ -123,7 +125,9 @@ async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
 
     if setup is not None:
         completed_setup = setup_service.complete_meta(
-            str(setup["id"]), phone_number_id=body.phone_number_id, business_account_id=body.business_account_id
+            str(setup["id"]),
+            phone_number_id=completion.credentials.phone_number_id,
+            business_account_id=completion.credentials.business_account_id,
         )
         return (await connection_service.get_connection(str(completed_setup["connection_id"]))).public_dict()
     if body.connection_id:
