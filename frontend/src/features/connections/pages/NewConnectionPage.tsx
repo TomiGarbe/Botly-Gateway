@@ -9,13 +9,15 @@ import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { getConnection } from '../api/connectionsApi'
 import { cancelConnectionSetup, createConnectionSetup, getConnectionSetup, getConnectionSetupQr, type ConnectionSetup } from '../api/connectionSetupsApi'
-import { completeMetaSignup, getMetaSignupConfig } from '../api/metaSignupApi'
+import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
 import { gatewayRequest } from '@/shared/lib/gatewayClient'
 import { useAuth } from '@/app/providers/AuthProvider'
 
 type ProviderId = 'meta' | 'evolution'
 type EmbeddedSession = { phoneNumberId: string; businessAccountId: string; raw: Record<string, unknown> }
 type ProvisioningStep = 'connecting' | 'authorizing' | 'creating' | 'webhook' | 'testing' | 'ready'
+
+let facebookSdkPromise: Promise<void> | null = null
 
 const provisioningSteps: Array<{ id: ProvisioningStep; label: string }> = [
   { id: 'connecting', label: 'Conectando…' },
@@ -85,22 +87,38 @@ async function loadFacebookSdk(appId: string, graphVersion: string): Promise<voi
     window.FB.init({ appId, autoLogAppEvents: true, xfbml: true, version: graphVersion })
     return
   }
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error('signup_unavailable')), 20000)
-    window.fbAsyncInit = () => {
-      if (!window.FB) return
-      window.FB.init({ appId, autoLogAppEvents: true, xfbml: true, version: graphVersion })
-      window.clearTimeout(timeout)
-      resolve()
-    }
-    const script = document.createElement('script')
-    script.id = 'facebook-jssdk'
-    script.src = 'https://connect.facebook.net/en_US/sdk.js'
-    script.async = true
-    script.defer = true
-    script.onerror = () => reject(new Error('signup_unavailable'))
-    document.body.appendChild(script)
-  })
+  if (!facebookSdkPromise) {
+    facebookSdkPromise = new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        facebookSdkPromise = null
+        reject(new Error('signup_unavailable'))
+      }, 20000)
+      window.fbAsyncInit = () => {
+        if (!window.FB) return
+        window.clearTimeout(timeout)
+        resolve()
+      }
+      const script = document.getElementById('facebook-jssdk') as HTMLScriptElement | null
+      if (script) {
+        script.addEventListener('error', () => reject(new Error('signup_unavailable')), { once: true })
+        return
+      }
+      const nextScript = document.createElement('script')
+      nextScript.id = 'facebook-jssdk'
+      nextScript.src = 'https://connect.facebook.net/en_US/sdk.js'
+      nextScript.async = true
+      nextScript.defer = true
+      nextScript.onerror = () => {
+        facebookSdkPromise = null
+        reject(new Error('signup_unavailable'))
+      }
+      document.body.appendChild(nextScript)
+    })
+  }
+  await facebookSdkPromise
+  const facebook = window.FB as { init: (options: { appId: string; autoLogAppEvents: boolean; xfbml: boolean; version: string }) => void } | undefined
+  if (!facebook) throw new Error('signup_unavailable')
+  facebook.init({ appId, autoLogAppEvents: true, xfbml: true, version: graphVersion })
 }
 
 function loginWithFacebook(configId: string): Promise<string> {
@@ -152,6 +170,8 @@ export function NewConnectionPage() {
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [metaSignupConfig, setMetaSignupConfig] = useState<MetaSignupConfig | null>(null)
+  const [isMetaSdkLoading, setIsMetaSdkLoading] = useState(false)
   const { user } = useAuth()
 
   const loadClient = useCallback(async () => {
@@ -203,6 +223,21 @@ export function NewConnectionPage() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [setup])
 
+  useEffect(() => {
+    if (setup?.provider !== 'meta' || setup.state !== 'onboarding') return
+    let active = true
+    setIsMetaSdkLoading(true)
+    void getMetaSignupConfig()
+      .then(async (config) => {
+        if (!config.enabled || !config.app_id || !config.config_id) throw new Error('configurada')
+        await loadFacebookSdk(config.app_id, config.graph_version)
+        if (active) setMetaSignupConfig(config)
+      })
+      .catch((reason) => { if (active) setError(friendlyError(reason)) })
+      .finally(() => { if (active) setIsMetaSdkLoading(false) })
+    return () => { active = false }
+  }, [setup?.id, setup?.provider, setup?.state])
+
   async function loadQr(setupId: string) {
     const payload = await getConnectionSetupQr(setupId)
     const nextQr = qrSource(payload)
@@ -244,28 +279,39 @@ export function NewConnectionPage() {
       } else {
         navigate(`/clients/${clientId}`, { replace: true })
       }
-    } catch {
+    } catch (reason) {
+      if (reason instanceof Error && reason.message) {
+        setError(reason.message)
+        return
+      }
       setError('No pudimos cancelar la configuración. Podés reintentar o continuar configurando.')
     } finally { setIsCancelling(false) }
   }
 
-  async function startMetaSignup() {
+  function startMetaSignup() {
     if (!setup) return
+    if (!metaSignupConfig || !window.FB) {
+      setError('La autorizacion de Meta se esta preparando. Espera un instante e intentalo nuevamente.')
+      return
+    }
     setError(null)
     setIsStarting(true)
     const progressTimers: number[] = []
-    try {
-      setStep('authorizing')
-      const config = await getMetaSignupConfig()
-      if (!config.enabled || !config.app_id || !config.config_id) throw new Error('configurada')
-      await loadFacebookSdk(config.app_id, config.graph_version)
-      const sessionPromise = waitForSession()
-      const code = await loginWithFacebook(config.config_id)
-      const session = await sessionPromise
+    setStep('authorizing')
+    // FB.login must be called before any await so the popup remains directly
+    // user initiated. The SDK and configuration are preloaded by the setup UI.
+    const sessionPromise = waitForSession()
+    const codePromise = loginWithFacebook(metaSignupConfig.config_id!)
+    void (async () => {
+      try {
+      const [code, session] = await Promise.all([codePromise, sessionPromise])
       setStep('creating')
       progressTimers.push(window.setTimeout(() => setStep('webhook'), 900))
       progressTimers.push(window.setTimeout(() => setStep('testing'), 2100))
-      const completed = await completeMetaSignup(setup.id, code, session, config.supports_coexistence, registrationPin)
+      // The provider request may take time. Keep cancellation available while
+      // the setup is in provisioning; the backend prevents any later promote.
+      setIsStarting(false)
+      const completed = await completeMetaSignup(setup.id, code, session, metaSignupConfig.supports_coexistence, registrationPin)
       progressTimers.forEach(window.clearTimeout)
       setStep('testing')
       await getConnection(completed.id)
@@ -278,6 +324,7 @@ export function NewConnectionPage() {
     } finally {
       setIsStarting(false)
     }
+    })()
   }
 
   if (isLoading) return <LoadingState label="Cargando cliente…" />
@@ -310,7 +357,7 @@ export function NewConnectionPage() {
     </div> : <div className="connection-provisioning">
       <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
       {!isStarting && step === 'connecting' ? <label className="new-connection-name meta-pin-field"><span>PIN de verificación en dos pasos (6 dígitos)</span><input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /><small>Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN.</small></label> : null}
-      {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()}>Continuar con WhatsApp</button> : null}
+      {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={startMetaSignup} disabled={isMetaSdkLoading}>{isMetaSdkLoading ? 'Preparando Meta...' : 'Conectar con Meta'}</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p>{canRetry ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button> : null}</div> : null}
       {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting}>Cancelar configuración</button> : null}
     </div>}

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.routers import connection_setups as setup_router
 from app.services.clients import ClientService
 from app.services.connection_registry import ConnectionRegistry
-from app.services.connection_setups import ConnectionSetupService, InvalidConnectionSetupTransition
+from app.services.connection_setups import ConnectionSetupConflictError, ConnectionSetupService, InvalidConnectionSetupTransition
 from app.services.connection_setup_cleanup import ConnectionSetupCleanupService
 from app.services.gateway_settings import GatewaySettingsService
 
@@ -53,6 +53,8 @@ def test_meta_setup_is_not_inventory_until_atomically_promoted(monkeypatch, tmp_
     assert completed["connection_id"]
     assert len(registry.connection_records()) == 1
     with pytest.raises(InvalidConnectionSetupTransition):
+        service.cancel(setup["id"])
+    with pytest.raises(InvalidConnectionSetupTransition):
         service.transition(setup["id"], "draft")
 
 
@@ -83,6 +85,22 @@ def test_meta_failure_and_known_resource_cancellation_follow_lifecycle(monkeypat
     service.begin_meta(cleanup["id"])
     registry.update_setup_record(cleanup["id"], {"external_resources": [{"kind": "meta_phone_number", "identifier": "phone", "ownership_confirmed": False}]})
     assert service.cancel(cleanup["id"])["state"] == "cleanup_pending"
+
+
+def test_meta_cancel_during_provisioning_preserves_external_assets_for_manual_cleanup(monkeypatch, tmp_path) -> None:
+    service, _registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Cancel", provider="meta")
+
+    service.begin_meta(setup["id"])
+    service.begin_meta_provisioning(
+        setup["id"], phone_number_id="phone-1", business_account_id="waba-1"
+    )
+    cancelled = service.cancel(setup["id"])
+
+    assert cancelled["state"] == "cleanup_pending"
+    assert cancelled["cleanup_required"] is True
+    with pytest.raises(ConnectionSetupConflictError):
+        service.complete_meta(setup["id"], phone_number_id="phone-1", business_account_id="waba-1")
 
 
 def test_evolution_setup_promotes_only_after_provisioning(monkeypatch, tmp_path) -> None:
