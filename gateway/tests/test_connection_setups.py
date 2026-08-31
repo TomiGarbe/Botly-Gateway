@@ -80,6 +80,9 @@ def test_meta_failure_and_known_resource_cancellation_follow_lifecycle(monkeypat
     service.begin_meta(failed["id"])
     service.begin_meta_provisioning(failed["id"])
     assert service.mark_meta_failed(failed["id"])["state"] == "failed"
+    # A retry uses a new, single-use Meta OAuth code and may resume the same
+    # setup without losing its durable identity.
+    assert service.begin_meta_provisioning(failed["id"])["state"] == "provisioning"
 
     cleanup = service.create(client_id=client.id, channel="whatsapp", name="Cleanup", provider="meta")
     service.begin_meta(cleanup["id"])

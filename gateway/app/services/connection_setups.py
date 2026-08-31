@@ -20,7 +20,10 @@ _TRANSITIONS = {
     # promoted after that point, even if the in-flight provider request later
     # returns successfully.
     "provisioning": {"ready", "failed", "cancelled", "cleanup_pending", "expired"},
-    "failed": {"cancelled", "cleanup_pending"},
+    # A Meta OAuth code is single-use, but a failed attempt must not force the
+    # operator to discard the setup.  A later attempt starts a new Meta login
+    # and can safely resume the same durable setup.
+    "failed": {"onboarding", "cancelled", "cleanup_pending"},
     "cancelled": {"cleanup_pending"},
     "expired": {"cleanup_pending"},
     "cleanup_pending": set(),
@@ -159,6 +162,8 @@ class ConnectionSetupService:
         record = self._record(setup_id)
         if record.get("provider_id") != "meta":
             raise ConnectionSetupConflictError("This setup does not use Meta")
+        if record["state"] == "failed":
+            record = self._transition_record(record, "onboarding", {"diagnostic": None})
         if record["state"] == "onboarding":
             record = self._transition_record(record, "provisioning")
         if record["state"] != "provisioning":
