@@ -26,6 +26,10 @@ def _isolate_key_store(monkeypatch, tmp_path) -> None:
         "app.services.instance_auth.get_settings",
         lambda: SimpleNamespace(instance_api_keys_path=str(tmp_path / "instance_api_keys.json"), gateway_api_key="test-gateway-key"),
     )
+    class _LegacyRegistrySync:
+        async def migrate_legacy_connections(self):
+            return 0
+    monkeypatch.setattr(instances_router, "get_connection_service", lambda: _LegacyRegistrySync())
 
 
 def test_create_instance_returns_instance_and_plaintext_api_key(monkeypatch, tmp_path) -> None:
@@ -49,6 +53,11 @@ def test_create_instance_fallback_response_still_exposes_api_key(monkeypatch, tm
     """Si Evolution devuelve algo inusable, el fallback no debe romper ni perder la apiKey."""
     _isolate_key_store(monkeypatch, tmp_path)
     monkeypatch.setattr(instances_router, "_connection_manager", _StubConnectionManager(None))
+    monkeypatch.setattr(
+        instances_router,
+        "_configure_webhook_if_needed",
+        lambda _instance: (_ for _ in ()).throw(AssertionError("Cloud must not configure an Evolution webhook")),
+    )
 
     body = CreateInstanceRequest(
         instance_name="cloud_instance",
@@ -57,7 +66,7 @@ def test_create_instance_fallback_response_still_exposes_api_key(monkeypatch, tm
         token="access-token",
         phone_number_id="phone_123",
         business_id="waba_456",
-        auto_configure_webhook=False,
+        auto_configure_webhook=True,
     )
     payload = asyncio.run(instances_router.create_instance(body))
 

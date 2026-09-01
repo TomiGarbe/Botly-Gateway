@@ -23,6 +23,7 @@ from app.services.instance_webhooks import (
 from app.services.normalization import list_events, save_business_event, save_pipeline_event
 from app.services.outbound_provider_attempts import execute_outbound_attempt, get_outbound_provider_attempt_store
 from app.services.webhook_delivery import dispatch_webhook_with_retry
+from app.services.evolution_webhook import ensure_evolution_webhook
 
 
 class ConnectionOperationUnavailableError(ValueError):
@@ -283,6 +284,7 @@ class ConnectionOperationsService:
         if not any(str(item.get("name") or item.get("instanceName") or "") == runtime_name for item in records if isinstance(item, dict)):
             raise ConnectionOperationUnavailableError("Connection is not ready to reconnect")
         await self._connection_manager.reconnect(runtime_name)
+        await ensure_evolution_webhook(self._connection_manager, runtime_name)
         self._registry.update_connection_record(
             connection_id,
             {"status_state": "connecting", "last_activity_at": _now(), "updated_at": _now()},

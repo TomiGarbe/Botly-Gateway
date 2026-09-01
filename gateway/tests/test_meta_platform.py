@@ -67,6 +67,31 @@ def test_meta_platform_authenticate_exchanges_oauth_code_and_hides_token_publicl
     asyncio.run(run())
 
 
+def test_meta_platform_retries_oauth_190_with_the_graph_query_token_format() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.headers.get("Authorization"):
+            assert request.url.params.get("appsecret_proof")
+            return httpx.Response(401, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
+        assert request.url.params.get("access_token") == "embedded-signup-token"
+        assert request.url.params.get("appsecret_proof")
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://graph.facebook.com/v23.0")
+        platform = MetaPlatform(client=client, settings_factory=lambda: _settings())
+        result = await platform.request("GET", "/waba/phone_numbers", headers={"Authorization": "Bearer embedded-signup-token"})
+        await client.aclose()
+
+        assert result == {"data": []}
+        assert len(requests) == 2
+        assert requests[1].headers.get("Authorization") is None
+
+    asyncio.run(run())
+
+
 def test_meta_platform_builds_embedded_signup_credentials() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"access_token": "secret-token", "token_type": "bearer"})

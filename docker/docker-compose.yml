@@ -151,6 +151,8 @@ services:
       FEATURE_WHATSAPP_CLOUD: ${FEATURE_WHATSAPP_CLOUD:-true}
       EVOLUTION_URL: http://evolution:8080
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET:-}
+      EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://gateway:9000/webhooks/evolution}
       # Fallback target when an instance has no explicit webhook. Explicit
       # instance webhooks must use the same Docker-internal URL.
       BOT_WEBHOOK_URL: ${BOT_WEBHOOK_URL:-http://botly-api:8000/api/v1/webhook/inbound}

@@ -57,7 +57,8 @@ async def _startup_recovery() -> None:
     instances_list = normalize_instance_list(fetched)
     logger.info("startup_instances_loaded", count=len(instances_list))
 
-    # Recovery pragmatico: rehacer webhooks de instancias no conectadas en background.
+    # An open WhatsApp socket does not prove that Evolution retained its callback.
+    # Verify every runtime in the background so startup remains non-blocking.
     reconnect_candidates = 0
     for item in instances_list:
         name = item["name"]
@@ -65,7 +66,7 @@ async def _startup_recovery() -> None:
 
         if state != "open":
             reconnect_candidates += 1
-            asyncio.create_task(instances._configure_webhook_if_needed(name))
+        asyncio.create_task(instances._configure_webhook_if_needed(name))
 
     logger.info("startup_recovery_summary", reconnect_candidates=reconnect_candidates)
     logger.info("[BOOT][SESSIONS] recovery completed", instances_loaded=len(instances_list), reconnect_candidates=reconnect_candidates)

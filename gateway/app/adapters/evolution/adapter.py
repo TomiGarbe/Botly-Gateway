@@ -206,16 +206,30 @@ class EvolutionAdapter:
     async def send_list(self, instance_name: str, payload: dict) -> dict:
         return await self._client.request("POST", f"/message/sendList/{instance_name}", json=payload, retries=0)
 
-    async def configure_webhook(self, instance_name: str, url: str, events: list[str]) -> dict:
+    async def configure_webhook(
+        self,
+        instance_name: str,
+        url: str,
+        events: list[str],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        """Configure the Evolution v2.3.7 ``/webhook/set`` contract.
+
+        Production v2.3.7 validates a root ``webhook`` object.  Keeping the
+        provider-specific wrapper here prevents callers from depending on its
+        transport schema.
+        """
         payload = {
             "webhook": {
                 "enabled": True,
                 "url": url,
-                "webhookByEvents": False,
-                "webhookBase64": False,
                 "events": events,
+                "headers": headers or {},
+                "base64": False,
             }
         }
+        logger.info("evolution_webhook_configuration_started", instance=instance_name, url=url, events=events)
         return await self._client.request("POST", f"/webhook/set/{instance_name}", json=payload, retries=1)
 
     async def get_webhook(self, instance_name: str) -> dict:

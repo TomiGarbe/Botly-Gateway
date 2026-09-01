@@ -348,6 +348,7 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
             event=event,
             details={"error": str(exc)[:220]},
         )
+        return {"status": "persist_error", "normalized": normalized, "trace": trace, "classification": classification}
 
     save_pipeline_event(
         stage="normalized",

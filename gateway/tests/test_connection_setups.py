@@ -27,6 +27,14 @@ class _Runtime:
     async def set_webhook(self, name: str, *_args, **_kwargs):
         self.webhooks.append(name)
 
+    async def get_webhook(self, _name: str, **_kwargs):
+        return {
+            "enabled": True,
+            "url": "http://gateway:9000/webhooks/evolution",
+            "events": ["MESSAGES_UPSERT"],
+            "headers": {},
+        }
+
     async def delete(self, name: str, **_kwargs):
         self.created = [item for item in self.created if item != name]
         return {"deleted": name}
@@ -34,6 +42,7 @@ class _Runtime:
 
 def _service(tmp_path, monkeypatch, runtime=None):
     monkeypatch.setattr("app.services.connection_setups.get_settings", lambda: SimpleNamespace(connection_setup_ttl_seconds=3600, gateway_port=9000))
+    monkeypatch.setattr("app.services.evolution_webhook.get_settings", lambda: SimpleNamespace(gateway_port=9000, evolution_webhook_secret=""))
     registry = ConnectionRegistry(tmp_path / "connections.json")
     client = ClientService(registry).create_client("Setup owner")
     return ConnectionSetupService(runtime or _Runtime(), registry, GatewaySettingsService(tmp_path / "settings.json")), registry, client
@@ -80,6 +89,9 @@ def test_meta_failure_and_known_resource_cancellation_follow_lifecycle(monkeypat
     service.begin_meta(failed["id"])
     service.begin_meta_provisioning(failed["id"])
     assert service.mark_meta_failed(failed["id"])["state"] == "failed"
+    # A retry uses a new, single-use Meta OAuth code and may resume the same
+    # setup without losing its durable identity.
+    assert service.begin_meta_provisioning(failed["id"])["state"] == "provisioning"
 
     cleanup = service.create(client_id=client.id, channel="whatsapp", name="Cleanup", provider="meta")
     service.begin_meta(cleanup["id"])
@@ -127,6 +139,20 @@ def test_evolution_setup_promotes_only_after_provisioning(monkeypatch, tmp_path)
     assert runtime.created == [ready["runtime_name"]]
     assert runtime.webhooks == [ready["runtime_name"]]
     assert registry.connection_record_by_id(ready["connection_id"])["status_state"] == "connecting"
+
+
+def test_evolution_setup_does_not_hide_webhook_configuration_failure(monkeypatch, tmp_path) -> None:
+    class FailingWebhookRuntime(_Runtime):
+        async def set_webhook(self, *_args, **_kwargs):
+            raise RuntimeError("Evolution unavailable")
+
+    service, _registry, client = _service(tmp_path, monkeypatch, FailingWebhookRuntime())
+    setup = service.create(client_id=client.id, channel="whatsapp", name="QR", provider="evolution")
+
+    result = asyncio.run(service.provision_evolution(setup["id"]))
+
+    assert result["state"] == "cleanup_pending"
+    assert result["diagnostic"]["code"] == "evolution_webhook_failed"
 
 
 def test_setup_router_enforces_reviewer_ownership(monkeypatch, tmp_path) -> None:

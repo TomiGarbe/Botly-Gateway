@@ -4,6 +4,7 @@
     "exclude": ["/assets/*"]
   },
   "globalHeaders": {
-    "Cache-Control": "no-cache"
+    "Cache-Control": "no-cache",
+    "Cross-Origin-Opener-Policy": "unsafe-none"
   }
 }

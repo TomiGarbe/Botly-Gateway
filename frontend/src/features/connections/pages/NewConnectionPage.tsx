@@ -10,7 +10,7 @@ import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { getConnection } from '../api/connectionsApi'
 import { cancelConnectionSetup, createConnectionSetup, getConnectionSetup, getConnectionSetupQr, type ConnectionSetup } from '../api/connectionSetupsApi'
 import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
-import { gatewayRequest } from '@/shared/lib/gatewayClient'
+import { GatewayRequestError, gatewayRequest } from '@/shared/lib/gatewayClient'
 import { useAuth } from '@/app/providers/AuthProvider'
 
 type ProviderId = 'meta' | 'evolution'
@@ -18,6 +18,9 @@ type EmbeddedSession = { phoneNumberId?: string; businessAccountId: string; raw:
 type ProvisioningStep = 'connecting' | 'authorizing' | 'creating' | 'webhook' | 'testing' | 'ready'
 
 let facebookSdkPromise: Promise<void> | null = null
+// Embedded Signup often includes password recovery, 2FA and phone
+// verification.  Two minutes is not enough for a real customer flow.
+const META_SIGNUP_WAIT_TIMEOUT_MS = 30 * 60 * 1000
 
 const provisioningSteps: Array<{ id: ProvisioningStep; label: string }> = [
   { id: 'connecting', label: 'Conectando…' },
@@ -63,7 +66,7 @@ function waitForSession(signal: AbortSignal): Promise<EmbeddedSession> {
     }
     const timeout = window.setTimeout(() => {
       finish({ error: new Error('signup_timeout') })
-    }, 120000)
+    }, META_SIGNUP_WAIT_TIMEOUT_MS)
     const abort = () => finish({ error: new Error('signup_cancelled') })
     const listener = (event: MessageEvent) => {
       if (!isFacebookOrigin(event.origin)) return
@@ -161,6 +164,7 @@ function qrSource(payload: { qrcode?: { base64?: string; code?: string }; base64
 
 function friendlyError(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : ''
+  if (reason instanceof GatewayRequestError && reason.status === 401) return 'Tu sesiÃ³n de Botly venciÃ³ mientras completabas Meta. VolvÃ© a iniciar sesiÃ³n y reintentÃ¡; la configuraciÃ³n queda guardada.'
   if (message === 'signup_cancelled') return 'La autorización se canceló antes de terminar. Podés intentarlo nuevamente.'
   if (message === 'signup_timeout') return 'La autorización tardó demasiado. Verificá la ventana de Meta e intentá nuevamente.'
   if (message === 'signup_unavailable') return 'No pudimos abrir la autorización de Meta. Revisá tu conexión e intentá nuevamente.'
@@ -305,7 +309,7 @@ export function NewConnectionPage() {
   }
 
   function startMetaSignup() {
-    if (!setup) return
+    if (!setup || isStarting) return
     if (!metaSignupConfig || !window.FB) {
       setError('La autorizacion de Meta se esta preparando. Espera un instante e intentalo nuevamente.')
       return
@@ -337,6 +341,11 @@ export function NewConnectionPage() {
       window.setTimeout(() => navigate(`/connections/${completed.id}`, { replace: true }), 750)
     } catch (reason) {
       progressTimers.forEach(window.clearTimeout)
+      // The backend records a failed provisioning attempt so a fresh Meta
+      // authorization can resume it.  Refresh the local setup as well: using
+      // a stale "provisioning" state was causing the next attempt to end in a
+      // misleading 409 conflict.
+      void getConnectionSetup(setup.id).then(setSetup).catch(() => undefined)
       setError(friendlyError(reason))
     } finally {
       signupAbort.abort()
@@ -352,7 +361,7 @@ export function NewConnectionPage() {
   const whatsappEnabled = channels.whatsapp?.implemented && channels.whatsapp.enabled
   const metaEnabled = providers.meta?.implemented && providers.meta.enabled
   const evolutionEnabled = providers.evolution?.implemented && providers.evolution.enabled
-  const canRetry = Boolean(setup && ['onboarding', 'provisioning'].includes(setup.state))
+  const canRetry = Boolean(setup && ['onboarding', 'provisioning', 'failed'].includes(setup.state))
 
   return <section className="new-connection-page">
     {!setup ? <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${client.id}`)}><ArrowLeft size={16} aria-hidden="true" /> {client.name}</button> : null}

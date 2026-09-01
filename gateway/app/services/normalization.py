@@ -921,6 +921,9 @@ def normalize_webhook(payload: dict[str, Any]) -> dict[str, Any]:
             "hasContacts": bool(contacts),
             "hasPoll": bool(poll_content),
             "unknownTypeDetected": is_unknown_fallback,
+            "connectionId": _first(payload, ("_botlyConnection", "connectionId")),
+            "businessId": _first(payload, ("_botlyConnection", "businessId")),
+            "channel": _first(payload, ("_botlyConnection", "channel")),
         },
         "interaction": interaction,
         "context": {

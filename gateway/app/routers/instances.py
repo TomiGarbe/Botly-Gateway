@@ -4,7 +4,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.connections import get_connection_manager
 from app.models.requests import ActivityTestRecordRequest, CreateInstanceRequest
@@ -17,18 +16,12 @@ from app.services.instance_webhooks import delete_all_instance_webhooks
 from app.services.instances_contract import normalize_instance, normalize_instance_list, normalize_instance_status
 from app.services.features import get_feature_service
 from app.services.normalization import save_pipeline_event
+from app.services.evolution_webhook import ensure_evolution_webhook
+from app.services.connections import get_connection_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/instances", tags=["instances"])
 _connection_manager = get_connection_manager()
-
-_WEBHOOK_EVENTS = [
-    "MESSAGES_UPSERT",
-    "MESSAGES_UPDATE",
-    "CONNECTION_UPDATE",
-    "QRCODE_UPDATED",
-    "SEND_MESSAGE",
-]
 
 def _validate_instance_name(instance_name: str) -> str:
     cleaned = str(instance_name or "").strip()
@@ -46,21 +39,10 @@ def _apply_http_error(exc: Exception, *, fallback_status: int = 502) -> HTTPExce
 
 
 async def _configure_webhook_if_needed(instance_name: str) -> bool:
-    settings = get_settings()
-    webhook_url = f"http://gateway:{settings.gateway_port}/webhooks/evolution"
-
     try:
-        configured = await _connection_manager.get_webhook(instance_name)
-        current_url = configured.get("webhook", {}).get("url") if isinstance(configured, dict) else None
-        if current_url == webhook_url:
-            return True
-    except Exception as exc:
-        logger.warning("webhook_lookup_failed", instance=instance_name, error=str(exc))
-
-    try:
-        await _connection_manager.set_webhook(instance_name, webhook_url, _WEBHOOK_EVENTS)
-        logger.info("webhook_configured", instance=instance_name, url=webhook_url)
-        audit_event("webhook_configured", instance=instance_name, url=webhook_url, events=_WEBHOOK_EVENTS)
+        await ensure_evolution_webhook(_connection_manager, instance_name)
+        logger.info("webhook_configured", instance=instance_name)
+        audit_event("webhook_configured", instance=instance_name)
         return True
     except Exception as exc:
         logger.warning("webhook_configure_failed", instance=instance_name, error=str(exc))
@@ -85,8 +67,18 @@ async def create_instance(body: CreateInstanceRequest):
         logger.error("create_instance_failed", instance=instance_name, error=str(exc))
         raise _apply_http_error(exc)
 
-    if body.auto_configure_webhook:
-        await _configure_webhook_if_needed(instance_name)
+    # Legacy /instances callers do not create a Connection-domain row. Register
+    # the runtime now so its signed inbound webhook is not treated as unknown.
+    try:
+        await get_connection_service().migrate_legacy_connections()
+    except Exception as exc:
+        logger.warning("legacy_instance_registry_sync_failed", instance=instance_name, error=str(exc))
+
+    # This callback belongs to Evolution/Baileys. Cloud API has its own Meta
+    # webhook lifecycle and must not be routed through Evolution's endpoint.
+    if body.connection_type == "baileys" and body.auto_configure_webhook:
+        if not await _configure_webhook_if_needed(instance_name):
+            raise HTTPException(status_code=502, detail="La instancia fue creada, pero Evolution no pudo configurar/verificar el webhook entrante.")
     # Devuelve el token en claro una unica vez para que el panel pueda revelarlo.
     api_key_payload = instance_auth.create_or_regenerate_instance_key(instance_name, instance_id=instance_name)
     if body.connection_type == "cloud" and body.token and body.phone_number_id and body.business_id:
@@ -219,6 +211,8 @@ async def reconnect(instance_name: str):
             logger.warning("instance_restart_failed_fallback_qr", instance=instance_name, error=str(restart_exc))
 
         await asyncio.sleep(1.0)
+        if not await _configure_webhook_if_needed(instance_name):
+            raise HTTPException(status_code=502, detail="Evolution se reconectó, pero el webhook entrante no pudo verificarse.")
         state = await _connection_manager.get_status(instance_name)
         normalized_state = normalize_instance_status(state.get("instance", {}).get("state"))
 

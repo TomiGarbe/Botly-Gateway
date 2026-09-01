@@ -131,9 +131,9 @@ class BaileysConnection(Connection):
             convert_to_mp4=convert_to_mp4,
         )
 
-    async def set_webhook(self, instance_name: str, url: str, events: list[str]) -> dict:
+    async def set_webhook(self, instance_name: str, url: str, events: list[str], *, headers: dict[str, str] | None = None) -> dict:
         evolution = _evolution_client()
-        return await evolution.configure_webhook(instance_name, url, events)
+        return await evolution.configure_webhook(instance_name, url, events, headers=headers)
 
     async def get_webhook(self, instance_name: str) -> dict:
         evolution = _evolution_client()
