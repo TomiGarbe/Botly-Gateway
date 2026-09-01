@@ -21,6 +21,7 @@ class _EmptyRuntime:
 class _EvolutionRuntime(_EmptyRuntime):
     def __init__(self) -> None:
         self.created: list[tuple[str, dict]] = []
+        self.webhook: dict = {}
 
     async def create(self, instance_name: str, **kwargs) -> dict:
         self.created.append((instance_name, kwargs))
@@ -28,6 +29,13 @@ class _EvolutionRuntime(_EmptyRuntime):
 
     async def connect(self, instance_name: str, **_kwargs) -> dict:
         return {"qrcode": {"base64": "qr-data"}, "instance": {"instanceName": instance_name}}
+
+    async def set_webhook(self, _instance_name: str, url: str, events: list[str], **kwargs) -> dict:
+        self.webhook = {"enabled": True, "url": url, "events": events, "headers": kwargs.get("headers", {})}
+        return self.webhook
+
+    async def get_webhook(self, _instance_name: str, **_kwargs) -> dict:
+        return self.webhook
 
 
 def test_channel_settings_persist_and_keep_implementation_server_owned(tmp_path) -> None:
