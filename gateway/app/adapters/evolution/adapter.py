@@ -214,18 +214,20 @@ class EvolutionAdapter:
         *,
         headers: dict[str, str] | None = None,
     ) -> dict:
-        """Configure the documented Evolution v2 ``/webhook/set`` contract.
+        """Configure the Evolution v2.3.7 ``/webhook/set`` contract.
 
-        Evolution v2.3.7 expects this object at the top level.  The former
-        nested ``webhook`` object was accepted by neither the current endpoint
-        nor its documented validation schema.
+        Production v2.3.7 validates a root ``webhook`` object.  Keeping the
+        provider-specific wrapper here prevents callers from depending on its
+        transport schema.
         """
         payload = {
-            "enabled": True,
-            "url": url,
-            "events": events,
-            "headers": headers or {},
-            "base64": False,
+            "webhook": {
+                "enabled": True,
+                "url": url,
+                "events": events,
+                "headers": headers or {},
+                "base64": False,
+            }
         }
         logger.info("evolution_webhook_configuration_started", instance=instance_name, url=url, events=events)
         return await self._client.request("POST", f"/webhook/set/{instance_name}", json=payload, retries=1)
