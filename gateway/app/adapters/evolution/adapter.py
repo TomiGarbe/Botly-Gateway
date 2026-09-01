@@ -206,16 +206,28 @@ class EvolutionAdapter:
     async def send_list(self, instance_name: str, payload: dict) -> dict:
         return await self._client.request("POST", f"/message/sendList/{instance_name}", json=payload, retries=0)
 
-    async def configure_webhook(self, instance_name: str, url: str, events: list[str]) -> dict:
+    async def configure_webhook(
+        self,
+        instance_name: str,
+        url: str,
+        events: list[str],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        """Configure the documented Evolution v2 ``/webhook/set`` contract.
+
+        Evolution v2.3.7 expects this object at the top level.  The former
+        nested ``webhook`` object was accepted by neither the current endpoint
+        nor its documented validation schema.
+        """
         payload = {
-            "webhook": {
-                "enabled": True,
-                "url": url,
-                "webhookByEvents": False,
-                "webhookBase64": False,
-                "events": events,
-            }
+            "enabled": True,
+            "url": url,
+            "events": events,
+            "headers": headers or {},
+            "base64": False,
         }
+        logger.info("evolution_webhook_configuration_started", instance=instance_name, url=url, events=events)
         return await self._client.request("POST", f"/webhook/set/{instance_name}", json=payload, retries=1)
 
     async def get_webhook(self, instance_name: str) -> dict:

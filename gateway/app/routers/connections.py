@@ -153,6 +153,12 @@ async def get_connection_integration_endpoints(connection_id: str):
         raise HTTPException(status_code=404, detail="Connection not found")
     except ConnectionOperationUnavailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.error("connection_reconnect_failed", connection_id=connection_id, error=str(exc))
+        raise HTTPException(
+            status_code=getattr(exc, "status_code", 502),
+            detail="Evolution reconnect/webhook verification failed",
+        )
 
 
 @router.put("/{connection_id}/webhook")

@@ -23,10 +23,12 @@ from app.services.webhook_delivery import dispatch_webhook_with_retry
 from app.services.webhook_delivery import diagnose_webhook_target
 from app.services.evolution_auth import auth_runtime_snapshot, extract_evolution_auth, validate_evolution_auth
 from app.services.audit import audit_event
+from app.services.connection_registry import get_connection_registry
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 settings = get_settings()
+_connection_registry = get_connection_registry()
 
 _forward_semaphore = asyncio.Semaphore(max(1, settings.bot_webhook_max_parallel))
 _forward_tasks: set[asyncio.Task] = set()
@@ -305,9 +307,10 @@ async def receive_webhook(request: Request):
         instance=instance,
         auth_source=provided_source,
         expected_global_prefix=auth_validation["expectedGlobalPrefix"],
+        expected_webhook_secret_prefix=auth_validation["expectedWebhookSecretPrefix"],
         expected_instance_prefix=auth_validation["expectedInstancePrefix"],
         received_prefix=auth_validation["receivedPrefix"],
-        comparison_mode="global_or_instance",
+        comparison_mode="webhook_secret_or_legacy",
         result="ok" if auth_validation["accepted"] else "fail",
         accepted_mode=auth_validation["mode"],
     )
@@ -321,6 +324,7 @@ async def receive_webhook(request: Request):
             "source": provided_source,
             "receivedPrefix": auth_validation["receivedPrefix"],
             "expectedGlobalPrefix": auth_validation["expectedGlobalPrefix"],
+            "expectedWebhookSecretPrefix": auth_validation["expectedWebhookSecretPrefix"],
             "expectedInstancePrefix": auth_validation["expectedInstancePrefix"],
             "acceptedMode": auth_validation["mode"],
         },
@@ -360,6 +364,31 @@ async def receive_webhook(request: Request):
     else:
         logger.info("evolution_webhook_auth_success", instance=instance, source=provided_source, mode=auth_validation["mode"])
 
+    connection_record = _connection_registry.connection_record(instance)
+    if connection_record is None:
+        logger.warning("evolution_webhook_unknown_instance", request_id=request_id, instance=instance, source_event=payload.get("event"))
+        save_pipeline_event(
+            stage="instance_resolution",
+            status="unknown_instance",
+            instance=instance,
+            request_id=request_id,
+            event=str(payload.get("event") or "UNKNOWN"),
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown Evolution instance")
+    payload["_botlyConnection"] = {
+        "connectionId": connection_record.get("id"),
+        "businessId": connection_record.get("client_id"),
+        "channel": connection_record.get("channel_id") or "whatsapp",
+    }
+    logger.info(
+        "evolution_webhook_instance_resolved",
+        request_id=request_id,
+        instance=instance,
+        connection_id=connection_record.get("id"),
+        business_id=connection_record.get("client_id"),
+        channel=connection_record.get("channel_id") or "whatsapp",
+    )
+
     payload.setdefault("provider", "evolution")
     logger.debug("webhook_received", request_id=request_id, source_event=payload.get("event"), instance=instance)
     logger.info("[OUTBOUND][WEBHOOK] evolution webhook received", request_id=request_id, instance=instance, source_event=payload.get("event"))
@@ -377,7 +406,10 @@ async def receive_webhook(request: Request):
         return {"status": "ignored_technical"}
     if pipeline_result.get("status") == "normalize_error":
         logger.error("webhook_normalize_error", request_id=request_id, instance=instance)
-        return {"status": "normalize_error"}
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evolution webhook payload could not be normalized")
+    if pipeline_result.get("status") == "persist_error":
+        logger.error("evolution_webhook_processing_failed", request_id=request_id, instance=instance, event=payload.get("event"), error="persistence")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Evolution webhook persistence failed")
     if pipeline_result.get("status") == "stale_dropped":
         return {"status": "stale_dropped"}
     if pipeline_result.get("status") == "ignored_group":
@@ -426,6 +458,16 @@ async def receive_webhook(request: Request):
             "statusMessage": (normalized.get("metadata") or {}).get("statusMessage"),
         },
         pipeline_trace=(normalized.get("operational") or {}).get("pipeline"),
+    )
+    logger.info(
+        "evolution_message_received",
+        request_id=request_id,
+        instance=normalized.get("instance"),
+        event=normalized.get("event"),
+        message_id=msg_id or None,
+        remote_jid=(normalized.get("message") or {}).get("from"),
+        from_me=bool((normalized.get("message") or {}).get("fromMe")),
+        message_type=normalized_kind,
     )
 
     bot_payload = _to_bot_payload(normalized)

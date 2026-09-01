@@ -9,6 +9,7 @@ from app.connections import ConnectionManager, get_connection_manager
 from app.core.config import get_settings
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
 from app.services.gateway_settings import GatewaySettingsService, get_gateway_settings_service
+from app.services.evolution_webhook import ensure_evolution_webhook
 
 
 ACTIVE_STATES = {"draft", "onboarding", "provisioning"}
@@ -199,7 +200,7 @@ class ConnectionSetupService:
         resources = [{"kind": "evolution_instance", "identifier": record["runtime_name"], "ownership_confirmed": True}]
         record = self._registry.update_setup_record(record["id"], {"external_resources": resources, "updated_at": _iso(_now())}) or record
         try:
-            await self._connection_manager.set_webhook(record["runtime_name"], f"http://gateway:{get_settings().gateway_port}/webhooks/evolution", ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE"], connection_type="baileys")
+            await ensure_evolution_webhook(self._connection_manager, record["runtime_name"], force_configure=True)
         except Exception:
             # Instance ownership is known, so expose a manual compensation state.
             return self._public(self._transition_record(record, "cleanup_pending", {"cleanup_required": True, "diagnostic": {"code": "evolution_webhook_failed", "message": "La instancia fue creada, pero no se pudo configurar su webhook."}}))

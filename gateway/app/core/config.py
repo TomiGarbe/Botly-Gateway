@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Evolution API
     evolution_url: str = "http://evolution:8080"
     evolution_api_key: str
+    # Shared secret sent by Evolution as a configured per-instance webhook
+    # header.  Keep it distinct from the API key used by Gateway -> Evolution.
+    evolution_webhook_secret: str = ""
 
     # Bot (destino de los webhooks procesados)
     bot_webhook_url: str = ""

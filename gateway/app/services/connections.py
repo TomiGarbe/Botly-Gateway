@@ -6,7 +6,6 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.connections import ConnectionManager, get_connection_manager
-from app.core.config import get_settings
 from app.domain.connection import (
     Channel,
     Connection,
@@ -28,6 +27,7 @@ from app.services.gateway_settings import (
     get_gateway_settings_service,
 )
 from app.services.instances_contract import normalize_instance_list
+from app.services.evolution_webhook import ensure_evolution_webhook
 
 
 _MIGRATION_CLIENT_ID = str(uuid5(NAMESPACE_URL, "botly-gateway:migrated-connections"))
@@ -232,16 +232,15 @@ class ConnectionService:
             self._registry.delete_connection_record(connection_id)
             raise
         try:
-            await self._connection_manager.set_webhook(
-                self._runtime_name(record),
-                f"http://gateway:{get_settings().gateway_port}/webhooks/evolution",
-                ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE"],
-                connection_type="baileys",
-            )
+            await ensure_evolution_webhook(self._connection_manager, self._runtime_name(record), force_configure=True)
         except Exception:
-            # The QR connection is usable even if webhook setup must be
-            # retried later, mirroring the existing instance creation flow.
-            pass
+            # Preserve a possibly paired runtime for diagnosis, but do not
+            # expose an initial connection as usable without its callback.
+            self._registry.update_connection_record(
+                connection_id,
+                {"status_state": "error", "status_health": "degraded", "updated_at": _now()},
+            )
+            raise
         return self._stored_connection(record)
 
     async def evolution_qr(self, connection_id: str) -> dict[str, Any]:

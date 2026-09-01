@@ -99,7 +99,7 @@ class Connection(Protocol):
     ) -> str:
         ...
 
-    async def set_webhook(self, instance_name: str, url: str, events: list[str]) -> dict:
+    async def set_webhook(self, instance_name: str, url: str, events: list[str], *, headers: dict[str, str] | None = None) -> dict:
         ...
 
     async def get_webhook(self, instance_name: str) -> dict:

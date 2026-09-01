@@ -168,9 +168,10 @@ class ConnectionManager:
         url: str,
         events: list[str],
         *,
+        headers: dict[str, str] | None = None,
         connection_type: ConnectionType | str | None = None,
     ) -> dict:
-        return await self.get(connection_type).set_webhook(instance_name, url, events)
+        return await self.get(connection_type).set_webhook(instance_name, url, events, headers=headers)
 
     async def get_webhook(self, instance_name: str, *, connection_type: ConnectionType | str | None = None) -> dict:
         return await self.get(connection_type).get_webhook(instance_name)
