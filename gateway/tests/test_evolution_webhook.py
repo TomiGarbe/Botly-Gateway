@@ -23,7 +23,7 @@ class _Client:
         return {"success": True}
 
 
-def test_configure_webhook_uses_evolution_v2_flat_contract() -> None:
+def test_configure_webhook_uses_evolution_v237_wrapped_contract() -> None:
     async def run() -> None:
         client = _Client()
         adapter = EvolutionAdapter(client=client)
@@ -37,11 +37,13 @@ def test_configure_webhook_uses_evolution_v2_flat_contract() -> None:
             "method": "POST",
             "path": "/webhook/set/botly_connection",
             "json": {
-                "enabled": True,
-                "url": "http://gateway:9000/webhooks/evolution",
-                "events": ["MESSAGES_UPSERT"],
-                "headers": {"x-evolution-webhook-secret": "private"},
-                "base64": False,
+                "webhook": {
+                    "enabled": True,
+                    "url": "http://gateway:9000/webhooks/evolution",
+                    "events": ["MESSAGES_UPSERT"],
+                    "headers": {"x-evolution-webhook-secret": "private"},
+                    "base64": False,
+                },
             },
             "retries": 1,
         }]
@@ -67,17 +69,18 @@ class _Runtime:
 
 
 def test_ensure_webhook_repairs_then_verifies(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.evolution_webhook.get_settings", lambda: SimpleNamespace(gateway_port=9000, evolution_webhook_secret="secret"))
+    monkeypatch.setattr("app.services.evolution_webhook.get_settings", lambda: SimpleNamespace(gateway_port=9000, evolution_webhook_secret="secret", evolution_webhook_url="http://botly-gateway:9000/webhooks/evolution"))
     runtime = _Runtime({"enabled": False, "url": "", "events": []})
 
     result = asyncio.run(ensure_evolution_webhook(runtime, "runtime-a"))
 
     assert result["enabled"] is True
+    assert runtime.set_calls[0]["url"] == "http://botly-gateway:9000/webhooks/evolution"
     assert runtime.set_calls[0]["headers"] == {"x-evolution-webhook-secret": "secret"}
 
 
 def test_ensure_webhook_rejects_remote_configuration_mismatch(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.evolution_webhook.get_settings", lambda: SimpleNamespace(gateway_port=9000, evolution_webhook_secret=""))
+    monkeypatch.setattr("app.services.evolution_webhook.get_settings", lambda: SimpleNamespace(gateway_port=9000, evolution_webhook_secret="", evolution_webhook_url=""))
 
     class MismatchRuntime(_Runtime):
         async def set_webhook(self, *_args, **_kwargs):

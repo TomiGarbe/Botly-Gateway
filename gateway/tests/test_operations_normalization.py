@@ -18,6 +18,12 @@ class _Runtime:
         self.connection_type = connection_type
         self.status = status
         self.reconnect_calls: list[str] = []
+        self.webhook = {
+            "enabled": True,
+            "url": "http://gateway:9000/webhooks/evolution",
+            "events": ["MESSAGES_UPSERT"],
+            "headers": {},
+        }
 
     async def list_instances(self) -> list[dict[str, str]]:
         return [{"name": self.name, "connectionType": self.connection_type, "status": self.status}]
@@ -26,6 +32,13 @@ class _Runtime:
         self.reconnect_calls.append(name)
         await asyncio.sleep(0.01)
         return {"ok": True}
+
+    async def get_webhook(self, _name: str, **_kwargs) -> dict:
+        return self.webhook
+
+    async def set_webhook(self, _name: str, url: str, events: list[str], **kwargs) -> dict:
+        self.webhook = {"enabled": True, "url": url, "events": events, "headers": kwargs.get("headers", {})}
+        return self.webhook
 
 
 def _connection(tmp_path, *, provider: str = "evolution"):

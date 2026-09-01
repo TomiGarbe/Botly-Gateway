@@ -21,6 +21,9 @@ _SECRET_HEADER = "x-evolution-webhook-secret"
 
 def evolution_webhook_url() -> str:
     settings = get_settings()
+    configured_url = str(getattr(settings, "evolution_webhook_url", "") or "").strip()
+    if configured_url:
+        return configured_url.rstrip("/")
     return f"http://gateway:{settings.gateway_port}/webhooks/evolution"
 
 
