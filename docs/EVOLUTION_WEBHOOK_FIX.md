@@ -98,19 +98,22 @@ entrantes propios y ajenos con campos opcionales ausentes.
 ## Runtime validation
 
 **Implementado y testeado automaticamente.** La validación contra
-contenedores debe ejecutarse dentro de la distribución Linux de WSL que corre
-el stack; Docker Desktop no es parte de este entorno ni un reemplazo válido.
+contenedores debe ejecutarse dentro de la distribución Linux WSL del servidor,
+en `/srv/botly/compose`; Docker Desktop no es parte de este entorno ni un
+reemplazo válido.
 
 Antes de ejecutarla por SSH, confirmar que la sesión entra a una distribución
 WSL real con Bash y Docker Compose. Si devuelve `execvpe(/bin/bash) failed`,
 la configuración SSH/WSL está apuntando erróneamente a `docker-desktop` u otra
 distribución sin Bash y debe corregirse antes de desplegar.
 
-Validación manual en la terminal WSL del servidor:
+Validación manual en la terminal WSL del servidor, después de promover el
+artefacto del Gateway a `/srv/botly/gateway`:
 
 ```bash
-docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env up -d evolution gateway
-docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env exec evolution sh -lc "wget -S -O- http://gateway:9000/webhooks/evolution"
+cd /srv/botly/compose
+docker compose up -d evolution gateway
+docker compose exec evolution sh -lc "wget -S -O- http://gateway:9000/webhooks/evolution"
 ```
 
 Despues, crear o reconectar una instancia, consultar `GET

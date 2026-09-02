@@ -72,56 +72,76 @@ Los scripts son Bash y deben ejecutarse dentro de una distribución Linux de
 WSL o de otro host Linux; no desde PowerShell ni mediante el motor de Docker
 de Windows.
 
-## Producción: WSL por SSH (sin Docker Desktop)
+## Producción: Docker en WSL por SSH (sin Docker Desktop)
 
-El despliegue de Gateway usa Docker Compose **dentro de la distribución Linux
-de WSL del servidor**, accedida por SSH. Docker Desktop no forma parte del
-flujo de despliegue y la distribución técnica `docker-desktop` no es un host
-válido para ejecutar Gateway.
+El servidor de producción es un host Windows que ejecuta el stack Linux con
+Docker Compose **dentro de WSL2**. Docker Desktop no interviene en este flujo;
+la distribución técnica `docker-desktop` nunca es un destino de despliegue.
+El alias de acceso es `rivo-server`.
 
-El alias de acceso configurado es `rivo-server`. Antes de desplegar, la sesión
-SSH debe abrir una distribución WSL real con `bash` y `docker compose`
-disponibles (por ejemplo, Ubuntu). En el host Windows del servidor, comprobar
-la distribución elegida sin mostrar valores de `config/.env`:
+El host Windows recibe artefactos en `C:\Users\crist`; desde WSL esa misma
+ruta es `/mnt/c/Users/crist`. El stack se opera en estas rutas Linux:
 
-```bash
+| Ruta | Uso |
+|---|---|
+| `/srv/botly/gateway` | Código fuente activo del Gateway |
+| `/srv/botly/compose` | Docker Compose de producción |
+| `/srv/botly/_deploy` | Staging de artefactos |
+| `/srv/botly/_predeploy_backup` | Backup recuperable del código reemplazado |
+
+El servidor no despliega haciendo `git pull`: recibe un tar del Gateway ya
+validado. Esto preserva `config/.env` y los volúmenes Docker existentes.
+
+### Preflight del host
+
+En el host Windows, confirmar que el shell SSH abre la distribución Linux de
+producción, no `docker-desktop`:
+
+```powershell
 wsl -l -v
 wsl --status
 ```
 
-Ya dentro de la distribución Linux de producción, comprobar:
+Luego, dentro de la terminal WSL de producción:
 
 ```bash
 command -v bash
 docker compose version
+cd /srv/botly/compose
+docker compose ps
 ```
 
-Si la sesión devuelve un error como `execvpe(/bin/bash) failed`, el shell SSH
-está apuntando a una distribución WSL sin Bash (frecuentemente
-`docker-desktop`). Corregir primero la distribución WSL predeterminada o la
-configuración del shell SSH del servidor para que use la distribución Linux de
-producción. No intentar el despliegue con Docker Desktop ni con el cliente
-Docker de Windows.
+Un error como `execvpe(/bin/bash) failed` significa que el shell SSH no puede
+abrir la distribución WSL correcta. Resolver esa configuración del host antes
+de desplegar; no sustituirla por Docker Desktop ni ejecutar Docker desde
+PowerShell.
 
-Una vez dentro del repositorio de producción en WSL, el despliegue reproducible
-del commit ya publicado se realiza así:
+### Despliegue reproducible del Gateway
+
+1. En el checkout validado, empaquetar el contenido de `gateway/` y nombrar el
+   artefacto con el SHA de `main`.
+2. Subirlo por SFTP a `C:\Users\crist`; WSL lo verá en
+   `/mnt/c/Users/crist`.
+3. En WSL, extraer el tar en `/srv/botly/_deploy`, comprobar que contiene
+   `Dockerfile` y `app/main.py`, mover el Gateway activo a
+   `/srv/botly/_predeploy_backup` y promover el staging a
+   `/srv/botly/gateway`.
+4. Desde `/srv/botly/compose`, reconstruir y recrear únicamente el servicio
+   `gateway` con los metadatos del commit:
 
 ```bash
-git fetch origin
-git checkout --detach "$(git rev-parse origin/main)"
-GATEWAY_GIT_SHA="$(git rev-parse HEAD)" \
-GATEWAY_BUILD_VERSION="$(git describe --always)" \
-docker compose -p evolution -f docker/docker-compose.yml \
-  --env-file config/.env up -d --build
-docker compose -p evolution -f docker/docker-compose.yml \
-  --env-file config/.env ps
+GATEWAY_GIT_SHA="<sha-de-main>" \
+GATEWAY_BUILD_VERSION="<versión>" \
+docker compose build gateway
+docker compose up -d --no-deps --force-recreate gateway
+docker compose ps gateway
 curl -fsS http://127.0.0.1:9000/health
 ```
 
-El comando no modifica `config/.env`, conserva los volúmenes existentes y
-etiqueta la imagen del Gateway con el SHA y la versión desplegados. El
-frontend se entrega por su canal de hosting independiente; este Compose
-despliega los servicios de Gateway, Evolution, PostgreSQL y Redis.
+El `docker-compose.yml` define el contexto de build del servicio como
+`../gateway`; por eso, desde `/srv/botly/compose`, la fuente promovida debe
+quedar exactamente en `/srv/botly/gateway`. El frontend no forma parte de este
+Compose y se entrega por su canal de hosting independiente.
 
 ## Documentación
 
