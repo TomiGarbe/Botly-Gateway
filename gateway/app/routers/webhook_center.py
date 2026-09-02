@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
-from app.models.requests import ManualWebhookActionRequest, WebhookCenterCreateRequest, WebhookCenterPatchRequest, WebhookEnabledRequest
+from app.models.requests import ManualWebhookActionRequest, WebhookCenterCreateRequest, WebhookCenterPatchRequest, WebhookEnabledRequest, WebhookTestRequest
 from app.core.secret_protection import REDACTED, SecretRedactor
 from app.services.audit import audit_event
 from app.services.authorization import require_reviewer_connection_access, require_webhook_delivery_manual_action_access, require_webhook_delivery_repeat_test_access
@@ -55,9 +56,9 @@ def _public_webhook(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _test_payload(instance_name: str) -> dict[str, Any]:
-    return {
-        "id": "webhook_center_test",
+def _test_payload(instance_name: str, override: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": f"webhook_center_test_{uuid.uuid4().hex}",
         "event": "TEST_WEBHOOK",
         "instance": instance_name,
         "timestamp": int(time.time() * 1000),
@@ -66,6 +67,13 @@ def _test_payload(instance_name: str) -> dict[str, Any]:
         "text": "test webhook",
         "meta": {"source": "webhook_center_test"},
     }
+    if override:
+        payload.update(override)
+    # A manual test must not spoof another runtime or lose its stable origin.
+    payload["instance"] = instance_name
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    payload["meta"] = {**meta, "source": "webhook_center_test"}
+    return payload
 
 
 def _contains_redacted_value(value: Any) -> bool:
@@ -222,13 +230,27 @@ async def set_filters_route(webhook_id: str, body: dict[str, bool], request: Req
     return {"connectionId": connection.id, **_public_webhook(item)}
 
 
+@router.get("/{webhook_id}/test-payload")
+async def get_test_webhook_payload(webhook_id: str, request: Request):
+    _connection, instance_name, _item = await _webhook_target(request, webhook_id)
+    return {"payload": _test_payload(instance_name)}
+
+
 @router.post("/{webhook_id}/test")
-async def test_webhook_route(webhook_id: str, request: Request):
-    _connection, instance_name, item = await _webhook_target(request, webhook_id)
+async def test_webhook_route(webhook_id: str, request: Request, body: WebhookTestRequest | None = None):
+    connection, instance_name, item = await _webhook_target(request, webhook_id)
+    require_webhook_delivery_manual_action_access(request, connection)
     if not item.get("enabled"):
         raise HTTPException(status_code=409, detail="Webhook is disabled")
-    result = await dispatch_webhook_with_retry(payload=_test_payload(instance_name), request_id=f"webhook-test-{webhook_id[:8]}", item=item, test_mode=True)
-    return {"ok": bool(result.get("ok")), "status": int(result.get("statusCode") or 0), "error": result.get("error"), "retriesUsed": int(result.get("retriesUsed") or 0), "latencyMs": result.get("latencyMs"), "deliveryType": "test"}
+    request_id = f"webhook-test-{webhook_id[:8]}-{uuid.uuid4().hex[:10]}"
+    result = await dispatch_webhook_with_retry(
+        payload=_test_payload(instance_name, body.payload if body else None), request_id=request_id, item=item, test_mode=True,
+    )
+    return {
+        "ok": bool(result.get("ok")), "status": int(result.get("statusCode") or 0), "error": result.get("error"),
+        "retriesUsed": int(result.get("retriesUsed") or 0), "latencyMs": result.get("latencyMs"),
+        "deliveryType": "test", "deliveryId": result.get("deliveryId"), "requestId": request_id, "webhookId": webhook_id,
+    }
 
 
 @router.post("/{webhook_id}/deliveries/{delivery_id}/repeat-test")

@@ -241,7 +241,13 @@ async def _process_cloud_event(
             queue_size=len(_forward_tasks),
         )
         return "queued_dropped"
-    _track_background_task(asyncio.create_task(_forward_to_instance_webhooks(payload, request_id)))
+    _track_background_task(
+        asyncio.create_task(_forward_to_instance_webhooks(payload, request_id)),
+        request_id=request_id,
+        instance=instance,
+        message_id=str(message.get("id") or "") or None,
+        conversation_id=conversation_id,
+    )
     logger.info(
         "[META_INBOUND][FRONTEND] event queued for configured Gateway webhook targets",
         request_id=request_id,

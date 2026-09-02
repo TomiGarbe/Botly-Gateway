@@ -97,6 +97,8 @@ def test_webhook_secret_survives_service_reinitialization_and_runtime_delivery(m
     assert result["ok"] is True
     assert received["headers"]["X-Client-Key"] == "test-secret-123456"
     assert received["headers"]["X-Webhook-Token"] == "test-secret-123456"
+    assert received["headers"]["X-Request-Id"] == "phase-03-restart"
+    assert received["headers"]["X-Dispatch-Id"].startswith("disp_phase-03-restart")
     assert public["authConfig"]["apiKey"] == REDACTED
     assert "test-secret-123456" not in str(public)
     assert "test-secret-123456" not in str(history)

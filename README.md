@@ -68,6 +68,61 @@ Las demás variables tienen valores por defecto funcionales para desarrollo loca
 | `./scripts/logs.sh [servicio]` | Logs en tiempo real. Ej: `./scripts/logs.sh evolution` |
 | `./scripts/reset.sh` | **Destructivo.** Borra todos los volúmenes de datos |
 
+Los scripts son Bash y deben ejecutarse dentro de una distribución Linux de
+WSL o de otro host Linux; no desde PowerShell ni mediante el motor de Docker
+de Windows.
+
+## Producción: WSL por SSH (sin Docker Desktop)
+
+El despliegue de Gateway usa Docker Compose **dentro de la distribución Linux
+de WSL del servidor**, accedida por SSH. Docker Desktop no forma parte del
+flujo de despliegue y la distribución técnica `docker-desktop` no es un host
+válido para ejecutar Gateway.
+
+El alias de acceso configurado es `rivo-server`. Antes de desplegar, la sesión
+SSH debe abrir una distribución WSL real con `bash` y `docker compose`
+disponibles (por ejemplo, Ubuntu). En el host Windows del servidor, comprobar
+la distribución elegida sin mostrar valores de `config/.env`:
+
+```bash
+wsl -l -v
+wsl --status
+```
+
+Ya dentro de la distribución Linux de producción, comprobar:
+
+```bash
+command -v bash
+docker compose version
+```
+
+Si la sesión devuelve un error como `execvpe(/bin/bash) failed`, el shell SSH
+está apuntando a una distribución WSL sin Bash (frecuentemente
+`docker-desktop`). Corregir primero la distribución WSL predeterminada o la
+configuración del shell SSH del servidor para que use la distribución Linux de
+producción. No intentar el despliegue con Docker Desktop ni con el cliente
+Docker de Windows.
+
+Una vez dentro del repositorio de producción en WSL, el despliegue reproducible
+del commit ya publicado se realiza así:
+
+```bash
+git fetch origin
+git checkout --detach "$(git rev-parse origin/main)"
+GATEWAY_GIT_SHA="$(git rev-parse HEAD)" \
+GATEWAY_BUILD_VERSION="$(git describe --always)" \
+docker compose -p evolution -f docker/docker-compose.yml \
+  --env-file config/.env up -d --build
+docker compose -p evolution -f docker/docker-compose.yml \
+  --env-file config/.env ps
+curl -fsS http://127.0.0.1:9000/health
+```
+
+El comando no modifica `config/.env`, conserva los volúmenes existentes y
+etiqueta la imagen del Gateway con el SHA y la versión desplegados. El
+frontend se entrega por su canal de hosting independiente; este Compose
+despliega los servicios de Gateway, Evolution, PostgreSQL y Redis.
+
 ## Documentación
 
 - [Referencia de API](docs/api-reference.md)
@@ -113,7 +168,7 @@ Se normalizan quitando slash final para evitar rutas inconsistentes.
 
 `VITE_PUBLIC_BASE_URL` se mantiene solo como compatibilidad de lectura para builds anteriores; los nuevos despliegues deben usar `VITE_PUBLIC_APP_URL`.
 
-El build de produccion usa `frontend/.env.production`: `VITE_PUBLIC_APP_URL` apunta a `https://gateway.botly.com.ar` (frontend) y `VITE_GATEWAY_URL` a `https://gateway-server.botly.com.ar` (API del Gateway en el server propio, Docker sobre WSL2, expuesto por Cloudflare Tunnel). El archivo `.env` sin sufijo puede mantenerse con valores locales para desarrollo.
+El build de produccion usa `frontend/.env.production`: `VITE_PUBLIC_APP_URL` apunta a `https://gateway.botly.com.ar` (frontend) y `VITE_GATEWAY_URL` a `https://gateway-server.botly.com.ar` (API del Gateway en el server propio, Docker Compose dentro de WSL, expuesto por Cloudflare Tunnel). El archivo `.env` sin sufijo puede mantenerse con valores locales para desarrollo.
 
 ### PUBLIC_APP_URL (backend)
 

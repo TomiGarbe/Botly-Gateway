@@ -1,26 +1,24 @@
-import { ArrowLeft, Clipboard, Eye, EyeOff, MessageCircle, Pencil, RefreshCw, Trash2, X } from 'lucide-react'
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, Clipboard, Eye, EyeOff, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { Connection } from '@/domain/connection'
 import { StatusBadge, type StatusTone } from '@/shared/components/StatusBadge'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
-import { EmptyState } from '@/shared/components/EmptyState'
 import { Toast } from '@/shared/components/Toast'
 import {
-  ConnectionActivity,
   ConnectionApiKey,
   ConnectionIntegrationEndpoints,
   ConnectionStatusSummary,
   getConnectionApiKey,
   getConnectionIntegrationEndpoints,
   getConnectionStatusSummary,
-  listConnectionActivity,
   reconnectConnection,
   regenerateConnectionApiKey,
 } from '../api/connectionOperationsApi'
 import { deleteConnection, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
+import { ConnectionWebhooks } from '../components/ConnectionWebhooks'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
@@ -46,10 +44,6 @@ function dateTime(value: string | null | undefined, fallback = 'Sin actividad re
   return Number.isNaN(date.getTime()) ? fallback : new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-function eventTime(value: number): string {
-  return new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-}
-
 export function ConnectionDetailPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -58,8 +52,6 @@ export function ConnectionDetailPage() {
   const [integrationEndpoints, setIntegrationEndpoints] = useState<ConnectionIntegrationEndpoints | null>(null)
   const [apiKey, setApiKey] = useState<ConnectionApiKey | null>(null)
   const [statusSummary, setStatusSummary] = useState<ConnectionStatusSummary | null>(null)
-  const [activity, setActivity] = useState<ConnectionActivity[]>([])
-  const [selectedActivity, setSelectedActivity] = useState<ConnectionActivity | null>(null)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('general')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -89,12 +81,11 @@ export function ConnectionDetailPage() {
   const loadOperations = useCallback(async () => {
     if (!connectionId) return
     try {
-      const [nextApiKey, nextStatus, nextActivity, nextIntegrationEndpoints] = await Promise.all([
-        getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), listConnectionActivity(connectionId), getConnectionIntegrationEndpoints(connectionId),
+      const [nextApiKey, nextStatus, nextIntegrationEndpoints] = await Promise.all([
+        getConnectionApiKey(connectionId), getConnectionStatusSummary(connectionId), getConnectionIntegrationEndpoints(connectionId),
       ])
       setApiKey(nextApiKey)
       setStatusSummary(nextStatus)
-      setActivity(nextActivity)
       setIntegrationEndpoints(nextIntegrationEndpoints)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo cargar la operación de la conexión.')
@@ -104,8 +95,12 @@ export function ConnectionDetailPage() {
   useEffect(() => { void loadConnection() }, [loadConnection])
   useEffect(() => { void loadOperations() }, [loadOperations])
   useEffect(() => {
-    if (new URLSearchParams(location.search).get('tab') === 'messages') setActiveTab('messages')
-  }, [location.search])
+    if (location.pathname.endsWith('/webhooks')) setActiveTab('webhooks')
+    else {
+      const requestedTab = new URLSearchParams(location.search).get('tab')
+      setActiveTab(tabs.some((tab) => tab.id === requestedTab) ? requestedTab as WorkspaceTab : 'general')
+    }
+  }, [location.pathname, location.search])
 
   async function refreshWorkspace() { await Promise.all([loadConnection(), loadOperations()]) }
 
@@ -163,8 +158,6 @@ export function ConnectionDetailPage() {
     try { await deleteConnection(connection.id); navigate(`/clients/${connection.clientId}`) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo eliminar la conexión.') } finally { setIsDeleting(false) }
   }
 
-  const channelActivity = useMemo(() => activity, [activity])
-
   if (isLoading) return <LoadingState label="Cargando conexión…" />
   if (!connection) return <div className="clients-state clients-state-error" role="alert"><p>{error || 'Conexión no encontrada.'}</p><button type="button" onClick={() => void loadConnection()}>Reintentar</button></div>
 
@@ -176,27 +169,26 @@ export function ConnectionDetailPage() {
       <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button>
       <div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
     </header>
-    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</div>
+    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
 
     <div className="workspace-tab-content">
-      {activeTab === 'webhooks' ? <section className="connection-section workspace-webhook-center"><div><h3>Webhooks de la conexión</h3><p>La gestión de destinos y entregas se realiza desde el Webhooks Center.</p></div><button type="button" className="client-button-primary" onClick={() => navigate(`/webhooks?connectionId=${encodeURIComponent(connection.id)}`)}>Administrar webhooks</button></section> : null}
+      {activeTab === 'webhooks' ? <ConnectionWebhooks connection={connection} /> : null}
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><label><span>Nombre</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></label><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
         <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
-        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} connectionState={connection.status.state} connectionLifecycle={connection.status.lifecycle} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => setActiveTab('webhooks')} />
+        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} />
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
 
       {activeTab === 'security' ? <section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl>{apiKey?.hasApiKey && !apiKey.canRevealApiKey ? <p className="connection-endpoint-note">Esta clave fue creada antes de habilitar la visualización. Regenerala una vez para poder mostrarla y copiarla luego.</p> : null}<div className="connection-inline-actions">{apiKey?.canRevealApiKey ? <button type="button" className="client-button-secondary" onClick={() => void toggleKeyVisibility()}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!apiKey?.canRevealApiKey && !apiKey?.apiKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section> : null}
 
-      {activeTab === 'messages' ? <><MessagesWorkspace runtimeName={connection.runtimeName} connectionId={connection.id} messageId={new URLSearchParams(location.search).get('message_id')} /><section className="connection-section"><div className="connection-section-heading"><div><h3>Actividad del canal</h3><p>Gateway · Meta · Canal</p></div></div>{channelActivity.length === 0 ? <EmptyState icon={MessageCircle} title="No hay actividad del canal." description="La actividad de mensajería aparecerá aquí cuando se produzca." /> : <ol className="connection-activity-list">{channelActivity.map((item) => <li key={item.id}><button type="button" onClick={() => setSelectedActivity(item)}><div><strong>{item.description}</strong><span>{eventTime(item.occurredAt)}</span></div><em>{item.status}</em></button></li>)}</ol>}</section></> : null}
+      {activeTab === 'messages' ? <MessagesWorkspace runtimeName={connection.runtimeName} connectionId={connection.id} messageId={new URLSearchParams(location.search).get('message_id')} /> : null}
 
     </div>
 
-    {selectedActivity ? <div className="activity-panel-backdrop" role="presentation" onMouseDown={() => setSelectedActivity(null)}><aside className="activity-panel" role="dialog" aria-modal="true" aria-label="Detalle técnico de actividad" onMouseDown={(event) => event.stopPropagation()}><div className="activity-panel-heading"><div><h3>{selectedActivity.description}</h3><p>{eventTime(selectedActivity.occurredAt)}</p></div><button type="button" onClick={() => setSelectedActivity(null)} aria-label="Cerrar detalle"><X size={18} /></button></div><dl>{Object.entries(selectedActivity.technical).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></aside></div> : null}
     <ConfirmDialog isOpen={isDeleteDialogOpen} title="Eliminar conexión" description="Esta acción eliminará la conexión y su acceso al Workspace." confirmLabel="Eliminar conexión" isSubmitting={isDeleting} onCancel={() => setIsDeleteDialogOpen(false)} onConfirm={() => void removeConnection()} />
     <ConfirmDialog isOpen={isRegenerateDialogOpen} title="Regenerar API Key" description="La API Key actual dejará de ser válida. Asegurate de copiar la nueva clave al finalizar." confirmLabel="Regenerar API Key" tone="default" onCancel={() => setIsRegenerateDialogOpen(false)} onConfirm={() => { setIsRegenerateDialogOpen(false); void regenerateKey() }} />
   </section>

@@ -14,60 +14,22 @@ export interface TimelineMessage {
   sender: string | null
   recipient: string | null
   media: { id?: string; kind?: string; mimeType?: string; fileName?: string; caption?: string; url?: string } | null
-}
-
-interface TimelineEvent {
-  id: string
-  timestamp: number
-  direction?: string
-  type?: string
-  subtype?: string
-  messageType?: string
-  status?: string
-  text?: string
-  content?: { text?: string }
-  sender?: string
-  recipient?: string
-  messageId?: string
-  message?: { id?: string; kind?: string; text?: string }
-  metadata?: { messageId?: string; status?: string }
-  media?: TimelineMessage['media']
-}
-
-const messageKinds = new Set<MessageKind>(['text', 'image', 'audio', 'document', 'video'])
-
-function statusFor(event: TimelineEvent): string | null {
-  return event.status || event.metadata?.status || null
+  provider: string | null
+  providerMessageId: string | null
+  conversationId: string | null
+  channelId: string | null
+  connectionId: string | null
+  correlationId: string | null
+  requestId: string | null
+  eventId: string | null
+  deliveryId: string | null
+  outboundAttemptId: string | null
+  payload: unknown
 }
 
 export async function listTimelineMessages(runtimeName: string): Promise<TimelineMessage[]> {
-  const payload = await gatewayRequest<{ items: TimelineEvent[] }>(`/webhooks/events?instance=${encodeURIComponent(runtimeName)}&limit=200`)
-  const statuses = new Map<string, string>()
-  for (const event of payload.items) {
-    if (event.subtype !== 'message_status') continue
-    const id = event.messageId || event.metadata?.messageId
-    const status = statusFor(event)
-    if (id && status) statuses.set(id, status)
-  }
+  const payload = await gatewayRequest<{ items: TimelineMessage[] }>(`/messages/${encodeURIComponent(runtimeName)}/timeline?limit=200`)
   return payload.items
-    .filter((event) => event.type === 'message')
-    .map((event) => {
-      const messageId = event.message?.id || event.messageId || null
-      const rawKind = event.messageType || event.message?.kind || 'text'
-      return {
-        id: event.id,
-        messageId,
-        timestamp: event.timestamp,
-        direction: (event.direction === 'inbound' ? 'inbound' : 'outbound') as TimelineMessage['direction'],
-        kind: messageKinds.has(rawKind as MessageKind) ? rawKind : rawKind,
-        text: event.text || event.content?.text || event.message?.text || event.media?.caption || '',
-        status: messageId ? statuses.get(messageId) || statusFor(event) : statusFor(event),
-        sender: event.sender || null,
-        recipient: event.recipient || null,
-        media: event.media || null,
-      }
-    })
-    .sort((a, b) => a.timestamp - b.timestamp)
 }
 
 export function sendWorkspaceMessage(

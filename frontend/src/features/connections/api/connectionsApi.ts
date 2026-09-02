@@ -61,7 +61,7 @@ export function toConnection(payload: ApiConnection): Connection {
 
 export async function listConnections(clientId?: string): Promise<Connection[]> {
   const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : ''
-  const payload = await gatewayRequest<ApiConnection[]>(`/connections${query}`)
+  const payload = await gatewayRequest<ApiConnection[]>(`/connections${query}`, { cache: 'no-store' })
   return payload.map(toConnection)
 }
 

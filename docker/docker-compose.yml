@@ -119,6 +119,9 @@ services:
     build:
       context: ../gateway
       dockerfile: Dockerfile
+      args:
+        GATEWAY_GIT_SHA: ${GATEWAY_GIT_SHA:-unknown}
+        GATEWAY_BUILD_VERSION: ${GATEWAY_BUILD_VERSION:-unknown}
     container_name: evolution_gateway
     restart: unless-stopped
     ports:

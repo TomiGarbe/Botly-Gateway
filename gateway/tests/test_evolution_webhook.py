@@ -190,3 +190,61 @@ def test_known_evolution_instance_reaches_the_pipeline(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ignored_technical"}
+
+
+def test_messages_upsert_logs_without_event_collision_and_forwards(monkeypatch) -> None:
+    from app.routers import webhooks
+    from app.services import evolution_auth
+    import threading
+
+    class KnownRegistry:
+        def connection_record(self, instance: str):
+            assert instance == "runtime-a"
+            return {"id": "connection-a", "client_id": "business-a", "channel_id": "channel-a"}
+
+    test_settings = SimpleNamespace(
+        evolution_api_key="global", evolution_webhook_secret="webhook-secret", evolution_auth_cache_ttl_seconds=45,
+        allow_insecure_evolution_webhooks=False, bot_webhook_max_parallel=20, bot_webhook_max_queue=200,
+    )
+    forwarded: list[dict] = []
+    forwarded_event = threading.Event()
+
+    async def forward(payload, request_id):
+        forwarded.append({"payload": payload, "request_id": request_id})
+        forwarded_event.set()
+
+    monkeypatch.setattr(evolution_auth, "get_settings", lambda: test_settings)
+    monkeypatch.setattr(webhooks, "settings", test_settings)
+    monkeypatch.setattr(webhooks, "_connection_registry", KnownRegistry())
+    monkeypatch.setattr(webhooks, "save_pipeline_event", lambda **_kwargs: None)
+    monkeypatch.setattr(webhooks, "_forward_to_instance_webhooks", forward)
+    monkeypatch.setattr(
+        webhooks,
+        "process_incoming_webhook",
+        lambda _payload, request_id: {
+            "status": "ok",
+            "normalized": {
+                "layer": "business", "event": "MESSAGES_UPSERT", "type": "message", "subtype": "text",
+                "instance": "runtime-a", "direction": "inbound", "id": "gateway-event-1", "messageId": "provider-message-1",
+                "message": {"id": "provider-message-1", "kind": "text", "from": "5491100000000@s.whatsapp.net", "fromMe": False},
+                "meta": {"requestId": request_id, "conversationId": "conversation-1"}, "metadata": {},
+            },
+        },
+    )
+    evolution_auth._TOKEN_CACHE.update({"expiresAt": 0.0, "byInstance": {}})
+    app = FastAPI()
+    app.include_router(webhooks.router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/evolution",
+            json={"instance": "runtime-a", "event": "MESSAGES_UPSERT", "data": {}},
+            headers={"x-evolution-webhook-secret": "webhook-secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert forwarded_event.wait(timeout=1)
+    assert forwarded[0]["payload"]["instance"] == "runtime-a"
+    assert forwarded[0]["payload"]["messageId"] == "provider-message-1"
+    assert forwarded[0]["payload"]["trace"]["conversationId"] == "conversation-1"
