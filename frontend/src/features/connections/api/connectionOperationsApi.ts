@@ -54,19 +54,34 @@ export interface ConnectionIntegrationEndpoints {
 }
 
 export interface WebhookDelivery {
+  id: string
+  webhookId: string | null
   timestamp: number
   webhookName: string | null
   destinationUrl: string | null
+  operation: string | null
+  semanticStatus: string | null
   eventType: string | null
+  eventId: string | null
+  requestId: string | null
+  correlationId: string | null
   messageId: string | null
+  conversationId: string | null
+  isTest: boolean
   status: string
   success: boolean
   statusCode: number
   durationMs: number
+  attemptCount: number
   retryCount: number
   error: string | null
   errorType: string | null
+  errorDetail: { code?: string | null; category?: string | null; message?: string | null; retryable?: boolean | null } | null
   request: {
+    method?: string | null
+    url?: string | null
+    query?: Record<string, unknown>
+    headers?: Record<string, unknown>
     payloadSummary?: {
       event?: string
       type?: string
@@ -81,7 +96,9 @@ export interface WebhookDelivery {
     payloadPreview?: string
     payloadTruncated?: boolean
   }
-  response: { bodyPreview?: string }
+  response: { status?: number | null; headers?: Record<string, unknown>; bodyPreview?: string }
+  attempts: Array<Record<string, unknown>>
+  metadata: Record<string, unknown>
 }
 
 export interface WebhookDeliveryMetrics {

@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+ARG GATEWAY_GIT_SHA=unknown
+ARG GATEWAY_BUILD_VERSION=unknown
+LABEL org.opencontainers.image.revision=${GATEWAY_GIT_SHA} \
+      org.opencontainers.image.version=${GATEWAY_BUILD_VERSION}
+ENV GATEWAY_GIT_SHA=${GATEWAY_GIT_SHA} \
+    GATEWAY_BUILD_VERSION=${GATEWAY_BUILD_VERSION}
+
 WORKDIR /app
 
 # Dependencias del sistema mínimas

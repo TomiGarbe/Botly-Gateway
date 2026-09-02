@@ -217,7 +217,12 @@ async def dispatch_webhook_with_retry(
     if target_payload is None:
         return {"ok": True, "status": "skipped_by_filter", "statusCode": 204, "retriesUsed": 0, "latencyMs": 0.0}
 
-    headers = {"Content-Type": "application/json", **build_auth_headers(item)}
+    headers = {
+        "Content-Type": "application/json",
+        "X-Request-Id": request_id,
+        "X-Dispatch-Id": dispatch_id,
+        **build_auth_headers(item),
+    }
     query_params = build_auth_query_params(item)
     auth_type = str(item.get("authType") or "NONE").upper()
     verbose = _should_verbose_dispatch_logs()

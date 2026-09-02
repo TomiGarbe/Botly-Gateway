@@ -76,6 +76,9 @@ export interface WebhookTestResult {
   retriesUsed: number
   latencyMs: number | null
   deliveryType: 'test'
+  deliveryId: string | null
+  requestId: string
+  webhookId: string
 }
 
 export interface RepeatWebhookTestResult {
@@ -135,8 +138,14 @@ export function deleteWebhook(webhookId: string): Promise<void> {
   return gatewayRequest<void>(`/webhooks/${encodeURIComponent(webhookId)}`, { method: 'DELETE' })
 }
 
-export function testWebhook(webhookId: string): Promise<WebhookTestResult> {
-  return gatewayRequest<WebhookTestResult>(`/webhooks/${encodeURIComponent(webhookId)}/test`, { method: 'POST' })
+export function getWebhookTestPayload(webhookId: string): Promise<{ payload: Record<string, unknown> }> {
+  return gatewayRequest<{ payload: Record<string, unknown> }>(`/webhooks/${encodeURIComponent(webhookId)}/test-payload`)
+}
+
+export function testWebhook(webhookId: string, payload?: Record<string, unknown>): Promise<WebhookTestResult> {
+  return gatewayRequest<WebhookTestResult>(`/webhooks/${encodeURIComponent(webhookId)}/test`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload ? { payload } : {}),
+  })
 }
 
 export function diagnoseWebhook(webhookId: string): Promise<WebhookDiagnosis> {

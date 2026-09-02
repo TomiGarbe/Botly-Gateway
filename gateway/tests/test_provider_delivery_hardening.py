@@ -16,6 +16,42 @@ def _reset_timeline() -> None:
     normalization._business_event_keys_order.clear()
 
 
+def test_logical_message_projection_merges_local_send_and_provider_echo(monkeypatch) -> None:
+    """The audit stream keeps both facts, while Messages shows one message."""
+    monkeypatch.setattr(normalization, "_persist_business_events", lambda: True)
+    _reset_timeline()
+    normalization.save_event({
+        "id": "local-send", "layer": "business", "event": "LOCAL_OUTBOUND_SEND", "instance": "runtime-a", "timestamp": 100,
+        "direction": "outbound", "type": "message", "subtype": "text", "messageType": "text", "text": "hola",
+        "status": "sent", "sender": "runtime-a", "recipient": "5491100000000", "message": {"id": "provider-message-1", "kind": "text", "text": "hola"},
+        "raw": {"provider": "evolution", "providerMessageId": "provider-message-1"},
+    })
+    echo = normalization.normalize_webhook({
+        "event": "MESSAGES_UPSERT", "instance": "runtime-a", "provider": "evolution",
+        "data": {"key": {"id": "provider-message-1", "remoteJid": "5491100000000@s.whatsapp.net", "fromMe": True}, "message": {"conversation": "hola"}},
+    })
+    echo["id"] = "provider-echo"
+    echo["timestamp"] = 110
+    normalization.save_event(echo)
+    status = normalization.normalize_webhook({
+        "event": "MESSAGES_UPDATE", "instance": "runtime-a", "provider": "evolution",
+        "data": {"key": {"id": "provider-message-1", "fromMe": True}, "status": "delivered"},
+    })
+    status["id"] = "delivery-status"
+    status["timestamp"] = 120
+    normalization.save_event(status)
+
+    evidence = normalization.list_events(instance="runtime-a", limit=10)
+    timeline = normalization.list_logical_messages("runtime-a")
+
+    assert len([event for event in evidence if event.get("type") == "message"]) == 2
+    assert len(timeline) == 1
+    assert timeline[0]["messageId"] == "provider-message-1"
+    assert timeline[0]["status"] == "delivered"
+    assert timeline[0]["payload"]["sourceEvent"] == "LOCAL_OUTBOUND_SEND"
+    assert timeline[0]["payload"]["sourceEventIds"] == ["local-send", "provider-echo"]
+
+
 def _attempt(store: OutboundProviderAttemptStore, *, provider: str = "meta", message_id: str = "provider-1") -> dict:
     attempt = store.create(instance="runtime-a", provider=provider, message_type="text", recipient="5491100000000", text="hola")
 

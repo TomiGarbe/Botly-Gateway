@@ -162,7 +162,12 @@ api.include_router(operations.router)
 
 @api.get("/health", tags=["system"])
 async def health():
-    return {"status": "ok", "service": "evolution-gateway"}
+    return {
+        "status": "ok",
+        "service": "evolution-gateway",
+        "version": settings.gateway_build_version,
+        "gitSha": settings.gateway_git_sha,
+    }
 
 
 @api.get("/ready", tags=["system"])

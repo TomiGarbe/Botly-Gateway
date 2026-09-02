@@ -45,6 +45,7 @@ export function AppRouter() {
           <Route path="clients/:clientId" element={<ClientDetailPage />} />
           <Route path="clients/:clientId/connections/new" element={<NewConnectionPage />} />
           <Route path="connections/:connectionId" element={<ConnectionDetailPage />} />
+          <Route path="connections/:connectionId/webhooks" element={<ConnectionDetailPage />} />
           <Route path="connections/:connectionId/message-logs" element={<ProviderDeliveriesPage />} />
           <Route path="connections/:connectionId/message-logs/:deliveryId" element={<ProviderDeliveryDetailPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />

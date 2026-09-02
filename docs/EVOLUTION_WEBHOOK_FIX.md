@@ -97,14 +97,20 @@ entrantes propios y ajenos con campos opcionales ausentes.
 
 ## Runtime validation
 
-**Implementado y testeado automaticamente.** No se pudo hacer una validacion
-contra contenedores: Docker Desktop no estaba disponible en este entorno.
+**Implementado y testeado automaticamente.** La validación contra
+contenedores debe ejecutarse dentro de la distribución Linux de WSL que corre
+el stack; Docker Desktop no es parte de este entorno ni un reemplazo válido.
 
-Validacion manual pendiente al disponer de Docker:
+Antes de ejecutarla por SSH, confirmar que la sesión entra a una distribución
+WSL real con Bash y Docker Compose. Si devuelve `execvpe(/bin/bash) failed`,
+la configuración SSH/WSL está apuntando erróneamente a `docker-desktop` u otra
+distribución sin Bash y debe corregirse antes de desplegar.
 
-```powershell
-docker compose -f docker/docker-compose.yml up -d evolution gateway
-docker compose -f docker/docker-compose.yml exec evolution sh -lc "wget -S -O- http://gateway:9000/webhooks/evolution"
+Validación manual en la terminal WSL del servidor:
+
+```bash
+docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env up -d evolution gateway
+docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env exec evolution sh -lc "wget -S -O- http://gateway:9000/webhooks/evolution"
 ```
 
 Despues, crear o reconectar una instancia, consultar `GET
