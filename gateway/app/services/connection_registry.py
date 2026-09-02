@@ -12,7 +12,7 @@ from app.core.logging import get_logger
 
 
 _LOCK = threading.Lock()
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _LEGACY_CONNECTION_REGISTRY_PATH = Path("/tmp/botly_connection_registry.json")
 logger = get_logger(__name__)
 
@@ -32,7 +32,7 @@ class ConnectionRegistry:
 
     @staticmethod
     def _empty() -> dict[str, Any]:
-        return {"schema_version": _SCHEMA_VERSION, "clients": {}, "connections": {}, "setups": {}}
+        return {"schema_version": _SCHEMA_VERSION, "clients": {}, "connections": {}, "setups": {}, "deleted_legacy_names": {}}
 
     def _read_unlocked(self) -> dict[str, Any]:
         self._ensure_private_storage_unlocked()
@@ -47,7 +47,14 @@ class ConnectionRegistry:
         clients = raw.get("clients") if isinstance(raw.get("clients"), dict) else {}
         connections = raw.get("connections") if isinstance(raw.get("connections"), dict) else {}
         setups = raw.get("setups") if isinstance(raw.get("setups"), dict) else {}
-        return {"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": setups}
+        deleted_legacy_names = raw.get("deleted_legacy_names") if isinstance(raw.get("deleted_legacy_names"), dict) else {}
+        return {
+            "schema_version": _SCHEMA_VERSION,
+            "clients": clients,
+            "connections": connections,
+            "setups": setups,
+            "deleted_legacy_names": deleted_legacy_names,
+        }
 
     def _write_unlocked(self, store: dict[str, Any]) -> None:
         self._ensure_private_storage_unlocked()
@@ -95,10 +102,11 @@ class ConnectionRegistry:
 
         clients = raw.get("clients") if isinstance(raw.get("clients"), dict) else {}
         connections = raw.get("connections") if isinstance(raw.get("connections"), dict) else {}
+        deleted_legacy_names = raw.get("deleted_legacy_names") if isinstance(raw.get("deleted_legacy_names"), dict) else {}
         with _LOCK:
             if self._path.exists():
                 return
-            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": {}})
+            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": {}, "deleted_legacy_names": deleted_legacy_names})
         logger.info("connection_registry_legacy_migrated", source=str(legacy_path), destination=str(self._path))
 
     def snapshot(self) -> dict[str, Any]:
@@ -110,8 +118,17 @@ class ConnectionRegistry:
         clients = store.get("clients") if isinstance(store.get("clients"), dict) else {}
         connections = store.get("connections") if isinstance(store.get("connections"), dict) else {}
         setups = store.get("setups") if isinstance(store.get("setups"), dict) else {}
+        deleted_legacy_names = store.get("deleted_legacy_names") if isinstance(store.get("deleted_legacy_names"), dict) else {}
         with _LOCK:
-            self._write_unlocked({"schema_version": _SCHEMA_VERSION, "clients": clients, "connections": connections, "setups": setups})
+            self._write_unlocked(
+                {
+                    "schema_version": _SCHEMA_VERSION,
+                    "clients": clients,
+                    "connections": connections,
+                    "setups": setups,
+                    "deleted_legacy_names": deleted_legacy_names,
+                }
+            )
 
     def list_clients(self) -> list[dict[str, Any]]:
         with _LOCK:
@@ -190,6 +207,7 @@ class ConnectionRegistry:
             setup.update(deepcopy(setup_changes))
             store["setups"][setup_id] = setup
             store["connections"][legacy_name] = deepcopy(connection)
+            store["deleted_legacy_names"].pop(legacy_name, None)
             self._write_unlocked(store)
             return deepcopy(setup), deepcopy(connection)
 
@@ -209,6 +227,7 @@ class ConnectionRegistry:
         with _LOCK:
             store = self._read_unlocked()
             store["connections"][legacy_name] = deepcopy(record)
+            store["deleted_legacy_names"].pop(legacy_name, None)
             self._write_unlocked(store)
         return deepcopy(record)
 
@@ -220,6 +239,7 @@ class ConnectionRegistry:
             if not client_id or client_id not in store["clients"]:
                 return None
             store["connections"][legacy_name] = deepcopy(record)
+            store["deleted_legacy_names"].pop(legacy_name, None)
             self._write_unlocked(store)
         return deepcopy(record)
 
@@ -243,6 +263,10 @@ class ConnectionRegistry:
                     continue
                 deleted = deepcopy(record)
                 del store["connections"][legacy_name]
+                # A runtime may remain visible briefly after the provider accepts
+                # a delete, or may be restored externally.  The user's explicit
+                # deletion must take precedence over the legacy auto-import.
+                store["deleted_legacy_names"][legacy_name] = {"connection_id": connection_id}
                 self._write_unlocked(store)
                 return deleted
             return None
@@ -304,20 +328,22 @@ class ConnectionRegistry:
         with _LOCK:
             store = self._read_unlocked()
             changed = False
-            if fallback_client["id"] not in store["clients"]:
-                store["clients"][fallback_client["id"]] = deepcopy(fallback_client)
-                changed = True
+            deleted_legacy_names = store["deleted_legacy_names"]
             for record in records:
                 name = str(record.get("name") or "").strip()
-                if not name:
+                if not name or name in deleted_legacy_names:
                     continue
                 existing = store["connections"].get(name)
                 if isinstance(existing, dict):
                     if existing.get("client_id") not in store["clients"]:
+                        if fallback_client["id"] not in store["clients"]:
+                            store["clients"][fallback_client["id"]] = deepcopy(fallback_client)
                         existing["client_id"] = fallback_client["id"]
                         existing["updated_at"] = fallback_client["updated_at"]
                         changed = True
                     continue
+                if fallback_client["id"] not in store["clients"]:
+                    store["clients"][fallback_client["id"]] = deepcopy(fallback_client)
                 store["connections"][name] = {
                     "id": str(record.get("id") or name),
                     "legacy_name": name,

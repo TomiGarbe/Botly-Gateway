@@ -262,6 +262,14 @@ class WebhookCenterPatchRequest(BaseModel):
     eventFilters: dict[str, bool] | None = None
 
 
+class WebhookTestRequest(BaseModel):
+    """Optional JSON override for a manual delivery using the real webhook contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict[str, Any] | None = None
+
+
 class ManualWebhookActionRequest(BaseModel):
     """Optional operator context for a manual delivery action; never request identity."""
 

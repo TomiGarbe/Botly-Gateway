@@ -5,7 +5,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from pydantic import ValidationError
 
 from app.connections import get_connection_manager
@@ -21,7 +21,7 @@ from app.models.requests import (
     SendMessageRequest,
 )
 from app.services.media import consume_uploaded_file, file_to_base64, get_uploaded_file
-from app.services.normalization import save_business_event, save_event, save_pipeline_event
+from app.services.normalization import list_logical_messages, save_business_event, save_event, save_pipeline_event
 from app.services.reliability import mark_outbound
 from app.services.outbound_provider_attempts import (
     OutboundAttemptPersistenceError,
@@ -460,6 +460,13 @@ async def _send_message_unified(instance_name: str, request: Request):
 @router.post("/messages/{instance_name}")
 async def send_message_public(instance_name: str, request: Request):
     return await _send_message_unified(instance_name, request)
+
+
+@router.get("/messages/{instance_name}/timeline")
+async def get_message_timeline(instance_name: str, request: Request, limit: int = Query(default=200, ge=1, le=500)):
+    instance_name = _validate_instance_name(instance_name)
+    _require_instance_token_scope(request, instance_name)
+    return {"items": list_logical_messages(instance_name, limit=limit)}
 
 
 @router.post("/instances/{instance_name}/messages", deprecated=True)

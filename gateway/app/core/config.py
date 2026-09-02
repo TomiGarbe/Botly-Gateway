@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Comma-separated email=role assignments. Roles are evaluated on each request.
     authorization_role_assignments_raw: str = Field(default="", validation_alias="AUTHORIZATION_ROLE_ASSIGNMENTS")
     gateway_port: int = 9000
+    gateway_git_sha: str = "unknown"
+    gateway_build_version: str = "unknown"
     # PUBLIC_BASE_URL se conserva como alias de lectura para no interrumpir
     # despliegues existentes durante la migracion del dominio.
     public_app_url: str = Field(

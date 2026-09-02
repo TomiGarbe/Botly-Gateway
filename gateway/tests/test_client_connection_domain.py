@@ -102,6 +102,20 @@ class _LegacyRuntime:
         ]
 
 
+class _StaleLegacyRuntime:
+    """Models a provider that still lists an instance after accepting DELETE."""
+
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    async def list_instances(self) -> list[dict]:
+        return [{"instanceName": "migrated_support", "instanceId": "legacy-connection-01", "integration": "WHATSAPP-BAILEYS", "connectionStatus": "open"}]
+
+    async def delete(self, name: str) -> dict:
+        self.deleted.append(name)
+        return {"ok": True}
+
+
 def test_client_service_persists_simple_client_model(tmp_path) -> None:
     service = ClientService(ConnectionRegistry(tmp_path / "connection_registry.json"))
 
@@ -284,6 +298,7 @@ def test_connections_router_exposes_client_bound_crud_contract(monkeypatch, tmp_
     deleted = http.delete(f"/connections/{connection_id}")
     assert deleted.status_code == 204
     assert http.get(f"/connections/{connection_id}").status_code == 404
+    assert http.get(f"/connections?client_id={owner.id}").json() == []
 
 
 def test_empty_runtime_does_not_create_a_migration_client(tmp_path) -> None:
@@ -384,6 +399,28 @@ def test_legacy_connections_receive_a_migration_client_without_runtime_mutation(
     assert migrated_client.name == "Migrated connections"
     with pytest.raises(ClientHasConnectionsError):
         clients.delete_client(migrated_client.id)
+
+
+def test_deleted_migrated_connection_is_not_reimported_after_a_fresh_registry_read(tmp_path) -> None:
+    path = tmp_path / "connection_registry.json"
+    runtime = _StaleLegacyRuntime()
+    service = ConnectionService(runtime, ConnectionRegistry(path))
+
+    migrated = asyncio.run(service.list_connections())
+    assert [connection.id for connection in migrated] == ["legacy-connection-01"]
+
+    asyncio.run(service.delete_connection("legacy-connection-01"))
+
+    assert runtime.deleted == ["migrated_support"]
+    assert ConnectionRegistry(path).connection_record_by_id("legacy-connection-01") is None
+    assert ConnectionRegistry(path).snapshot()["deleted_legacy_names"] == {
+        "migrated_support": {"connection_id": "legacy-connection-01"}
+    }
+
+    # This fresh registry/service pair models both a list reload and a restart.
+    reloaded = ConnectionService(runtime, ConnectionRegistry(path))
+    assert asyncio.run(reloaded.migrate_legacy_connections()) == 0
+    assert asyncio.run(reloaded.list_connections()) == []
 
 
 def test_registry_migration_is_idempotent_and_snapshot_is_reversible(tmp_path) -> None:

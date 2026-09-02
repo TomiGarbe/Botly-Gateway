@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from app.services.instance_webhooks import (
     delete_webhook,
     get_webhook_delivery,
     get_webhook,
+    list_recent_dispatches,
     list_webhook_dispatches,
     update_webhook,
 )
@@ -191,6 +193,10 @@ def test_webhook_center_enforces_connection_ownership(monkeypatch, tmp_path) -> 
     listed = client.get("/webhooks")
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()["items"]] == [owned["id"]]
+    scoped = client.get("/webhooks", params={"connection_id": "connection-owned"})
+    assert scoped.status_code == 200
+    assert [item["id"] for item in scoped.json()["items"]] == [owned["id"]]
+    assert client.get("/webhooks", params={"connection_id": "connection-foreign"}).status_code == 403
     assert client.get(f"/webhooks/{owned['id']}").status_code == 200
     assert client.get(f"/webhooks/{foreign['id']}").status_code == 403
     assert client.get(f"/webhooks/{foreign['id']}/deliveries").status_code == 403
@@ -204,3 +210,121 @@ def test_webhook_center_enforces_connection_ownership(monkeypatch, tmp_path) -> 
     assert updated.json()["name"] == "Owned updated"
     assert client.patch(f"/webhooks/{owned['id']}/filters", json={"business": False, "transport": True}).status_code == 200
     assert client.patch(f"/webhooks/{owned['id']}/enabled", json={"enabled": False}).json()["enabled"] is False
+
+
+def test_connection_webhook_timeline_is_scoped_deduplicated_and_safe(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DEBUG", "false")
+    connections_router = importlib.import_module("app.routers.connections")
+    _configure_stores(monkeypatch, tmp_path)
+    owned = _create("runtime-owned", "Owned")
+    foreign = _create("runtime-foreign", "Foreign")
+    connections = {
+        "connection-owned": SimpleNamespace(id="connection-owned", client_id="tenant-a", technical={"legacy_instance_name": "runtime-owned"}),
+        "connection-empty": SimpleNamespace(id="connection-empty", client_id="tenant-a", technical={"legacy_instance_name": "runtime-empty"}),
+        "connection-foreign": SimpleNamespace(id="connection-foreign", client_id="tenant-b", technical={"legacy_instance_name": "runtime-foreign"}),
+    }
+    entry = {
+        "id": "logical-delivery", "timestamp": 100, "eventType": "messages.upsert", "eventId": "event-1",
+        "requestId": "request-1", "correlationId": "correlation-1", "success": False, "status": "http_500",
+        "statusCode": 500, "durationMs": 12, "attemptCount": 2, "retryCount": 1, "error": "delivery failed",
+        "request": {"headers": {"Authorization": "Bearer private"}, "payloadPreview": '{"token":"private"}'},
+        "response": {"bodyPreview": '{"apiKey":"private"}'},
+        "attempts": [{"statusCode": 500, "authorization": "private"}],
+    }
+    append_dispatch_history("runtime-owned", owned["id"], entry)
+    append_dispatch_history("runtime-owned", owned["id"], entry)
+    append_dispatch_history("runtime-foreign", foreign["id"], {"id": "foreign-delivery", "timestamp": 200, "success": True, "status": "success"})
+
+    class ConnectionService:
+        async def get_connection(self, connection_id):
+            if connection_id not in connections:
+                from app.services.connections import ConnectionNotFoundError
+                raise ConnectionNotFoundError(connection_id)
+            return connections[connection_id]
+
+    class Operations:
+        def webhook_deliveries(self, connection_id, *, limit):
+            runtime_name = connections[connection_id].technical["legacy_instance_name"]
+            return {"items": list_recent_dispatches(runtime_name, limit=limit), "metrics": {"totalDeliveries": 0}}
+
+    monkeypatch.setattr(connections_router, "_service", ConnectionService())
+    monkeypatch.setattr(connections_router, "_operations", Operations())
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def reviewer_identity(request, call_next):
+        request.state.user = SimpleNamespace(role="meta_reviewer", business_id="tenant-a")
+        return await call_next(request)
+
+    app.include_router(connections_router.router)
+    client = TestClient(app)
+
+    response = client.get("/connections/connection-owned/webhook/deliveries", params={"limit": 100})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == ["logical-delivery"]
+    assert payload["items"][0]["eventId"] == "event-1"
+    serialized = json.dumps(payload)
+    assert "private" not in serialized
+    assert client.get("/connections/connection-empty/webhook/deliveries").json()["items"] == []
+    assert client.get("/connections/connection-foreign/webhook/deliveries").status_code == 403
+    assert client.get("/connections/missing/webhook/deliveries").status_code == 404
+    assert client.get("/connections/connection-owned/webhook/deliveries", params={"limit": 201}).status_code == 422
+
+
+def test_manual_webhook_test_uses_selected_target_payload_and_delivery_identity(monkeypatch, tmp_path) -> None:
+    _configure_stores(monkeypatch, tmp_path)
+    owned = _create("runtime-owned", "Owned")
+    foreign = _create("runtime-foreign", "Foreign")
+    disabled = create_webhook("runtime-owned", name="Disabled", url="https://disabled.example.test", enabled=False, auth_type="NONE", auth_config=None, custom_headers=None)
+    connections = {
+        "connection-owned": SimpleNamespace(id="connection-owned", client_id="tenant-a", technical={"legacy_instance_name": "runtime-owned"}),
+        "connection-foreign": SimpleNamespace(id="connection-foreign", client_id="tenant-b", technical={"legacy_instance_name": "runtime-foreign"}),
+    }
+
+    class ConnectionService:
+        async def get_connection(self, connection_id):
+            if connection_id not in connections:
+                from app.services.connections import ConnectionNotFoundError
+                raise ConnectionNotFoundError(connection_id)
+            return connections[connection_id]
+
+        async def get_connection_by_runtime_name(self, runtime_name):
+            for connection in connections.values():
+                if connection.technical["legacy_instance_name"] == runtime_name:
+                    return connection
+            from app.services.connections import ConnectionNotFoundError
+            raise ConnectionNotFoundError(runtime_name)
+
+    captured: dict = {}
+
+    async def dispatch(*, payload, request_id, item, test_mode=False, **_kwargs):
+        captured.update({"payload": payload, "request_id": request_id, "webhook_id": item["id"], "test_mode": test_mode})
+        return {"ok": True, "statusCode": 202, "retriesUsed": 0, "latencyMs": 14.5, "deliveryId": "delivery-created"}
+
+    monkeypatch.setattr(webhook_center, "_connections", ConnectionService())
+    monkeypatch.setattr(webhook_center, "dispatch_webhook_with_retry", dispatch)
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def reviewer_identity(request, call_next):
+        request.state.user = SimpleNamespace(id="operator-a", role="meta_reviewer", business_id="tenant-a")
+        return await call_next(request)
+
+    app.include_router(webhook_center.router)
+    client = TestClient(app)
+
+    default = client.get(f"/webhooks/{owned['id']}/test-payload")
+    assert default.status_code == 200
+    assert default.json()["payload"]["instance"] == "runtime-owned"
+    response = client.post(f"/webhooks/{owned['id']}/test", json={"payload": {"instance": "runtime-foreign", "text": "manual test", "token": "never-return"}})
+    assert response.status_code == 200
+    assert response.json()["deliveryId"] == "delivery-created"
+    assert "never-return" not in response.text
+    assert captured["webhook_id"] == owned["id"] and captured["test_mode"] is True
+    assert captured["payload"]["instance"] == "runtime-owned"
+    assert captured["payload"]["text"] == "manual test"
+    assert captured["payload"]["meta"]["source"] == "webhook_center_test"
+    assert client.post(f"/webhooks/{owned['id']}/test", json={"payload": "not-an-object"}).status_code == 422
+    assert client.post(f"/webhooks/{disabled['id']}/test", json={}).status_code == 409
+    assert client.post(f"/webhooks/{foreign['id']}/test", json={}).status_code == 403

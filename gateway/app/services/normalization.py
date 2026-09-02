@@ -1229,6 +1229,128 @@ def list_events(instance: str | None = None, limit: int = 100) -> list[dict[str,
     return items
 
 
+def _timeline_message_id(event: dict[str, Any]) -> str | None:
+    """Return the provider message identity used to form a logical message."""
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    delivery = event.get("providerDelivery") if isinstance(event.get("providerDelivery"), dict) else {}
+    for value in (message.get("id"), event.get("messageId"), delivery.get("messageId"), delivery.get("providerMessageId")):
+        normalized = str(value or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _timeline_value(*values: Any) -> str | None:
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _timeline_timestamp(event: dict[str, Any]) -> int:
+    try:
+        return int(event.get("timestamp") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def list_logical_messages(instance: str, limit: int = 200) -> list[dict[str, Any]]:
+    """Project message evidence into one UI record per provider message ID.
+
+    A local send and the provider's ``MESSAGES_UPSERT`` echo are intentionally
+    retained as separate audit events.  They represent different evidence, but
+    not different user-visible messages.  This projection joins those events by
+    their canonical provider message ID while keeping the source event IDs in
+    the returned payload for investigation.
+    """
+    safe_limit = max(1, min(int(limit or 200), 500))
+    events = list_events(instance=instance, limit=max(500, safe_limit * 4))
+    status_by_message: dict[str, dict[str, Any]] = {}
+    groups: dict[str, dict[str, Any]] = {}
+
+    for event in events:
+        if event.get("layer") != "business":
+            continue
+        if str(event.get("direction") or "").lower() != "status" or str(event.get("subtype") or "") != "message_status":
+            continue
+        message_id = _timeline_message_id(event)
+        if not message_id or not event.get("status"):
+            continue
+        current = status_by_message.get(message_id)
+        if current is None or _timeline_timestamp(event) >= _timeline_timestamp(current):
+            status_by_message[message_id] = event
+
+    message_events = [
+        event for event in events
+        if event.get("layer") == "business" and str(event.get("type") or "") == "message"
+    ]
+    message_events.sort(key=_timeline_timestamp)
+    for event in message_events:
+        message_id = _timeline_message_id(event)
+        direction = "inbound" if str(event.get("direction") or "").lower() == "inbound" else "outbound"
+        # Events without a provider message ID cannot be proven to represent the
+        # same message, so preserve them as independent records.
+        key = f"{direction}:{message_id}" if message_id else f"event:{event.get('id')}"
+        group = groups.get(key)
+        if group is None:
+            groups[key] = {"primary": event, "sourceEventIds": [event.get("id")] if event.get("id") else []}
+            continue
+        primary = group["primary"]
+        if event.get("event") == "LOCAL_OUTBOUND_SEND" and primary.get("event") != "LOCAL_OUTBOUND_SEND":
+            group["primary"] = event
+        if event.get("id"):
+            group["sourceEventIds"].append(event["id"])
+
+    items: list[dict[str, Any]] = []
+    for group in groups.values():
+        event = group["primary"]
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        media = event.get("media") if isinstance(event.get("media"), dict) else None
+        delivery = event.get("providerDelivery") if isinstance(event.get("providerDelivery"), dict) else {}
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        pipeline = event.get("pipeline") if isinstance(event.get("pipeline"), dict) else {}
+        raw = event.get("raw") if isinstance(event.get("raw"), dict) else None
+        message_id = _timeline_message_id(event)
+        status_event = status_by_message.get(message_id or "")
+        raw_kind = _timeline_value(event.get("messageType"), event.get("subtype"), message.get("kind")) or "text"
+        content = event.get("content") if isinstance(event.get("content"), dict) else {}
+        items.append({
+            "id": message_id or str(event.get("id") or ""),
+            "messageId": message_id,
+            "timestamp": _timeline_timestamp(event),
+            "direction": "inbound" if str(event.get("direction") or "").lower() == "inbound" else "outbound",
+            "kind": raw_kind,
+            "text": _timeline_value(event.get("text"), content.get("text"), message.get("text"), (media or {}).get("caption")) or "",
+            "status": (status_event or event).get("status") or None,
+            "sender": _timeline_value(event.get("sender"), message.get("from")),
+            "recipient": _timeline_value(event.get("recipient")),
+            "media": media,
+            "provider": _timeline_value(delivery.get("provider"), (raw or {}).get("provider"), event.get("provider")),
+            "providerMessageId": _timeline_value(delivery.get("providerMessageId"), (raw or {}).get("providerMessageId")),
+            "conversationId": _timeline_value(delivery.get("conversationId"), meta.get("conversationId"), pipeline.get("conversationId")),
+            "channelId": _timeline_value(delivery.get("channelId"), meta.get("channelId")),
+            "connectionId": _timeline_value(delivery.get("connectionId"), meta.get("connectionId")),
+            "correlationId": _timeline_value(delivery.get("correlationId"), event.get("correlationId")),
+            "requestId": _timeline_value(delivery.get("requestId"), meta.get("requestId"), pipeline.get("requestId")),
+            "eventId": _timeline_value(delivery.get("eventId"), event.get("eventId"), event.get("id")),
+            "deliveryId": _timeline_value(delivery.get("id")),
+            "outboundAttemptId": _timeline_value(delivery.get("outboundAttemptId"), (raw or {}).get("outboundAttemptId")),
+            "payload": {
+                "sourceEvent": event.get("event"),
+                "sourceEventId": event.get("id"),
+                "sourceEventIds": group["sourceEventIds"],
+                "raw": raw,
+                "providerDelivery": delivery or None,
+                "latestStatusEvent": {
+                    "id": status_event.get("id"), "status": status_event.get("status"), "timestamp": _timeline_timestamp(status_event),
+                } if status_event else None,
+            },
+        })
+    items.sort(key=lambda item: int(item["timestamp"]), reverse=True)
+    return items[:safe_limit]
+
+
 def list_provider_deliveries(
     *,
     instance: str | None = None,

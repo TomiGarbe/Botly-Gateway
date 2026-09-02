@@ -34,11 +34,33 @@ _forward_semaphore = asyncio.Semaphore(max(1, settings.bot_webhook_max_parallel)
 _forward_tasks: set[asyncio.Task] = set()
 
 
-def _track_background_task(task: asyncio.Task) -> None:
+def _track_background_task(task: asyncio.Task, *, request_id: str, instance: str, message_id: str | None, conversation_id: str | None) -> None:
     _forward_tasks.add(task)
 
     def _cleanup(done: asyncio.Task) -> None:
         _forward_tasks.discard(done)
+        if done.cancelled():
+            logger.warning("webhook_dispatch_background_task_cancelled", request_id=request_id, instance=instance)
+            return
+        try:
+            error = done.exception()
+        except Exception as exc:
+            error = exc
+        if error is None:
+            return
+        # A failed in-memory forward is observable instead of becoming an
+        # unhandled task exception. Delivery-specific failures are recorded by
+        # the dispatcher; this handles unexpected worker-level failures.
+        logger.error("webhook_dispatch_background_task_failed", request_id=request_id, instance=instance, error=str(error))
+        save_pipeline_event(
+            stage="dispatch_background_task",
+            status="error",
+            instance=instance,
+            message_id=message_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            details={"error": str(error)[:220]},
+        )
 
     task.add_done_callback(_cleanup)
 
@@ -227,7 +249,7 @@ def _to_bot_payload(normalized: dict[str, Any]) -> dict[str, Any] | None:
         "timestamp": normalized.get("timestamp"),
         "direction": normalized.get("direction"),
         "messageType": subtype,
-        "messageId": normalized.get("messageId"),
+        "messageId": normalized.get("messageId") or (normalized.get("message") or {}).get("id"),
         "sender": normalized.get("sender"),
         "recipient": normalized.get("recipient"),
         "contactName": contact_name,
@@ -408,7 +430,7 @@ async def receive_webhook(request: Request):
         logger.error("webhook_normalize_error", request_id=request_id, instance=instance)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Evolution webhook payload could not be normalized")
     if pipeline_result.get("status") == "persist_error":
-        logger.error("evolution_webhook_processing_failed", request_id=request_id, instance=instance, event=payload.get("event"), error="persistence")
+        logger.error("evolution_webhook_processing_failed", request_id=request_id, instance=instance, source_event=payload.get("event"), error="persistence")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Evolution webhook persistence failed")
     if pipeline_result.get("status") == "stale_dropped":
         return {"status": "stale_dropped"}
@@ -463,7 +485,7 @@ async def receive_webhook(request: Request):
         "evolution_message_received",
         request_id=request_id,
         instance=normalized.get("instance"),
-        event=normalized.get("event"),
+        source_event=normalized.get("event"),
         message_id=msg_id or None,
         remote_jid=(normalized.get("message") or {}).get("from"),
         from_me=bool((normalized.get("message") or {}).get("fromMe")),
@@ -515,7 +537,7 @@ async def receive_webhook(request: Request):
         return {"status": "queued_dropped"}
 
     task = asyncio.create_task(_forward_to_instance_webhooks(bot_payload, request_id))
-    _track_background_task(task)
+    _track_background_task(task, request_id=request_id, instance=instance, message_id=msg_id or None, conversation_id=conv_id or None)
     logger.info(
         "[CHAT][EMIT] queued forward event",
         request_id=request_id,
