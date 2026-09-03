@@ -1,11 +1,11 @@
 import { FormEvent, useState } from 'react'
 import type { Connection } from '@/domain/connection'
-import { Checkbox, Field, Input, Select } from '@/shared/components/FormControls'
+import { Checkbox, Field, Input, RichSelect, Select } from '@/shared/components/FormControls'
 import type { WebhookAuthType, WebhookInput, WebhookRecord } from '../api/webhooksApi'
 
-const authOptions: Array<{ id: WebhookAuthType; label: string }> = [
-  { id: 'NONE', label: 'Sin autenticación' }, { id: 'BEARER', label: 'Bearer token' }, { id: 'API_KEY', label: 'API key por header' },
-  { id: 'BASIC', label: 'Basic auth' }, { id: 'CUSTOM_HEADERS', label: 'Header personalizado' }, { id: 'QUERY_PARAM', label: 'Query param' },
+const authOptions: Array<{ id: WebhookAuthType; label: string; description: string }> = [
+  { id: 'NONE', label: 'Sin autenticación', description: 'No se agrega ninguna credencial a la entrega.' }, { id: 'BEARER', label: 'Bearer token', description: 'Envía un token en el header Authorization.' }, { id: 'API_KEY', label: 'API key por header', description: 'Envía una clave en el header que indiques.' },
+  { id: 'BASIC', label: 'Basic auth', description: 'Envía usuario y contraseña mediante HTTP Basic.' }, { id: 'CUSTOM_HEADERS', label: 'Header personalizado', description: 'Envía un único header con valor secreto.' }, { id: 'QUERY_PARAM', label: 'Query param', description: 'Agrega el secreto como parámetro de la URL.' },
 ]
 const filters = [['business', 'Eventos de negocio'], ['transport', 'Eventos de transporte'], ['operational', 'Eventos operativos']] as const
 
@@ -66,7 +66,7 @@ export function WebhookForm({ webhook, connections, connectionId, isSubmitting, 
     <Field label="URL de destino" description="Endpoint al que se enviarán los eventos." required><Input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://…" required /></Field>
     <Checkbox label="Dejar webhook activo al guardar" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
     <fieldset className="webhook-form-fieldset"><legend>Eventos y filtros</legend>{filters.map(([id, label]) => <Checkbox key={id} label={label} checked={Boolean(eventFilters[id])} onChange={(event) => setEventFilters((current) => ({ ...current, [id]: event.target.checked }))} />)}</fieldset>
-    <Field label="Autenticación" description="Elegí el método que acepta el destino."><Select value={authType} onChange={(event) => { setAuthType(event.target.value as WebhookAuthType); setSecret('') }}>{authOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></Field>
+    <Field label="Autenticación" description="Elegí el método que acepta el destino."><RichSelect value={authType} options={authOptions.map((option) => ({ value: option.id, label: option.label, description: option.description }))} onChange={(next) => { setAuthType(next); setSecret('') }} /></Field>
     {needsName ? <Field label={nameLabel} required><Input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder={authType === 'QUERY_PARAM' ? 'token' : 'x-api-key'} required /></Field> : null}
     {authType === 'BASIC' ? <Field label="Usuario" required><Input value={username} onChange={(event) => setUsername(event.target.value)} required /></Field> : null}
     {needsSecret ? <Field label={webhook && hasExistingSecret ? 'Nuevo secreto' : 'Secreto'} description={webhook && hasExistingSecret ? 'El valor actual nunca se muestra; dejalo vacío para conservarlo.' : 'Se guarda de forma segura.'} required={!webhook || !hasExistingSecret}><Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={webhook && hasExistingSecret ? 'Configurado · dejá vacío para conservarlo' : 'Ingresá el valor'} required={!webhook || !hasExistingSecret} /></Field> : null}

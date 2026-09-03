@@ -1,4 +1,5 @@
-import { cloneElement, forwardRef, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { cloneElement, forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 function classes(...values: Array<string | undefined | null | false | 0>) { return values.filter(Boolean).join(' ') }
 
@@ -40,6 +41,23 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { code?: boolean }>(function Textarea({ className, code = false, ...props }, ref) {
   return <textarea ref={ref} className={classes('ui-control', 'ui-textarea', code && 'ui-textarea-code', className)} {...props} />
 })
+
+export function RichSelect<T extends string>({ value, options, onChange, disabled = false, id, 'aria-describedby': describedBy, 'aria-invalid': invalid }: { value: T; options: Array<{ value: T; label: string; description?: string }>; onChange: (value: T) => void; disabled?: boolean; id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const selected = options.find((option) => option.value === value) || options[0]
+  useEffect(() => {
+    const close = (event: MouseEvent) => { if (root.current && !root.current.contains(event.target as Node)) setIsOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
+  function move(direction: 1 | -1) {
+    const current = Math.max(0, options.findIndex((option) => option.value === value))
+    onChange(options[(current + direction + options.length) % options.length].value)
+  }
+  if (!selected) return null
+  return <div ref={root} className="ui-rich-select"><button id={id} type="button" className="ui-rich-select-trigger" aria-haspopup="listbox" aria-expanded={isOpen} aria-describedby={describedBy} aria-invalid={invalid} disabled={disabled} onClick={() => setIsOpen((open) => !open)} onKeyDown={(event) => { if (event.key === 'Escape') setIsOpen(false); if (event.key === 'ArrowDown') { event.preventDefault(); move(1) }; if (event.key === 'ArrowUp') { event.preventDefault(); move(-1) } }}>{selected.label}<ChevronDown size={16} aria-hidden="true" /></button>{isOpen ? <div className="ui-rich-select-menu" role="listbox" aria-label="Opciones"><>{options.map((option) => <button key={option.value} type="button" role="option" aria-selected={option.value === value} className={`ui-rich-select-option${option.value === value ? ' is-selected' : ''}`} onClick={() => { onChange(option.value); setIsOpen(false) }}><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</button>)}</></div> : null}</div>
+}
 
 export function Checkbox({ label, description, className, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode; description?: ReactNode }) {
   const id = useId()
