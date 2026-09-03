@@ -10,11 +10,13 @@
   button, input { font: inherit; }
   button { -webkit-tap-highlight-color: transparent; }
   :focus-visible { @apply outline-none ring-2 ring-blue-400 ring-offset-2 ring-offset-zinc-950; }
-  input:not([type="file"]), textarea, select { @apply rounded-lg border border-zinc-700 bg-zinc-950 text-sm text-zinc-100 shadow-sm transition-[border-color,box-shadow,background-color] placeholder:text-zinc-600 hover:border-zinc-600 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400/25 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500 disabled:opacity-70 read-only:bg-zinc-900/60; }
-  input:not([type="file"]), select { @apply min-h-10 px-3; }
+  input:not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea, select { @apply rounded-lg border border-zinc-700 bg-zinc-950 text-sm text-zinc-100 shadow-sm transition-[border-color,box-shadow,background-color] placeholder:text-zinc-600 hover:border-zinc-600 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400/25 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500 disabled:opacity-70 read-only:bg-zinc-900/60; }
+  input:not([type="file"]):not([type="checkbox"]):not([type="radio"]), select { @apply min-h-10 px-3; }
   textarea { @apply px-3 py-2.5; }
   input[type="file"] { @apply w-full text-sm text-zinc-400; }
   input[type="file"]::file-selector-button { @apply mr-3 rounded-lg border-0 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-700; }
+  select { color-scheme: dark; }
+  select option { @apply bg-zinc-900 text-zinc-100; }
 }
 
 @layer components {
@@ -169,10 +171,10 @@
   .client-button-secondary { @apply border border-zinc-700 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800; }
   .client-button-danger { @apply border border-red-950/70 text-red-300 hover:bg-red-950/40; }
   .client-form { @apply mt-8 max-w-xl space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5; }
-  .client-form label { @apply block space-y-2; }
-  .client-form label > span { @apply block text-sm font-medium text-zinc-300; }
+  .client-form label:not(.ui-checkbox) { @apply block space-y-2; }
+  .client-form label:not(.ui-checkbox) > span { @apply block text-sm font-medium text-zinc-300; }
   .client-form em { @apply ml-1 text-xs not-italic font-normal text-zinc-500; }
-  .client-form input, .client-form textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600; }
+  .client-form input:not([type="checkbox"]):not([type="radio"]), .client-form textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600; }
   .client-form textarea { @apply resize-y; }
   .client-form-actions, .client-detail-actions { @apply flex flex-wrap items-center gap-2; }
   .client-form-error { @apply m-0 text-sm text-red-300; }
