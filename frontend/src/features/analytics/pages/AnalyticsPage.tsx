@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react
 import { EmptyState } from '@/shared/components/EmptyState'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { Toast } from '@/shared/components/Toast'
+import { Input, Select } from '@/shared/components/FormControls'
 import { getAnalytics, type AnalyticsGranularity, type AnalyticsPreset, type AnalyticsSnapshot } from '../api/analyticsApi'
 
 function metric(value: number | null, suffix = ''): string { return value === null ? '—' : `${value}${suffix}` }
@@ -36,7 +37,7 @@ export function AnalyticsPage() {
   return <section className="analytics-page">
     <div className="webhooks-heading"><div><p>Observabilidad</p><h2>Analytics operativo</h2><span>{snapshot ? `${local(snapshot.range.fromUtc)} — ${local(snapshot.range.toUtc)} · UTC en backend` : 'Datos derivados de deliveries, attempts y acciones existentes.'}</span></div><button type="button" className="client-button-secondary" onClick={() => void load()} disabled={isLoading}><RefreshCw size={15} /> {isLoading ? 'Actualizando...' : 'Actualizar'}</button></div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
-    <div className="analytics-filters"><label>Período<select value={preset} onChange={(event) => setPreset(event.target.value as AnalyticsPreset)}><option value="today">Hoy</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="custom">Personalizado</option></select></label>{preset === 'custom' ? <><label>Desde<input type="datetime-local" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><label>Hasta<input type="datetime-local" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label></> : null}<label>Serie<select value={granularity} onChange={(event) => setGranularity(event.target.value as AnalyticsGranularity)}><option value="hour">Por hora</option><option value="day">Por día</option></select></label></div>
+    <div className="analytics-filters"><label>Período<Select value={preset} onChange={(event) => setPreset(event.target.value as AnalyticsPreset)}><option value="today">Hoy</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="custom">Personalizado</option></Select></label>{preset === 'custom' ? <><label>Desde<Input type="datetime-local" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><label>Hasta<Input type="datetime-local" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label></> : null}<label>Serie<Select value={granularity} onChange={(event) => setGranularity(event.target.value as AnalyticsGranularity)}><option value="hour">Por hora</option><option value="day">Por día</option></Select></label></div>
     {noData ? <EmptyState icon={Activity} title="No hay datos para este período." description="Cuando existan deliveries o attempts en el rango elegido, aparecerán aquí." /> : null}
     {snapshot && !noData ? <>
       <div className="analytics-cards">

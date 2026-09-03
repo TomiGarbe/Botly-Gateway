@@ -12,6 +12,7 @@ import { cancelConnectionSetup, createConnectionSetup, getConnectionSetup, getCo
 import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
 import { GatewayRequestError, gatewayRequest } from '@/shared/lib/gatewayClient'
 import { useAuth } from '@/app/providers/AuthProvider'
+import { Field, Input } from '@/shared/components/FormControls'
 
 type ProviderId = 'meta' | 'evolution'
 type EmbeddedSession = { phoneNumberId?: string; businessAccountId: string; raw: Record<string, unknown> }
@@ -369,7 +370,7 @@ export function NewConnectionPage() {
     {setup ? <div className={`connection-setup-state connection-setup-state-${setup.state}`} role="status"><strong>{setupStateLabel[setup.state] || 'Configurando'}</strong><span>{setup.state === 'cleanup_pending' ? 'No existe una conexión operativa.' : 'La conexión se agregará al inventario sólo al finalizar.'}</span></div> : null}
     {notice ? <div className="connection-setup-notice" role="status"><p>{notice}</p><button type="button" className="client-button-secondary" onClick={() => navigate(`/clients/${client.id}`, { replace: true })}>Volver a conexiones</button></div> : null}
     {!setup ? <>
-      <label className="new-connection-name"><span>Nombre de la conexión</span><input value={connectionName} onChange={(event) => setConnectionName(event.target.value)} maxLength={160} placeholder="Ej.: Ventas Argentina" autoFocus /></label>
+      <Field className="new-connection-name" label="Nombre de la conexión" required><Input value={connectionName} onChange={(event) => setConnectionName(event.target.value)} maxLength={160} placeholder="Ej.: Ventas Argentina" autoFocus /></Field>
       <div className="channel-selection">
         {whatsappEnabled && metaEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('meta')} disabled={isStarting}><BadgeCheck size={20} aria-hidden="true" /><span><strong>WhatsApp oficial con Meta</strong><small>Conectá una cuenta de WhatsApp Business mediante Meta.</small></span></button> : null}
         {whatsappEnabled && evolutionEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('evolution')} disabled={isStarting}><QrCode size={20} aria-hidden="true" /><span><strong>WhatsApp con Evolution</strong><small>Conectá WhatsApp Web escaneando un código QR.</small></span></button> : null}
@@ -383,7 +384,7 @@ export function NewConnectionPage() {
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
     </div> : <div className="connection-provisioning">
       <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
-      {!isStarting && step === 'connecting' ? <label className="new-connection-name meta-pin-field"><span>PIN de verificación en dos pasos (6 dígitos)</span><input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /><small>Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN.</small></label> : null}
+      {!isStarting && step === 'connecting' ? <Field className="new-connection-name meta-pin-field" label="PIN de verificación en dos pasos (6 dígitos)" optional description="Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN."><Input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /></Field> : null}
       {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={startMetaSignup} disabled={isMetaSdkLoading}>{isMetaSdkLoading ? 'Preparando Meta...' : 'Conectar con Meta'}</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p>{canRetry ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button> : null}</div> : null}
       {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting}>Cancelar configuración</button> : null}

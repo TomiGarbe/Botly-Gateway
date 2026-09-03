@@ -1,6 +1,7 @@
 import { FlaskConical, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getWebhookTestPayload, type WebhookRecord } from '@/features/webhooks/api/webhooksApi'
+import { Field, Select, Textarea } from '@/shared/components/FormControls'
 
 export function WebhookTestPanel({ webhooks, selected, isSubmitting, onSelect, onCancel, onSubmit }: {
   webhooks: WebhookRecord[]
@@ -38,10 +39,8 @@ export function WebhookTestPanel({ webhooks, selected, isSubmitting, onSelect, o
 
   return <section className="connection-webhook-test-panel" aria-label="Prueba de webhook">
     <div className="connection-webhook-test-panel-heading"><div><h4>Probar webhook</h4><p>El test usa el contrato real de entrega y genera un delivery en la actividad.</p></div><button type="button" className="client-button-ghost" onClick={onCancel} disabled={isSubmitting}><X size={16} /> Cerrar</button></div>
-    {webhooks.length > 1 ? <label><span>Webhook a probar</span><select value={selected.id} onChange={(event) => { const next = webhooks.find((item) => item.id === event.target.value); if (next) onSelect(next) }}>{webhooks.map((webhook) => <option key={webhook.id} value={webhook.id} disabled={!webhook.enabled}>{webhook.name} · {webhook.enabled ? 'Activo' : 'Inactivo'}</option>)}</select></label> : <p className="connection-webhook-test-target">Webhook: <strong>{selected.name}</strong></p>}
-    <label><span>Payload de prueba</span><textarea value={value} onChange={(event) => setValue(event.target.value)} disabled={isLoading || isSubmitting} spellCheck={false} aria-describedby="webhook-test-payload-help" /></label>
-    <p id="webhook-test-payload-help" className="connection-webhook-test-help">Podés editar el JSON. El runtime y el origen de prueba se conservan para mantener la trazabilidad.</p>
-    {error ? <p className="client-form-error" role="alert">{error}</p> : null}
+    {webhooks.length > 1 ? <Field label="Webhook a probar"><Select value={selected.id} onChange={(event) => { const next = webhooks.find((item) => item.id === event.target.value); if (next) onSelect(next) }}>{webhooks.map((webhook) => <option key={webhook.id} value={webhook.id} disabled={!webhook.enabled}>{webhook.name} · {webhook.enabled ? 'Activo' : 'Inactivo'}</option>)}</Select></Field> : <p className="connection-webhook-test-target">Webhook: <strong>{selected.name}</strong></p>}
+    <Field label="Payload de prueba" description="Podés editar el JSON. El runtime y el origen de prueba se conservan para mantener la trazabilidad." error={error}><Textarea code value={value} onChange={(event) => setValue(event.target.value)} disabled={isLoading || isSubmitting} spellCheck={false} /></Field>
     <div className="connection-webhook-card-actions"><button type="button" className="client-button-primary" onClick={() => void submit()} disabled={isLoading || isSubmitting}>{<FlaskConical size={15} />} {isSubmitting ? 'Enviando prueba…' : 'Enviar prueba'}</button></div>
   </section>
 }

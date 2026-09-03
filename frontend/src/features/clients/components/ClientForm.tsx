@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import type { ClientInput } from '@/domain/client'
+import { Field, Input, Textarea } from '@/shared/components/FormControls'
 
 interface ClientFormProps {
   initialValue?: ClientInput
@@ -29,14 +30,8 @@ export function ClientForm({ initialValue, submitLabel, onCancel, onSubmit }: Cl
 
   return (
     <form className="client-form" onSubmit={handleSubmit}>
-      <label>
-        <span>Nombre</span>
-        <input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus />
-      </label>
-      <label>
-        <span>Descripción <em>Opcional</em></span>
-        <textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={3} />
-      </label>
+      <Field label="Nombre" required><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></Field>
+      <Field label="Descripción" optional><Textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={3} /></Field>
       {error ? <p className="client-form-error" role="alert">{error}</p> : null}
       <div className="client-form-actions">
         <button type="button" className="client-button-secondary" onClick={onCancel} disabled={isSubmitting}>Cancelar</button>

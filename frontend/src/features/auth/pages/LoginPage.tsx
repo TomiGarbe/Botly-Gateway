@@ -2,6 +2,7 @@ import { LoaderCircle } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/app/providers/AuthProvider'
+import { Input } from '@/shared/components/FormControls'
 
 interface GoogleAccounts {
   id: {
@@ -73,11 +74,11 @@ export function LoginPage() {
       <form className="auth-password-form" onSubmit={(event) => void submit(event)}>
         <div className="auth-field">
           <label htmlFor="login-email">Email</label>
-          <input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="tu@email.com" required />
+          <Input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="tu@email.com" required />
         </div>
         <div className="auth-field">
           <label htmlFor="login-password">Contraseña</label>
-          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="••••••••" required />
+          <Input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="••••••••" required />
         </div>
         <button className="auth-submit" type="submit" disabled={isLoading}>
           {isLoading ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : null}

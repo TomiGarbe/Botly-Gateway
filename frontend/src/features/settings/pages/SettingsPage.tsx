@@ -1,7 +1,8 @@
-import { Boxes, Camera, Check, MessageCircle, MessagesSquare, Send, Server, X } from 'lucide-react'
+import { Boxes, Camera, MessageCircle, MessagesSquare, Send, Server } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { LoadingState } from '@/shared/components/LoadingState'
+import { Switch } from '@/shared/components/FormControls'
 import {
   getGatewayChannels,
   getGatewayProviders,
@@ -98,18 +99,14 @@ function SettingsList({
       return <article key={id} className="settings-channel-card">
         <Icon size={21} aria-hidden="true" />
         <div><h3>{item.name}</h3><p>{item.description}</p><small>{item.implemented ? 'Implementado' : 'Próximamente'}</small></div>
-        <button
-          type="button"
-          role="switch"
+        <Switch
           aria-checked={item.enabled}
           aria-label={`${item.enabled ? 'Deshabilitar' : 'Habilitar'} ${item.name}`}
-          className={`settings-channel-toggle ${item.enabled ? 'is-enabled' : ''}`}
+          className="settings-channel-toggle"
           disabled={!canToggle}
           onClick={() => void onToggle(id, !item.enabled)}
-        >
-          <span className="settings-channel-toggle-label">{item.implemented ? (item.enabled ? 'Activo' : 'Inactivo') : 'Próximamente'}</span>
-          <span className="settings-channel-toggle-track" aria-hidden="true"><span className="settings-channel-toggle-thumb">{item.enabled ? <Check size={12} strokeWidth={3} /> : <X size={12} strokeWidth={3} />}</span></span>
-        </button>
+          label={item.implemented ? (item.enabled ? 'Activo' : 'Inactivo') : 'Próximamente'}
+        />
       </article>
     })}
   </div></div>

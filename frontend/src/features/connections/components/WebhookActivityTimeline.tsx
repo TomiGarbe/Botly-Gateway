@@ -4,6 +4,7 @@ import { EmptyState } from '@/shared/components/EmptyState'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { ObservabilityDataSection, ObservabilityFields, ObservabilityStatusBadge, formatObservabilityTimestamp } from '@/features/observability/components/ObservabilityPresentation'
 import { listConnectionWebhookDeliveries, type WebhookDelivery } from '../api/connectionOperationsApi'
+import { Input } from '@/shared/components/FormControls'
 
 function label(delivery: WebhookDelivery): string {
   if (delivery.isTest) return 'Prueba de webhook'
@@ -64,7 +65,7 @@ export function WebhookActivityTimeline({ connectionId, refreshToken = 0, select
       <button type="button" className="client-button-secondary" onClick={() => void load(true)} disabled={isLoading || isRefreshing}><RefreshCw size={15} className={isRefreshing ? 'is-spinning' : undefined} aria-hidden="true" /> Actualizar</button>
     </div>
     <div className="webhook-activity-toolbar">
-      <label className="webhook-activity-search"><Search size={16} aria-hidden="true" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar evento, delivery o ID" aria-label="Buscar actividad de webhooks" /></label>
+      <label className="webhook-activity-search"><Search size={16} aria-hidden="true" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar evento, delivery o ID" aria-label="Buscar actividad de webhooks" /></label>
     </div>
     {isLoading ? <LoadingState label="Cargando actividad de webhooks…" lines={3} /> : null}
     {!isLoading && error ? <div className="clients-state clients-state-error" role="alert"><p>{error}</p><button type="button" onClick={() => void load()}>Reintentar</button></div> : null}

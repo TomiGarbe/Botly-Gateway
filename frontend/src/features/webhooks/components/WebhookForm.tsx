@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import type { Connection } from '@/domain/connection'
+import { Checkbox, Field, Input, Select } from '@/shared/components/FormControls'
 import type { WebhookAuthType, WebhookInput, WebhookRecord } from '../api/webhooksApi'
 
 const authOptions: Array<{ id: WebhookAuthType; label: string }> = [
@@ -60,15 +61,15 @@ export function WebhookForm({ webhook, connections, connectionId, isSubmitting, 
 
   return <form className="client-form webhook-form" onSubmit={(event) => void submit(event)}>
     {validationError ? <p className="client-form-error" role="alert">{validationError}</p> : null}
-    {!webhook ? <label><span>Conexión</span><select value={selectedConnection} onChange={(event) => setSelectedConnection(event.target.value)} required><option value="">Seleccionar conexión…</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}{connection.client ? ` · ${connection.client.name}` : ''}</option>)}</select></label> : null}
-    <label><span>Nombre</span><input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Ej. CRM Integration" required /></label>
-    <label><span>URL de destino</span><input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://…" required /></label>
-    <label className="webhook-enabled-control"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span>Dejar webhook activo al guardar</span></label>
-    <fieldset className="webhook-form-fieldset"><legend>Eventos y filtros</legend>{filters.map(([id, label]) => <label key={id} className="webhook-enabled-control"><input type="checkbox" checked={Boolean(eventFilters[id])} onChange={(event) => setEventFilters((current) => ({ ...current, [id]: event.target.checked }))} /><span>{label}</span></label>)}</fieldset>
-    <label><span>Autenticación</span><select value={authType} onChange={(event) => { setAuthType(event.target.value as WebhookAuthType); setSecret('') }}>{authOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-    {needsName ? <label><span>{nameLabel}</span><input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder={authType === 'QUERY_PARAM' ? 'token' : 'x-api-key'} required /></label> : null}
-    {authType === 'BASIC' ? <label><span>Usuario</span><input value={username} onChange={(event) => setUsername(event.target.value)} required /></label> : null}
-    {needsSecret ? <label><span>{webhook && hasExistingSecret ? 'Nuevo secreto' : 'Secreto'}</span><input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={webhook && hasExistingSecret ? 'Configurado · dejá vacío para conservarlo' : 'Ingresá el valor'} required={!webhook || !hasExistingSecret} /><em>{webhook && hasExistingSecret ? 'El valor actual nunca se muestra.' : 'Se guarda de forma segura.'}</em></label> : null}
+    {!webhook ? <Field label="Conexión" required><Select value={selectedConnection} onChange={(event) => setSelectedConnection(event.target.value)} required><option value="">Seleccionar conexión…</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}{connection.client ? ` · ${connection.client.name}` : ''}</option>)}</Select></Field> : null}
+    <Field label="Nombre" required><Input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Ej. CRM Integration" required /></Field>
+    <Field label="URL de destino" description="Endpoint al que se enviarán los eventos." required><Input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://…" required /></Field>
+    <Checkbox label="Dejar webhook activo al guardar" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+    <fieldset className="webhook-form-fieldset"><legend>Eventos y filtros</legend>{filters.map(([id, label]) => <Checkbox key={id} label={label} checked={Boolean(eventFilters[id])} onChange={(event) => setEventFilters((current) => ({ ...current, [id]: event.target.checked }))} />)}</fieldset>
+    <Field label="Autenticación" description="Elegí el método que acepta el destino."><Select value={authType} onChange={(event) => { setAuthType(event.target.value as WebhookAuthType); setSecret('') }}>{authOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></Field>
+    {needsName ? <Field label={nameLabel} required><Input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder={authType === 'QUERY_PARAM' ? 'token' : 'x-api-key'} required /></Field> : null}
+    {authType === 'BASIC' ? <Field label="Usuario" required><Input value={username} onChange={(event) => setUsername(event.target.value)} required /></Field> : null}
+    {needsSecret ? <Field label={webhook && hasExistingSecret ? 'Nuevo secreto' : 'Secreto'} description={webhook && hasExistingSecret ? 'El valor actual nunca se muestra; dejalo vacío para conservarlo.' : 'Se guarda de forma segura.'} required={!webhook || !hasExistingSecret}><Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={webhook && hasExistingSecret ? 'Configurado · dejá vacío para conservarlo' : 'Ingresá el valor'} required={!webhook || !hasExistingSecret} /></Field> : null}
     <div className="client-form-actions"><button type="button" className="client-button-secondary" onClick={onCancel} disabled={isSubmitting}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSubmitting}>{isSubmitting ? 'Guardando…' : webhook ? 'Guardar cambios' : 'Crear webhook'}</button></div>
   </form>
 }
