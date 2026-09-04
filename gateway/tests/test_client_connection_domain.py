@@ -343,6 +343,31 @@ def test_connection_operations_are_scoped_to_the_connection(monkeypatch, tmp_pat
     assert operations.recent_activity(connection.id) == []
 
 
+def test_instagram_connection_api_key_is_persistent_and_supported(monkeypatch, tmp_path) -> None:
+    settings = SimpleNamespace(
+        instance_api_keys_path=str(tmp_path / "api_keys.json"),
+        gateway_api_key="test-gateway-key",
+    )
+    monkeypatch.setattr("app.services.instance_auth.get_settings", lambda: settings)
+
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    service = ConnectionService(_EmptyRuntime(), registry)
+    created = service.create_connection(client_id=client.id, channel="whatsapp")
+    registry.update_connection_record(
+        created.id,
+        {"provider_id": "meta", "channel_id": "instagram", "channel_display_name": "Instagram"},
+    )
+
+    instagram = asyncio.run(service.get_connection(created.id))
+    operations = ConnectionOperationsService(_EmptyRuntime(), registry)
+    generated = operations.regenerate_api_key(instagram.id)
+    reloaded = operations.api_key(instagram.id, reveal=True)
+
+    assert instagram.capabilities.supports_api_key is True
+    assert reloaded["api_key"] == generated["api_key"]
+
+
 def test_connection_operations_record_quick_message_and_heartbeat(tmp_path) -> None:
     registry = ConnectionRegistry(tmp_path / "connection_registry.json")
     client = ClientService(registry).create_client("Global Tech")

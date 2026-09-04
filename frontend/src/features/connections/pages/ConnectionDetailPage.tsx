@@ -98,7 +98,7 @@ export function ConnectionDetailPage() {
 
   useEffect(() => { void loadConnection() }, [loadConnection])
   useEffect(() => {
-    if (connection && !(connection.provider.id === 'meta' && connection.channel.id === 'instagram')) void loadOperations()
+    if (connection) void loadOperations()
   }, [connection, loadOperations])
   useEffect(() => {
     if (location.pathname.endsWith('/webhooks')) setActiveTab('webhooks')
@@ -110,7 +110,7 @@ export function ConnectionDetailPage() {
 
   async function refreshWorkspace() {
     await loadConnection()
-    if (!(connection?.provider.id === 'meta' && connection?.channel.id === 'instagram')) await loadOperations()
+    await loadOperations()
   }
 
   async function saveName(event: FormEvent<HTMLFormElement>) {

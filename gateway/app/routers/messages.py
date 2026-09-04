@@ -19,6 +19,7 @@ from app.models.requests import (
     CheckNumbersRequest,
     SendUploadedMediaRequest,
     SendMessageRequest,
+    InstagramOutboundMessageRequest,
 )
 from app.services.media import consume_uploaded_file, file_to_base64, get_uploaded_file
 from app.services.normalization import list_logical_messages, save_business_event, save_event, save_pipeline_event
@@ -31,6 +32,7 @@ from app.services.outbound_provider_attempts import (
 from app.platforms.meta import MetaPlatformError
 from app.providers.whatsapp_official import get_official_whatsapp_provider
 from app.services.credential_manager import get_credential_manager
+from app.services.connections import ConnectionNotFoundError, UnsupportedConnectionProviderError, get_connection_service
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["messages"])
@@ -223,6 +225,41 @@ async def _run_outbound_attempt(
 async def _send_message_unified(instance_name: str, request: Request):
     instance_name = _validate_instance_name(instance_name)
     _require_instance_token_scope(request, instance_name)
+
+    # An Instagram connection intentionally keeps the established, scoped
+    # /messages/{runtime} surface: its generated connection API key therefore
+    # continues to work after a browser refresh. Instagram recipients are
+    # opaque external IDs, never telephone numbers.
+    connections = get_connection_service()
+    try:
+        connection = await connections.get_connection_by_runtime_name(instance_name)
+    except ConnectionNotFoundError:
+        connection = None
+    if connection and connection.provider.id == "meta" and connection.channel.id == "instagram":
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=422, detail="El body JSON debe ser un objeto.")
+            payload = InstagramOutboundMessageRequest.model_validate(data)
+            return await connections.send_instagram_text(
+                connection_id=connection.id,
+                external_id=payload.external_id,
+                text=payload.text,
+            )
+        except HTTPException:
+            raise
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="Payload de Instagram inválido.") from exc
+        except (UnsupportedConnectionProviderError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except MetaPlatformError as exc:
+            logger.warning(
+                "instagram_message_send_failed",
+                instance=instance_name,
+                status_code=exc.status_code,
+            )
+            raise HTTPException(status_code=exc.status_code, detail="Instagram message delivery failed") from exc
+
     settings = get_settings()
     content_type = str(request.headers.get("content-type") or "").lower()
 

@@ -146,7 +146,9 @@ class ConnectionService:
                 supports_media=not is_instagram,
                 supports_qr=str(record.get("provider_id") or "meta") == "evolution",
                 supports_reconnect=True,
-                supports_api_key=not is_instagram,
+                # Instagram exposes the same connection-scoped outbound API as
+                # the other runtimes once its OAuth readiness is satisfied.
+                supports_api_key=True,
                 supports_official_api=str(record.get("provider_id") or "meta") == "meta",
             ),
             webhook=ConnectionWebhook(supported=True),

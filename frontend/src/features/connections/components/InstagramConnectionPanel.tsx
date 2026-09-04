@@ -60,11 +60,15 @@ export function InstagramConnectionPanel({ connection, onConnectionChange }: { c
   const account = connection.providerAccount?.metadata || {}
   const state = readinessCopy(readiness)
   const isConnected = connection.status.state === 'connected' && !!connection.providerAccount
+  const messageApiUrl = readiness?.ready && connection.runtimeName
+    ? new URL(`/messages/${encodeURIComponent(connection.runtimeName)}`, environment.gatewayUrl || window.location.origin).toString()
+    : null
   return <section className="connection-section instagram-connection-panel">
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
     <div className="connection-section-heading"><div><div className="instagram-title"><Instagram size={20} aria-hidden="true" /><h3>Instagram</h3></div><p>{account.username ? `@${account.username}` : account.displayName || 'Cuenta profesional pendiente de conexión'}</p></div><StatusBadge tone={state.tone}>{state.label}</StatusBadge></div>
     <dl className="connection-information-list instagram-status-list"><div><dt>Cuenta</dt><dd>{isConnected ? 'Conectada' : 'No conectada'}</dd></div><div><dt>Readiness</dt><dd>{state.label}</dd></div><div><dt>Canal de Botly</dt><dd>{connection.coreChannel?.name || (connection.coreChannel?.configured ? 'Canal vinculado' : 'No vinculado')}</dd></div></dl>
+    {messageApiUrl ? <div className="connection-endpoint"><span>API de envío</span><code>{messageApiUrl}</code><p className="connection-endpoint-note">POST · autenticación con la API Key de esta conexión · body: external_id y text.</p></div> : null}
     {readiness ? <ul className="instagram-readiness-list">{[
       ['Cuenta conectada', readiness.authenticated], ['Credenciales configuradas', readiness.credentialValid], ['Cuenta profesional detectada', readiness.accountDiscovered], ['Scopes requeridos', readiness.requiredScopesPresent],
     ].filter(([, value]) => value !== undefined).map(([label, value]) => <li key={String(label)}>{value ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}<span>{label}</span></li>)}</ul> : null}
