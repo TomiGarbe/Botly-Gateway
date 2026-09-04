@@ -208,6 +208,8 @@ services:
       META_SIGNUP_TIMEOUT_SECONDS: ${META_SIGNUP_TIMEOUT_SECONDS:-30}
       META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
       META_WEBHOOK_REQUIRE_SIGNATURE: ${META_WEBHOOK_REQUIRE_SIGNATURE:-true}
+      # Instagram Login uses its own app ID; META_APP_ID remains for Meta/WhatsApp.
+      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID:-}
       META_REDIRECT_URI: ${META_REDIRECT_URI:-}
       INSTAGRAM_OAUTH_SCOPES: ${INSTAGRAM_OAUTH_SCOPES:-instagram_business_basic,instagram_business_manage_messages}
       INSTAGRAM_OAUTH_AUTHORIZE_URL: ${INSTAGRAM_OAUTH_AUTHORIZE_URL:-https://www.instagram.com/oauth/authorize}

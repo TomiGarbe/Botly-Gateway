@@ -170,7 +170,7 @@ class InstagramOAuthService:
         self.validate_configuration()
         scopes = self.requested_scopes()
         return f"{str(settings.instagram_oauth_authorize_url).rstrip('?')}?{urlencode({
-            'client_id': settings.meta_app_id,
+            'client_id': settings.instagram_app_id,
             'redirect_uri': settings.meta_redirect_uri,
             'response_type': 'code',
             'scope': ','.join(scopes),
@@ -234,7 +234,7 @@ class InstagramOAuthService:
             response = await client.post(
                 "",
                 data={
-                    "client_id": settings.meta_app_id,
+                    "client_id": settings.instagram_app_id,
                     "client_secret": settings.meta_app_secret,
                     "grant_type": "authorization_code",
                     "redirect_uri": settings.meta_redirect_uri,
@@ -260,7 +260,7 @@ class InstagramOAuthService:
 
     def _ensure_configured(self, settings: Any) -> None:
         missing = [name for name, value in {
-            "META_APP_ID": getattr(settings, "meta_app_id", ""),
+            "INSTAGRAM_APP_ID": getattr(settings, "instagram_app_id", ""),
             "META_APP_SECRET": getattr(settings, "meta_app_secret", ""),
             "META_REDIRECT_URI": getattr(settings, "meta_redirect_uri", ""),
         }.items() if not str(value or "").strip()]

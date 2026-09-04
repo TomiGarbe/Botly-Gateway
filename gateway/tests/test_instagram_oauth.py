@@ -12,6 +12,7 @@ import pytest
 from app.services.clients import ClientService
 from app.services.connection_registry import ConnectionRegistry
 from app.services.connections import ConnectionService, UnsupportedConnectionProviderError
+from app.core.config import Settings
 from app.services.credential_manager import CredentialManager, ProviderAccountReference
 from app.services.gateway_settings import GatewaySettingsService
 from app.services.instagram_oauth import (
@@ -30,9 +31,10 @@ class _Runtime:
 
 def _oauth_settings(**changes):
     values = {
-        "meta_app_id": "app-id",
+        "meta_app_id": "1031982409198448",
+        "instagram_app_id": "1787511689049505",
         "meta_app_secret": "app-secret",
-        "meta_redirect_uri": "https://gateway.example/connections/meta/instagram/callback",
+        "meta_redirect_uri": "https://gateway-server.botly.com.ar/connections/meta/instagram/callback",
         "instagram_oauth_scopes": "instagram_business_basic,instagram_business_manage_messages",
         "instagram_oauth_authorize_url": "https://instagram.example/oauth/authorize",
         "instagram_oauth_token_url": "https://instagram.example/oauth/access_token",
@@ -89,12 +91,30 @@ def test_state_is_random_persistent_expiring_and_single_use(tmp_path) -> None:
 def test_authorization_url_requires_explicit_config_and_uses_server_state() -> None:
     service = InstagramOAuthService(settings_factory=lambda: _oauth_settings())
     url = service.authorization_url(state="server-only-state")
+    query = parse_qs(urlparse(url).query)
 
-    assert "client_id=app-id" in url
-    assert "state=server-only-state" in url
+    assert query["client_id"] == ["1787511689049505"]
+    assert query["client_id"] != ["1031982409198448"]
+    assert query["redirect_uri"] == ["https://gateway-server.botly.com.ar/connections/meta/instagram/callback"]
+    assert query["scope"] == ["instagram_business_basic,instagram_business_manage_messages"]
+    assert query["state"] == ["server-only-state"]
     assert "client_secret" not in url
-    with pytest.raises(InstagramOAuthError, match="META_REDIRECT_URI"):
-        InstagramOAuthService(settings_factory=lambda: _oauth_settings(meta_redirect_uri="")).authorization_url(state="state")
+    assert _oauth_settings().meta_app_id == "1031982409198448"
+    with pytest.raises(InstagramOAuthError, match="INSTAGRAM_APP_ID"):
+        InstagramOAuthService(settings_factory=lambda: _oauth_settings(instagram_app_id="")).authorization_url(state="state")
+
+
+def test_settings_keep_meta_and_instagram_app_ids_distinct() -> None:
+    settings = Settings(
+        gateway_api_key="gateway-test-key",
+        evolution_api_key="evolution-test-key",
+        debug=False,
+        meta_app_id="1031982409198448",
+        instagram_app_id="1787511689049505",
+    )
+
+    assert settings.meta_app_id == "1031982409198448"
+    assert settings.instagram_app_id == "1787511689049505"
 
 
 def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaque_ids() -> None:
@@ -119,6 +139,8 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
 
     asyncio.run(run())
     assert calls[0].method == "POST"
+    assert b"client_id=1787511689049505" in calls[0].content
+    assert b"client_id=1031982409198448" not in calls[0].content
     assert b"client_secret=app-secret" in calls[0].content
     assert calls[1].headers["authorization"] == "Bearer test-token"
 

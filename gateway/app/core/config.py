@@ -177,9 +177,11 @@ class Settings(BaseSettings):
     # Meta llama al Gateway directamente y firma cada POST con META_APP_SECRET.
     meta_webhook_verify_token: str = ""
     meta_webhook_require_signature: bool = True
-    # Instagram API with Instagram Login. They are validated lazily when an
-    # Instagram authorization is started, so WhatsApp/Evolution startup remains
-    # usable on installations that have not enabled Instagram.
+    # Instagram API with Instagram Login. This is intentionally separate from
+    # META_APP_ID, which remains the app identifier for Meta/WhatsApp flows.
+    # Both are validated lazily when an Instagram authorization is started, so
+    # WhatsApp/Evolution startup remains usable without Instagram configured.
+    instagram_app_id: str = ""
     meta_redirect_uri: str = ""
     instagram_oauth_scopes: str = "instagram_business_basic,instagram_business_manage_messages"
     instagram_oauth_authorize_url: str = "https://www.instagram.com/oauth/authorize"
