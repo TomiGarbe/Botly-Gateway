@@ -36,6 +36,9 @@ def _credentials_or_error(credentials: CredentialManager, instance_name: str):
 class OfficialWhatsAppProvider:
     """Outbound adapter for WhatsApp Cloud API's /{phone-number-id}/messages."""
 
+    provider_id = "meta"
+    channel_type = "whatsapp"
+
     def __init__(
         self,
         *,

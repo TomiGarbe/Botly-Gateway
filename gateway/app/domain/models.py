@@ -28,6 +28,7 @@ class PlatformId(str, Enum):
 
 class RuntimeId(str, Enum):
     EVOLUTION = "evolution"
+    META = "meta"
 
 
 class ChannelStatus(str, Enum):

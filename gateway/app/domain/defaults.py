@@ -42,13 +42,6 @@ WHATSAPP_WEB_CAPABILITIES = CapabilitySet.of(
 
 INSTAGRAM_OFFICIAL_CAPABILITIES = CapabilitySet.of(
     Capability.SUPPORTS_TEXT,
-    Capability.SUPPORTS_IMAGES,
-    Capability.SUPPORTS_VIDEO,
-    Capability.SUPPORTS_AUDIO,
-    Capability.SUPPORTS_REACTIONS,
-    Capability.SUPPORTS_TYPING,
-    Capability.SUPPORTS_READ_RECEIPTS,
-    Capability.SUPPORTS_WEBHOOKS,
 )
 
 
@@ -96,9 +89,11 @@ def build_default_domain_registry() -> DomainRegistry:
         authentication=AuthenticationKind.OAUTH,
         discovery=DiscoveryType.MANUAL,
         capabilities=INSTAGRAM_OFFICIAL_CAPABILITIES,
-        supports_discovery=True,
-        supports_oauth=True,
-        supports_refresh=True,
+        # G1 only establishes the adapter foundation. Business Login, account
+        # discovery and token refresh are future phases, not product support.
+        supports_discovery=False,
+        supports_oauth=False,
+        supports_refresh=False,
         sort_order=10,
     )
 
@@ -164,6 +159,15 @@ def build_default_domain_registry() -> DomainRegistry:
             "Preserve the existing public API and runtime behavior during migration.",
         ),
     )
+    meta_runtime = RuntimeDefinition(
+        id=RuntimeId.META,
+        name="Meta Graph API",
+        adapter_package="app.providers",
+        responsibilities=(
+            "Provide provider-specific Meta transports without an Evolution instance.",
+            "Keep WhatsApp and Instagram channel identities distinct.",
+        ),
+    )
 
     integrations = IntegrationRegistry(
         (
@@ -186,13 +190,13 @@ def build_default_domain_registry() -> DomainRegistry:
                 notes=("Internal bridge for the current QR-based WhatsApp Web path.",),
             ),
             IntegrationDefinition(
-                id="instagram.official.evolution",
+                id="instagram.official.meta",
                 channel_id=ChannelId.INSTAGRAM,
                 method_id=MethodId.OFFICIAL,
                 platform_id=PlatformId.META,
-                runtime_id=RuntimeId.EVOLUTION,
+                runtime_id=RuntimeId.META,
                 runtime_integration="INSTAGRAM-OFFICIAL",
-                notes=("Internal bridge for Instagram Messaging through Meta Platform.",),
+                notes=("G1 adapter foundation for Instagram Messaging through Meta Platform.",),
             ),
         )
     )
@@ -200,7 +204,7 @@ def build_default_domain_registry() -> DomainRegistry:
     return DomainRegistry(
         channels=ChannelRegistry((whatsapp, instagram)),
         platforms=PlatformRegistry((meta,)),
-        runtimes=RuntimeRegistry((evolution,)),
+        runtimes=RuntimeRegistry((evolution, meta_runtime)),
         integrations=integrations,
     )
 

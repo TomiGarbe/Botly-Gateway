@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import Settings, get_settings
+from app.services.gateway_settings import GatewaySettingsService, get_gateway_settings_service
 
 
 @dataclass(frozen=True)
@@ -22,9 +23,14 @@ class FeatureFlags:
 class FeatureService:
     """Single policy point for publicly exposed technologies."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        gateway_settings: GatewaySettingsService | None = None,
+    ) -> None:
         config = settings or get_settings()
         self.flags = FeatureFlags(config.feature_provider_evolution, config.feature_provider_baileys, config.feature_whatsapp_web, config.feature_qr_login, config.feature_instagram, config.feature_whatsapp_cloud)
+        self._gateway_settings = gateway_settings or get_gateway_settings_service()
 
     def public_dict(self) -> dict[str, Any]:
         return {"features": self.flags.public_dict()}
@@ -34,7 +40,13 @@ class FeatureService:
             return self.flags.whatsapp_cloud
         if channel_id == "whatsapp" and method_id == "web":
             return all((self.flags.provider_evolution, self.flags.provider_baileys, self.flags.whatsapp_web, self.flags.qr_login))
-        return channel_id == "instagram" and self.flags.instagram
+        # FEATURE_INSTAGRAM only controls whether the G1 foundation can be
+        # exposed. Product availability remains server-owned and is false until
+        # a later phase enables a complete connection flow.
+        if channel_id == "instagram":
+            instagram = self._gateway_settings.channels().get("instagram", {})
+            return self.flags.instagram and bool(instagram.get("implemented")) and bool(instagram.get("enabled"))
+        return False
 
     def public_channels(self, domain) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

@@ -10,7 +10,7 @@ from app.routers import settings as settings_router
 from app.services.clients import ClientService
 from app.services.connection_registry import ConnectionRegistry
 from app.services.connections import ConnectionService
-from app.services.gateway_settings import ChannelDisabledError, ChannelNotImplementedError, GatewaySettingsService, ProviderDisabledError
+from app.services.gateway_settings import ChannelDisabledError, GatewaySettingsService, ProviderDisabledError
 
 
 class _EmptyRuntime:
@@ -47,7 +47,7 @@ def test_channel_settings_persist_and_keep_implementation_server_owned(tmp_path)
         "name": "Instagram",
         "description": "Mensajería de Instagram desde Meta.",
         "icon": "instagram",
-        "implemented": False,
+        "implemented": True,
         "enabled": False,
     }
 
@@ -61,7 +61,7 @@ def test_connection_creation_requires_an_enabled_implemented_channel(tmp_path) -
     client = ClientService(registry).create_client("Global Tech")
     service = ConnectionService(_EmptyRuntime(), registry, settings)
 
-    with pytest.raises(ChannelNotImplementedError, match="todavía no está disponible"):
+    with pytest.raises(ChannelDisabledError):
         service.create_connection(client_id=client.id, channel="instagram")
 
     settings.update_channels({"whatsapp": False})
@@ -143,6 +143,6 @@ def test_settings_channels_api_reads_and_updates_persisted_state(monkeypatch, tm
     assert updated.json()["channels"]["whatsapp"]["enabled"] is False
     assert GatewaySettingsService(tmp_path / "gateway_settings.json").channels()["whatsapp"]["enabled"] is False
 
-    unavailable = client.patch("/settings/channels", json={"channels": {"instagram": {"enabled": True}}})
-    assert unavailable.status_code == 422
-    assert "todavía no está disponible" in unavailable.json()["detail"]
+    enabled = client.patch("/settings/channels", json={"channels": {"instagram": {"enabled": True}}})
+    assert enabled.status_code == 200
+    assert enabled.json()["channels"]["instagram"]["enabled"] is True

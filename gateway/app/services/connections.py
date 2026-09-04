@@ -19,19 +19,22 @@ from app.domain.connection import (
 from app.services.connection_adapter import legacy_instance_to_connection
 from app.services.connection_registry import ConnectionRegistry, get_connection_registry
 from app.services.gateway_settings import (
-    ChannelDisabledError,
-    ChannelNotImplementedError,
+    ChannelDisabledError,  # noqa: F401 - re-exported for the connections router API
+    ChannelNotImplementedError,  # noqa: F401 - re-exported for the connections router API
     GatewaySettingsService,
-    ProviderDisabledError,
-    ProviderNotImplementedError,
+    ProviderDisabledError,  # noqa: F401 - re-exported for the connections router API
+    ProviderNotImplementedError,  # noqa: F401 - re-exported for the connections router API
     get_gateway_settings_service,
 )
 from app.services.instances_contract import normalize_instance_list
 from app.services.evolution_webhook import ensure_evolution_webhook
+from app.services.credential_manager import CredentialManager, ProviderAccountReference, get_credential_manager
+from app.services.core_channel_credentials import CoreChannelCredentialStore, get_core_channel_credential_store
 
 
 _MIGRATION_CLIENT_ID = str(uuid5(NAMESPACE_URL, "botly-gateway:migrated-connections"))
 _WHATSAPP_CHANNEL = "whatsapp"
+_INSTAGRAM_CHANNEL = "instagram"
 
 
 def _now() -> str:
@@ -62,10 +65,14 @@ class ConnectionService:
         connection_manager: ConnectionManager | None = None,
         registry: ConnectionRegistry | None = None,
         gateway_settings: GatewaySettingsService | None = None,
+        credentials: CredentialManager | None = None,
+        core_channel_credentials: CoreChannelCredentialStore | None = None,
     ) -> None:
         self._connection_manager = connection_manager or get_connection_manager()
         self._registry = registry or get_connection_registry()
         self._gateway_settings = gateway_settings or get_gateway_settings_service()
+        self._credentials = credentials or get_credential_manager()
+        self._core_channel_credentials = core_channel_credentials or get_core_channel_credential_store()
 
     def _migration_client_record(self) -> dict[str, str | None]:
         record = self._registry.get_client(_MIGRATION_CLIENT_ID)
@@ -97,6 +104,13 @@ class ConnectionService:
 
     def _stored_connection(self, record: dict[str, Any]) -> Connection:
         client = self._client_reference(str(record["client_id"]))
+        is_instagram = str(record.get("channel_id") or "") == _INSTAGRAM_CHANNEL
+        provider_account = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else None
+        core_channel_data = record.get("core_channel") if isinstance(record.get("core_channel"), dict) else None
+        core_channel = None
+        if core_channel_data and str(core_channel_data.get("channelId") or "").strip():
+            core_channel = {"channelId": str(core_channel_data["channelId"]), "configured": True}
+        readiness = self.instagram_readiness(str(record["id"])) if is_instagram else None
         return Connection(
             id=str(record["id"]),
             client_id=client.id,
@@ -117,9 +131,11 @@ class ConnectionService:
                 health=str(record.get("status_health") or "unknown"),
             ),
             capabilities=ConnectionCapabilities(
-                supports_messaging=True,
+                supports_messaging=not is_instagram,
+                # G3 can receive and verify Meta Instagram callbacks. Message
+                # delivery to Core remains deliberately unavailable until G4.
                 supports_webhook=True,
-                supports_media=True,
+                supports_media=not is_instagram,
                 supports_qr=str(record.get("provider_id") or "meta") == "evolution",
                 supports_reconnect=True,
                 supports_api_key=True,
@@ -131,6 +147,9 @@ class ConnectionService:
             last_activity_at=str(record["last_activity_at"]) if record.get("last_activity_at") else None,
             created_at=str(record["created_at"]) if record.get("created_at") else None,
             updated_at=str(record["updated_at"]) if record.get("updated_at") else None,
+            provider_account=provider_account,
+            core_channel=core_channel,
+            readiness=readiness,
             technical={"legacy_instance_name": str(record.get("legacy_name") or "") or None},
         )
 
@@ -177,16 +196,18 @@ class ConnectionService:
     def create_connection(self, *, client_id: str, channel: str, name: str | None = None, provider: str = "meta") -> Connection:
         client = self._client_reference(client_id)
         self._gateway_settings.require_channel_available(channel)
-        if channel != _WHATSAPP_CHANNEL:
-            raise UnsupportedConnectionChannelError("Only WhatsApp is available for new connections")
+        if channel not in {_WHATSAPP_CHANNEL, _INSTAGRAM_CHANNEL}:
+            raise UnsupportedConnectionChannelError(f"Unsupported connection channel: {channel}")
         if provider not in {"meta", "evolution"}:
             raise UnsupportedConnectionProviderError(f"Unsupported provider: {provider}")
+        if channel == _INSTAGRAM_CHANNEL and provider != "meta":
+            raise UnsupportedConnectionProviderError("Instagram connections require provider meta")
         self._gateway_settings.require_provider_available(provider)
         # Meta (WhatsApp Cloud) es independiente del motor Evolution: opera directo
         # contra la Graph API. No exigir el proveedor "evolution" para conexiones Meta.
         clean_name = str(name or "").strip()
         if not clean_name:
-            clean_name = "WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution"
+            clean_name = "Instagram" if channel == _INSTAGRAM_CHANNEL else "WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution"
         now = _now()
         connection_id = str(uuid4())
         record = {
@@ -196,9 +217,9 @@ class ConnectionService:
             "name": clean_name,
             "provider_id": provider,
             "provider_display_name": "Meta" if provider == "meta" else "Evolution",
-            "channel_id": _WHATSAPP_CHANNEL,
-            "channel_display_name": "WhatsApp",
-            "status_state": "pending" if provider == "meta" else "connecting",
+            "channel_id": channel,
+            "channel_display_name": "Instagram" if channel == _INSTAGRAM_CHANNEL else "WhatsApp",
+            "status_state": "oauth_pending" if channel == _INSTAGRAM_CHANNEL else "pending" if provider == "meta" else "connecting",
             "status_health": "unknown",
             "created_at": now,
             "updated_at": now,
@@ -207,6 +228,156 @@ class ConnectionService:
         if saved is None:
             raise ConnectionClientNotFoundError(client.id)
         return self._stored_connection(record)
+
+    def require_instagram_meta_connection(self, connection_id: str) -> dict[str, Any]:
+        record = self._registry.connection_record_by_id(connection_id)
+        if record is None:
+            raise ConnectionNotFoundError(connection_id)
+        if str(record.get("provider_id") or "") != "meta" or str(record.get("channel_id") or "") != _INSTAGRAM_CHANNEL:
+            raise UnsupportedConnectionProviderError("Instagram OAuth requires a Meta + Instagram connection")
+        return record
+
+    def instagram_readiness(self, connection_id: str, *, required_scopes: tuple[str, ...] = ()) -> dict[str, Any]:
+        record = self._registry.connection_record_by_id(connection_id)
+        if record is None:
+            return {"state": "no_connection", "ready": False}
+        self.require_instagram_meta_connection(connection_id)
+        if str(record.get("status_state") or "") == "disconnected":
+            return {"state": "disconnected", "ready": False}
+        account_data = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else None
+        if not account_data:
+            return {"state": "oauth_pending", "ready": False, "configured": True, "authenticated": False}
+        account = ProviderAccountReference(
+            provider_id="meta",
+            channel_type="instagram",
+            provider_account_id=str(account_data.get("providerAccountId") or ""),
+        )
+        credential = self._credentials.get_provider_credentials(account)
+        if credential is None:
+            return {"state": "credential_missing", "ready": False, "configured": True, "authenticated": True, "accountDiscovered": True}
+        expiry = credential.expiry_state()
+        if expiry == "expired":
+            return {"state": "expired", "ready": False, "configured": True, "authenticated": True, "accountDiscovered": True, "credentialValid": False, "tokenExpiry": expiry}
+        missing = sorted(set(required_scopes) - set(credential.scopes))
+        if missing:
+            return {"state": "missing_scopes", "ready": False, "configured": True, "authenticated": True, "accountDiscovered": True, "credentialValid": True, "missingScopes": missing, "tokenExpiry": expiry}
+        return {"state": "ready", "ready": True, "configured": True, "authenticated": True, "accountDiscovered": True, "credentialValid": True, "requiredScopesPresent": True, "tokenExpiry": expiry}
+
+    def bind_instagram_provider_account(
+        self,
+        *,
+        connection_id: str,
+        account: ProviderAccountReference,
+        metadata: dict[str, Any],
+        required_scopes: tuple[str, ...],
+    ) -> Connection:
+        self.require_instagram_meta_connection(connection_id)
+        if account.provider_id != "meta" or account.channel_type != "instagram":
+            raise UnsupportedConnectionProviderError("Invalid provider account for Instagram connection")
+        self.assert_instagram_provider_account_available(connection_id, account)
+        readiness = self.instagram_readiness(connection_id, required_scopes=required_scopes)
+        if readiness["state"] in {"credential_missing", "expired", "missing_scopes"}:
+            raise UnsupportedConnectionProviderError("Instagram credentials do not satisfy connection readiness")
+        updated = self._registry.update_connection_record(
+            connection_id,
+            {
+                "provider_account": {
+                    "provider": account.provider_id,
+                    "channelType": account.channel_type,
+                    "providerAccountId": account.provider_account_id,
+                    "metadata": dict(metadata),
+                },
+                "status_state": "connected",
+                "status_health": "healthy",
+                "updated_at": _now(),
+            },
+        )
+        if updated is None:
+            raise ConnectionNotFoundError(connection_id)
+        return self._stored_connection(updated)
+
+    def assert_instagram_provider_account_available(self, connection_id: str, account: ProviderAccountReference) -> None:
+        self.require_instagram_meta_connection(connection_id)
+        for candidate in self._registry.connection_records():
+            binding = candidate.get("provider_account") if isinstance(candidate.get("provider_account"), dict) else {}
+            if str(binding.get("providerAccountId") or "") == account.provider_account_id and str(candidate.get("id") or "") != connection_id:
+                raise UnsupportedConnectionProviderError("Instagram provider account is already bound to another connection")
+
+    def resolve_active_instagram_provider_account(self, provider_account_id: str) -> Connection:
+        """Resolve a webhook account ID through persisted Gateway bindings only."""
+        target = str(provider_account_id or "")
+        matches: list[dict[str, Any]] = []
+        for record in self._registry.connection_records():
+            binding = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else {}
+            if str(binding.get("providerAccountId") or "") != target:
+                continue
+            if str(record.get("provider_id") or "") != "meta" or str(record.get("channel_id") or "") != _INSTAGRAM_CHANNEL:
+                raise UnsupportedConnectionProviderError("Instagram provider account has an invalid connection binding")
+            matches.append(record)
+        if not matches:
+            raise ConnectionNotFoundError(provider_account_id)
+        if len(matches) != 1:
+            raise UnsupportedConnectionProviderError("Instagram provider account has ambiguous connection bindings")
+        record = matches[0]
+        if str(record.get("status_state") or "") != "connected":
+            raise UnsupportedConnectionProviderError("Instagram connection is not active")
+        return self._stored_connection(record)
+
+    def bind_instagram_core_channel(
+        self,
+        *,
+        connection_id: str,
+        core_channel_id: str,
+        channel_api_key: str,
+    ) -> Connection:
+        """Bind one Core Channel credential to one Meta Instagram connection."""
+        self.require_instagram_meta_connection(connection_id)
+        clean_channel_id = str(core_channel_id or "").strip()
+        if not clean_channel_id or not str(channel_api_key or "").strip():
+            raise UnsupportedConnectionProviderError("Core channel ID and API key are required")
+        credential_ref = self._core_channel_credentials.upsert(
+            connection_id=connection_id,
+            core_channel_id=clean_channel_id,
+            channel_api_key=channel_api_key,
+        )
+        updated = self._registry.update_connection_record(
+            connection_id,
+            {
+                "core_channel": {
+                    "channelId": clean_channel_id,
+                    "credentialRef": credential_ref,
+                },
+                "updated_at": _now(),
+            },
+        )
+        if updated is None:
+            self._core_channel_credentials.delete(connection_id)
+            raise ConnectionNotFoundError(connection_id)
+        return self._stored_connection(updated)
+
+    def instagram_core_channel_binding(self, connection_id: str) -> dict[str, str] | None:
+        record = self.require_instagram_meta_connection(connection_id)
+        binding = record.get("core_channel") if isinstance(record.get("core_channel"), dict) else None
+        channel_id = str((binding or {}).get("channelId") or "").strip()
+        if not channel_id:
+            return None
+        return {"channelId": channel_id, "credentialRef": str(binding.get("credentialRef") or "")}
+
+    def disconnect_instagram_connection(self, connection_id: str) -> Connection:
+        record = self.require_instagram_meta_connection(connection_id)
+        binding = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else None
+        if binding:
+            self._credentials.delete_provider_credentials(
+                ProviderAccountReference("meta", "instagram", str(binding.get("providerAccountId") or ""))
+            )
+        self._core_channel_credentials.delete(connection_id)
+        updated = self._registry.update_connection_record(
+            connection_id,
+            {"provider_account": None, "core_channel": None, "status_state": "disconnected", "status_health": "unknown", "updated_at": _now()},
+        )
+        if updated is None:
+            raise ConnectionNotFoundError(connection_id)
+        return self._stored_connection(updated)
 
     async def get_connection_by_runtime_name(self, instance_name: str) -> Connection:
         """Resolve a legacy runtime name through the product ownership registry."""
@@ -273,6 +444,13 @@ class ConnectionService:
         record = self._registry.connection_record_by_id(connection_id)
         if record is None:
             raise ConnectionNotFoundError(connection_id)
+        if str(record.get("channel_id") or "") == _INSTAGRAM_CHANNEL and str(record.get("provider_id") or "") == "meta":
+            binding = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else None
+            if binding:
+                self._credentials.delete_provider_credentials(
+                    ProviderAccountReference("meta", "instagram", str(binding.get("providerAccountId") or ""))
+                )
+            self._core_channel_credentials.delete(connection_id)
         runtime = (await self._runtime_connections()).get(self._runtime_name(record))
         if runtime is not None:
             await self._connection_manager.delete(self._runtime_name(record))

@@ -29,3 +29,23 @@ def test_legacy_method_requires_all_compatibility_flags() -> None:
     features = _features(feature_provider_evolution=True, feature_provider_baileys=True, feature_whatsapp_web=True, feature_qr_login=True)
 
     assert features.method_enabled("whatsapp", "web") is True
+
+
+def test_instagram_feature_flag_does_not_make_foundation_ready() -> None:
+    class _FoundationOnlySettings:
+        def channels(self):
+            return {"instagram": {"implemented": False, "enabled": False}}
+
+    features = FeatureService(
+        SimpleNamespace(
+            feature_provider_evolution=False,
+            feature_provider_baileys=False,
+            feature_whatsapp_web=False,
+            feature_qr_login=False,
+            feature_instagram=True,
+            feature_whatsapp_cloud=True,
+        ),
+        _FoundationOnlySettings(),
+    )
+
+    assert features.method_enabled("instagram", "official") is False

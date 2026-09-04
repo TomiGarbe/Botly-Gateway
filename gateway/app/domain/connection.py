@@ -77,6 +77,9 @@ class Connection:
     last_activity_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    provider_account: dict[str, Any] | None = None
+    core_channel: dict[str, Any] | None = None
+    readiness: dict[str, Any] | None = None
     technical: dict[str, Any] = field(default_factory=dict)
 
     def public_dict(self) -> dict[str, Any]:
@@ -97,5 +100,8 @@ class Connection:
             "last_activity_at": self.last_activity_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "provider_account": dict(self.provider_account) if self.provider_account else None,
+            "core_channel": dict(self.core_channel) if self.core_channel else None,
+            "readiness": dict(self.readiness) if self.readiness else None,
             "runtime_name": self.technical.get("legacy_instance_name"),
         }

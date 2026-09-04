@@ -20,7 +20,7 @@ def test_default_domain_registers_current_channels_platform_and_runtime() -> Non
 
     assert [channel.id for channel in domain.channels.list()] == [ChannelId.WHATSAPP, ChannelId.INSTAGRAM]
     assert [platform.id for platform in domain.platforms.list()] == [PlatformId.META]
-    assert [runtime.id for runtime in domain.runtimes.list()] == [RuntimeId.EVOLUTION]
+    assert [runtime.id for runtime in domain.runtimes.list()] == [RuntimeId.EVOLUTION, RuntimeId.META]
 
 
 def test_whatsapp_channel_defines_current_methods_and_capabilities() -> None:
@@ -47,12 +47,8 @@ def test_instagram_channel_defines_official_method_and_capabilities() -> None:
     assert instagram.icon == "instagram"
     assert [method.id for method in instagram.methods] == [MethodId.OFFICIAL]
     assert instagram.capabilities.supports(Capability.SUPPORTS_TEXT)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_IMAGES)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_VIDEO)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_AUDIO)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_REACTIONS)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_TYPING)
-    assert instagram.capabilities.supports(Capability.SUPPORTS_READ_RECEIPTS)
+    assert not instagram.capabilities.supports(Capability.SUPPORTS_IMAGES)
+    assert not instagram.capabilities.supports(Capability.SUPPORTS_WEBHOOKS)
 
 
 def test_methods_describe_platform_authentication_and_discovery() -> None:
@@ -80,6 +76,8 @@ def test_methods_describe_platform_authentication_and_discovery() -> None:
     assert instagram_official.authentication == AuthenticationKind.OAUTH
     assert instagram_official.discovery == DiscoveryType.MANUAL
     assert instagram_official.current_connection_type is None
+    assert instagram_official.supports_oauth is False
+    assert instagram_official.supports_refresh is False
 
 
 def test_integrations_keep_runtime_details_internal_to_the_domain() -> None:
@@ -98,7 +96,7 @@ def test_integrations_keep_runtime_details_internal_to_the_domain() -> None:
     assert web_integration.runtime_integration == "WHATSAPP-BAILEYS"
 
     assert instagram_integration is not None
-    assert instagram_integration.runtime_id == RuntimeId.EVOLUTION
+    assert instagram_integration.runtime_id == RuntimeId.META
     assert instagram_integration.runtime_integration == "INSTAGRAM-OFFICIAL"
 
 
@@ -134,8 +132,8 @@ def test_runtime_resolver_maps_current_channel_methods_to_evolution_runtime() ->
     assert official.runtime.id == RuntimeId.EVOLUTION
     assert web.integration.id == "whatsapp.web.evolution"
     assert web.runtime.id == RuntimeId.EVOLUTION
-    assert instagram.integration.id == "instagram.official.evolution"
-    assert instagram.runtime.id == RuntimeId.EVOLUTION
+    assert instagram.integration.id == "instagram.official.meta"
+    assert instagram.runtime.id == RuntimeId.META
 
 
 def test_channels_router_exposes_catalog_from_domain_registry() -> None:
@@ -147,6 +145,4 @@ def test_channels_router_exposes_catalog_from_domain_registry() -> None:
     assert [method["id"] for method in payload["items"][0]["methods"]] == ["official"]
     assert payload["items"][0]["methods"][0]["currentConnectionType"] == "cloud"
     assert payload["features"]["qrLogin"] is False
-    assert payload["items"][1]["id"] == "instagram"
-    assert payload["items"][1]["methods"][0]["id"] == "official"
-    assert payload["items"][1]["methods"][0]["currentConnectionType"] is None
+    assert all(item["id"] != "instagram" for item in payload["items"])

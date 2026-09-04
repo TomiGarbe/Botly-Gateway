@@ -11,7 +11,7 @@ from app.services.instance_auth import authenticate_instance_token
 from app.services.authorization import reviewer_endpoint_allowed
 
 
-_PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta", "/auth/config", "/auth/google", "/auth/login"}
+_PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta", "/auth/config", "/auth/google", "/auth/login", "/connections/meta/instagram/callback"}
 _COOKIE = "botly_gateway_session"
 
 

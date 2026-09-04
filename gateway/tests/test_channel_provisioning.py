@@ -81,8 +81,8 @@ def test_channel_provisioning_creates_instagram_official_from_meta_resource(tmp_
     assert channel is not None
     assert channel.channel_id == ChannelId.INSTAGRAM
     assert channel.method_id == MethodId.OFFICIAL
-    assert channel.integration_id == "instagram.official.evolution"
-    assert channel.runtime_id == RuntimeId.EVOLUTION
+    assert channel.integration_id == "instagram.official.meta"
+    assert channel.runtime_id == RuntimeId.META
     assert channel.metadata["sourceResourceId"] == resource.id
     assert channel.metadata["sourceResourceType"] == MetaResourceType.INSTAGRAM.value
     assert channel.metadata["sourceExternalId"] == "ig_1"

@@ -23,6 +23,8 @@ from app.routers.webhooks import _to_bot_payload, _forward_to_instance_webhooks,
 from app.services.audit import audit_event
 from app.services.credential_manager import get_credential_manager
 from app.services.event_pipeline import process_incoming_webhook
+from app.services.core_inbound_dispatcher import CoreInboundPersistenceError, get_core_inbound_dispatcher
+from app.services.instagram_webhook import InstagramWebhookError, process_instagram_webhook
 from app.services.normalization import save_pipeline_event
 
 router = APIRouter(prefix="/webhooks", tags=["meta-webhook"])
@@ -335,12 +337,67 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         )
         _trace("payload_parse", request_id=request_id, started_at=started_at, result="invalid_json")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Meta webhook JSON") from exc
-    if not isinstance(payload, dict) or payload.get("object") != "whatsapp_business_account":
+    if not isinstance(payload, dict):
         logger.warning(
             "[META_INBOUND][PAYLOAD][FAILED] unsupported webhook object",
             request_id=request_id,
             object=payload.get("object") if isinstance(payload, dict) else None,
             payload_type=type(payload).__name__,
+        )
+        _trace("payload_parse", request_id=request_id, started_at=started_at, result="unsupported_object")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported Meta webhook object")
+
+    if payload.get("object") == "instagram":
+        try:
+            canonical = process_instagram_webhook(payload, request_id=request_id)
+        except InstagramWebhookError as exc:
+            logger.warning(
+                "instagram_webhook_rejected",
+                request_id=request_id,
+                provider="meta",
+                channel_type="instagram",
+                status_code=exc.status_code,
+                reason=str(exc),
+            )
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        try:
+            persisted = get_core_inbound_dispatcher().persist_many(canonical)
+        except CoreInboundPersistenceError as exc:
+            logger.error(
+                "instagram_webhook_handoff_persistence_failed",
+                request_id=request_id,
+                provider="meta",
+                channel_type="instagram",
+                error=str(exc),
+            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Instagram event handoff persistence failed") from exc
+        messaging_count = sum(
+            len(entry.get("messaging") or [])
+            for entry in payload.get("entry") or []
+            if isinstance(entry, dict) and isinstance(entry.get("messaging"), list)
+        )
+        for event in canonical:
+            logger.info(
+                "instagram_webhook_canonical_event_created",
+                request_id=request_id,
+                event_id=event["eventId"],
+                provider_account_id=event["transport"]["providerAccountRef"],
+                connection_id=event["transport"]["connectionRef"],
+                provider="meta",
+                channel_type="instagram",
+                event_type=event["eventType"],
+            )
+        # G3 intentionally stops at the G4 handoff boundary. No Core dispatch,
+        # inbound entity persistence or background task is created here.
+        result = {"status": "ok", "object": "instagram", "canonicalEvents": len(canonical), "acknowledged": messaging_count}
+        audit_event("instagram_webhook_received", requestId=request_id, canonicalEvents=len(canonical), persistedDeliveries=len(persisted), acknowledged=messaging_count)
+        return result
+
+    if payload.get("object") != "whatsapp_business_account":
+        logger.warning(
+            "[META_INBOUND][PAYLOAD][FAILED] unsupported webhook object",
+            request_id=request_id,
+            object=payload.get("object"),
         )
         _trace("payload_parse", request_id=request_id, started_at=started_at, result="unsupported_object")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported Meta webhook object")

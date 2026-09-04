@@ -9,7 +9,7 @@ import httpx
 
 from app.domain import ChannelId, ChannelStatus, MethodId, ProvisionedChannel, RuntimeId
 from app.platforms.meta import MetaPlatform
-from app.providers.instagram import InstagramProvider
+from app.providers.instagram import InstagramProvider, MetaInstagramProvider
 
 
 def _instagram_channel() -> ProvisionedChannel:
@@ -17,8 +17,8 @@ def _instagram_channel() -> ProvisionedChannel:
         id="instagram:official:abc123",
         channel_id=ChannelId.INSTAGRAM,
         method_id=MethodId.OFFICIAL,
-        integration_id="instagram.official.evolution",
-        runtime_id=RuntimeId.EVOLUTION,
+        integration_id="instagram.official.meta",
+        runtime_id=RuntimeId.META,
         display_name="acme",
         status=ChannelStatus.ACTIVE,
         metadata={
@@ -97,6 +97,20 @@ def test_instagram_provider_normalizes_text_media_reaction_and_typing_events() -
     assert normalized[2]["content"] == {"emoji": "\u2764\ufe0f"}
     assert normalized[3]["type"] == "event"
     assert all(event["metadata"]["channelId"] == "instagram" for event in normalized)
+    assert all(event["metadata"]["providerId"] == "meta" for event in normalized)
+    assert normalized[0]["providerAccountId"] == "ig_1"
+    assert "instance" not in normalized[0]
+
+
+def test_instagram_provider_capabilities_are_foundation_not_ready() -> None:
+    capabilities = MetaInstagramProvider().capabilities.public_dict()
+
+    assert capabilities["inboundText"] == "foundation"
+    assert capabilities["outboundText"] == "foundation"
+    assert capabilities["webhook"] == "implemented"
+    assert capabilities["businessLogin"] == "not_implemented"
+    assert capabilities["enabled"] is False
+    assert capabilities["ready"] is False
 
 
 def test_instagram_provider_sends_text_through_meta_platform() -> None:

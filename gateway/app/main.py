@@ -22,6 +22,7 @@ from app.services.operations import OperationWorker
 from app.services.connections import get_connection_service
 from app.services.connection_setups import get_connection_setup_service
 from app.services.connection_setup_cleanup import ConnectionSetupCleanupWorker
+from app.services.core_inbound_dispatcher import CoreInboundDeliveryWorker
 from app.services.instance_webhooks import protect_stored_webhook_secrets
 from app.services.users import bootstrap_initial_admin, bootstrap_meta_reviewer, ensure_meta_review_business
 
@@ -32,6 +33,7 @@ _connection_manager = get_connection_manager()
 _connection_service = get_connection_service()
 _connection_setup_service = get_connection_setup_service()
 _connection_setup_cleanup_worker = ConnectionSetupCleanupWorker()
+_core_inbound_delivery_worker = CoreInboundDeliveryWorker()
 
 
 async def _automation_instances() -> list[dict]:
@@ -92,6 +94,7 @@ async def lifespan(app: FastAPI):
         webhook_events_path=settings.webhook_events_path,
         automations_path=settings.automations_path,
         operations_path=settings.operations_path,
+        core_inbound_deliveries_path=settings.core_inbound_deliveries_path,
         media_cache_dir=settings.media_cache_dir,
     )
     bootstrap_initial_admin()
@@ -113,7 +116,9 @@ async def lifespan(app: FastAPI):
     _automation_scheduler.start()
     _operation_worker.start()
     _connection_setup_cleanup_worker.start()
+    _core_inbound_delivery_worker.start()
     yield
+    await _core_inbound_delivery_worker.stop()
     await _connection_setup_cleanup_worker.stop()
     await _operation_worker.stop()
     await _automation_scheduler.stop()

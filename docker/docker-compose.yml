@@ -161,6 +161,7 @@ services:
       BOT_WEBHOOK_URL: ${BOT_WEBHOOK_URL:-http://botly-api:8000/api/v1/webhook/inbound}
       ENABLE_GROUP_MESSAGES: ${ENABLE_GROUP_MESSAGES:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       INSTANCE_API_KEYS_PATH: /var/lib/botly/instance_api_keys.json
       INSTANCE_WEBHOOKS_PATH: /var/lib/botly/instance_webhooks.json
       INSTANCE_WEBHOOKS_ENCRYPTION_KEY: ${INSTANCE_WEBHOOKS_ENCRYPTION_KEY:-}
@@ -181,6 +182,18 @@ services:
       AUTOMATIONS_PATH: /var/lib/botly/automations.json
       OPERATIONS_PATH: /var/lib/botly/operations.json
       OFFICIAL_CREDENTIALS_ENCRYPTION_KEY: ${OFFICIAL_CREDENTIALS_ENCRYPTION_KEY:-}
+      PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${PROVIDER_CREDENTIALS_ENCRYPTION_KEY:-}
+      INSTAGRAM_OAUTH_STATE_PATH: /var/lib/botly/oauth/instagram_states.json
+      CORE_INBOUND_URL: ${CORE_INBOUND_URL:-http://botly-api:8000/api/v1/webhook/inbound}
+      CORE_CHANNEL_CREDENTIALS_PATH: ${CORE_CHANNEL_CREDENTIALS_PATH:-/var/lib/botly/core/core_channel_credentials.json}
+      CORE_CHANNEL_CREDENTIALS_ENCRYPTION_KEY: ${CORE_CHANNEL_CREDENTIALS_ENCRYPTION_KEY:-}
+      CORE_INBOUND_DELIVERIES_PATH: ${CORE_INBOUND_DELIVERIES_PATH:-/var/lib/botly/core/inbound_deliveries.json}
+      CORE_INBOUND_DELIVERY_MAX_ATTEMPTS: ${CORE_INBOUND_DELIVERY_MAX_ATTEMPTS:-5}
+      CORE_INBOUND_DELIVERY_BACKOFF_BASE_SECONDS: ${CORE_INBOUND_DELIVERY_BACKOFF_BASE_SECONDS:-5}
+      CORE_INBOUND_DELIVERY_POLL_SECONDS: ${CORE_INBOUND_DELIVERY_POLL_SECONDS:-2}
+      CORE_INBOUND_DELIVERY_BATCH_SIZE: ${CORE_INBOUND_DELIVERY_BATCH_SIZE:-25}
+      CORE_INBOUND_DELIVERY_LEASE_SECONDS: ${CORE_INBOUND_DELIVERY_LEASE_SECONDS:-60}
+      CORE_INBOUND_DISPATCHER_ENABLED: ${CORE_INBOUND_DISPATCHER_ENABLED:-true}
       META_ONBOARDING_PATH: /var/lib/botly/meta_onboarding.json
       META_RESOURCES_PATH: /var/lib/botly/meta_resources.json
       CHANNEL_RECORDS_PATH: /var/lib/botly/channel_records.json
@@ -192,6 +205,11 @@ services:
       META_SIGNUP_TIMEOUT_SECONDS: ${META_SIGNUP_TIMEOUT_SECONDS:-30}
       META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
       META_WEBHOOK_REQUIRE_SIGNATURE: ${META_WEBHOOK_REQUIRE_SIGNATURE:-true}
+      META_REDIRECT_URI: ${META_REDIRECT_URI:-}
+      INSTAGRAM_OAUTH_SCOPES: ${INSTAGRAM_OAUTH_SCOPES:-instagram_business_basic,instagram_business_manage_messages}
+      INSTAGRAM_OAUTH_AUTHORIZE_URL: ${INSTAGRAM_OAUTH_AUTHORIZE_URL:-https://www.instagram.com/oauth/authorize}
+      INSTAGRAM_OAUTH_TOKEN_URL: ${INSTAGRAM_OAUTH_TOKEN_URL:-https://api.instagram.com/oauth/access_token}
+      INSTAGRAM_GRAPH_API_URL: ${INSTAGRAM_GRAPH_API_URL:-https://graph.instagram.com}
       # Trazabilidad temporal de payloads Meta; contiene contenido de clientes.
       # Activar solamente durante el diagnóstico y volver a false al terminar.
       WEBHOOK_DEBUG: ${WEBHOOK_DEBUG:-false}

@@ -24,7 +24,7 @@ _CHANNEL_CATALOG: dict[str, dict[str, Any]] = {
         "name": "Instagram",
         "description": "Mensajería de Instagram desde Meta.",
         "icon": "instagram",
-        "implemented": False,
+        "implemented": True,
         "enabled": False,
     },
     "facebook": {

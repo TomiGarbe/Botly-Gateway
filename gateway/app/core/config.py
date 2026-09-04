@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     )
     log_level: str = "info"
     debug: bool = False
+    environment: str = "development"
     cors_allowed_origins: str = (
         "https://gateway.botly.com.ar,"
         "http://localhost:5174,"
@@ -123,6 +124,23 @@ class Settings(BaseSettings):
     # so existing installations remain operable; production deployments should
     # provide a distinct, high-entropy value.
     official_credentials_encryption_key: str = ""
+    # Dedicated key for provider-account OAuth credentials. Production must not
+    # fall back to GATEWAY_API_KEY when storing these long-lived tokens.
+    provider_credentials_encryption_key: str = ""
+    # Channel-scoped credentials used exclusively for Gateway -> Core canonical
+    # inbound delivery. They must never share Meta/OAuth credentials.
+    core_channel_credentials_path: str = "/var/lib/botly/core/core_channel_credentials.json"
+    core_channel_credentials_encryption_key: str = ""
+    core_inbound_url: str = ""
+    core_inbound_deliveries_path: str = "/var/lib/botly/core/inbound_deliveries.json"
+    core_inbound_delivery_max_attempts: int = 5
+    core_inbound_delivery_backoff_base_seconds: int = 5
+    core_inbound_delivery_poll_seconds: int = 2
+    core_inbound_delivery_batch_size: int = 25
+    core_inbound_delivery_lease_seconds: int = 60
+    core_inbound_dispatcher_enabled: bool = True
+    instagram_oauth_state_path: str = "/var/lib/botly/oauth/instagram_states.json"
+    instagram_oauth_state_ttl_seconds: int = 600
     meta_onboarding_path: str = "/tmp/botly_meta_onboarding.json"
     meta_resources_path: str = "/tmp/botly_meta_resources.json"
     channel_records_path: str = "/tmp/botly_channel_records.json"
@@ -152,6 +170,14 @@ class Settings(BaseSettings):
     # Meta llama al Gateway directamente y firma cada POST con META_APP_SECRET.
     meta_webhook_verify_token: str = ""
     meta_webhook_require_signature: bool = True
+    # Instagram API with Instagram Login. They are validated lazily when an
+    # Instagram authorization is started, so WhatsApp/Evolution startup remains
+    # usable on installations that have not enabled Instagram.
+    meta_redirect_uri: str = ""
+    instagram_oauth_scopes: str = "instagram_business_basic,instagram_business_manage_messages"
+    instagram_oauth_authorize_url: str = "https://www.instagram.com/oauth/authorize"
+    instagram_oauth_token_url: str = "https://api.instagram.com/oauth/access_token"
+    instagram_graph_api_url: str = "https://graph.instagram.com"
 
     model_config = SettingsConfigDict(
         # En Docker las variables llegan por environment: en el compose.

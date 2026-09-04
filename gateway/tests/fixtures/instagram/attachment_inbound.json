@@ -1,0 +1,15 @@
+{
+  "object": "instagram",
+  "entry": [{
+    "id": "178400012345678",
+    "messaging": [{
+      "sender": {"id": "178400001234567"},
+      "recipient": {"id": "178400012345678"},
+      "timestamp": 1710000000001,
+      "message": {
+        "mid": "ig-mid-image-001",
+        "attachments": [{"type": "image", "payload": {"id": "ig-media-001", "url": "https://cdn.example/image.jpg"}}]
+      }
+    }]
+  }]
+}

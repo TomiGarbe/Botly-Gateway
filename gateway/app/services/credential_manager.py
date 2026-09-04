@@ -7,6 +7,7 @@ import secrets
 import time
 from base64 import urlsafe_b64encode
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -82,6 +83,76 @@ class OfficialCredentialRecord:
         }
 
 
+@dataclass(frozen=True)
+class ProviderAccountReference:
+    """The Gateway-owned account identity at a provider.
+
+    It intentionally has no relationship to a recipient/contact external ID.
+    All identifiers remain opaque strings: callers must not apply phone or JID
+    normalization here.
+    """
+
+    provider_id: str
+    channel_type: str
+    provider_account_id: str
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("provider_id", self.provider_id),
+            ("channel_type", self.channel_type),
+            ("provider_account_id", self.provider_account_id),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} is required")
+
+    def storage_key(self) -> str:
+        return f"{self.provider_id.strip().lower()}:{self.channel_type.strip().lower()}:{self.provider_account_id}"
+
+
+@dataclass(frozen=True)
+class ProviderCredentialRecord:
+    """Encrypted credential metadata for a provider account, without OAuth flow."""
+
+    account: ProviderAccountReference
+    access_token_ref: str
+    access_token_hash: str | None = None
+    source: str = "unknown"
+    scopes: tuple[str, ...] = ()
+    expires_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.account.provider_id,
+            "channelType": self.account.channel_type,
+            "providerAccountId": self.account.provider_account_id,
+            "accessTokenRef": self.access_token_ref,
+            "hasAccessTokenHash": bool(self.access_token_hash),
+            "source": self.source,
+            "scopes": list(self.scopes),
+            "expiresAt": self.expires_at,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+            "metadata": dict(self.metadata),
+        }
+
+    def expiry_state(self, *, now: datetime | None = None) -> str:
+        if not self.expires_at:
+            return "active"
+        try:
+            expiry = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return "unknown"
+        current = now or datetime.now(timezone.utc)
+        if expiry <= current:
+            return "expired"
+        if (expiry - current).total_seconds() <= 7 * 24 * 60 * 60:
+            return "expiring"
+        return "active"
+
+
 class CredentialManager:
     def _path(self) -> str:
         return get_settings().official_credentials_path
@@ -89,15 +160,19 @@ class CredentialManager:
     def _load(self) -> dict[str, Any]:
         path = self._path()
         if not os.path.exists(path):
-            return {"official": {}}
+            return {"official": {}, "providerAccounts": {}}
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             if isinstance(payload, dict) and isinstance(payload.get("official"), dict):
-                return payload
+                provider_accounts = payload.get("providerAccounts")
+                return {
+                    **payload,
+                    "providerAccounts": provider_accounts if isinstance(provider_accounts, dict) else {},
+                }
         except Exception as exc:
             logger.warning("credential_store_load_failed", path=path, error=str(exc))
-        return {"official": {}}
+        return {"official": {}, "providerAccounts": {}}
 
     def _save(self, payload: dict[str, Any]) -> None:
         path = self._path()
@@ -124,6 +199,24 @@ class CredentialManager:
             raise RuntimeError("No hay clave configurada para cifrar credenciales oficiales")
         return Fernet(urlsafe_b64encode(hashlib.sha256(material.encode("utf-8")).digest()))
 
+    def _provider_cipher(self) -> Fernet:
+        """Use dedicated material for OAuth provider-account credentials.
+
+        Compatibility fallback is intentionally limited to development/test.
+        WhatsApp's existing ``official`` cipher remains unchanged.
+        """
+        settings = get_settings()
+        dedicated = str(getattr(settings, "provider_credentials_encryption_key", "") or "").strip()
+        environment = str(getattr(settings, "environment", "development") or "development").strip().lower()
+        if not dedicated and environment in {"production", "prod"}:
+            raise RuntimeError("PROVIDER_CREDENTIALS_ENCRYPTION_KEY is required in production")
+        material = dedicated or str(getattr(settings, "official_credentials_encryption_key", "") or "").strip()
+        if not material:
+            material = str(getattr(settings, "gateway_api_key", "") or "").strip()
+        if not material:
+            raise RuntimeError("No hay clave configurada para cifrar credenciales de provider")
+        return Fernet(urlsafe_b64encode(hashlib.sha256(material.encode("utf-8")).digest()))
+
     def _encrypt_secret(self, secret: str) -> str:
         return self._cipher().encrypt(secret.encode("utf-8")).decode("ascii")
 
@@ -138,6 +231,15 @@ class CredentialManager:
 
     def _decrypt_access_token(self, ciphertext: str) -> str:
         return self._decrypt_secret(ciphertext, secret_name="la credencial oficial")
+
+    def _encrypt_provider_access_token(self, access_token: str) -> str:
+        return self._provider_cipher().encrypt(access_token.encode("utf-8")).decode("ascii")
+
+    def _decrypt_provider_access_token(self, ciphertext: str) -> str:
+        try:
+            return self._provider_cipher().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError) as exc:
+            raise RuntimeError("No se pudo descifrar la credencial del provider; reconecta la cuenta") from exc
 
     def upsert_official_credentials(
         self,
@@ -192,6 +294,83 @@ class CredentialManager:
         if not isinstance(ciphertext, str) or not ciphertext.strip():
             return None
         return self._decrypt_access_token(ciphertext)
+
+    def upsert_provider_credentials(
+        self,
+        *,
+        account: ProviderAccountReference,
+        access_token: str,
+        access_token_ref: str,
+        source: str,
+        scopes: tuple[str, ...] | list[str] = (),
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ProviderCredentialRecord:
+        """Persist a generic provider-account credential for a later flow.
+
+        G1 deliberately supplies no OAuth/token refresh behavior; this is only
+        the encrypted storage contract required by those future phases.
+        """
+        if not isinstance(access_token, str) or not access_token.strip():
+            raise ValueError("access_token is required")
+        if not isinstance(access_token_ref, str) or not access_token_ref.strip():
+            raise ValueError("access_token_ref is required")
+        now = _now_iso()
+        payload = self._load()
+        records = payload.setdefault("providerAccounts", {})
+        key = account.storage_key()
+        previous = records.get(key) if isinstance(records.get(key), dict) else {}
+        record = {
+            "provider": account.provider_id.strip().lower(),
+            "channelType": account.channel_type.strip().lower(),
+            "providerAccountId": account.provider_account_id,
+            "accessTokenRef": access_token_ref.strip(),
+            "accessTokenHash": _hash_secret(access_token),
+            "accessTokenCiphertext": self._encrypt_provider_access_token(access_token),
+            "source": str(source or "unknown"),
+            "scopes": sorted({str(scope).strip() for scope in scopes if str(scope).strip()}),
+            "expiresAt": expires_at,
+            "createdAt": previous.get("createdAt") or now,
+            "updatedAt": now,
+            "metadata": _sanitize_metadata(metadata),
+        }
+        records[key] = record
+        self._save(payload)
+        audit_event(
+            "provider_account_credentials_upserted",
+            provider=record["provider"],
+            channelType=record["channelType"],
+            providerAccountId=record["providerAccountId"],
+            source=record["source"],
+        )
+        return self._provider_record_from_dict(record)
+
+    def get_provider_credentials(self, account: ProviderAccountReference) -> ProviderCredentialRecord | None:
+        record = self._load().get("providerAccounts", {}).get(account.storage_key())
+        return self._provider_record_from_dict(record) if isinstance(record, dict) else None
+
+    def get_provider_access_token(self, account: ProviderAccountReference) -> str | None:
+        record = self._load().get("providerAccounts", {}).get(account.storage_key())
+        ciphertext = record.get("accessTokenCiphertext") if isinstance(record, dict) else None
+        if not isinstance(ciphertext, str) or not ciphertext.strip():
+            return None
+        return self._decrypt_provider_access_token(ciphertext)
+
+    def delete_provider_credentials(self, account: ProviderAccountReference) -> bool:
+        payload = self._load()
+        records = payload.get("providerAccounts") if isinstance(payload.get("providerAccounts"), dict) else {}
+        if account.storage_key() not in records:
+            return False
+        records.pop(account.storage_key(), None)
+        payload["providerAccounts"] = records
+        self._save(payload)
+        audit_event(
+            "provider_account_credentials_deleted",
+            provider=account.provider_id,
+            channelType=account.channel_type,
+            providerAccountId=account.provider_account_id,
+        )
+        return True
 
     def get_or_create_registration_pin(self, instance_name: str, provided_pin: str | None = None) -> str:
         """Return the encrypted-at-rest 2FA PIN for a Cloud phone registration.
@@ -265,6 +444,25 @@ class CredentialManager:
             source=str(record.get("source") or "unknown"),
             created_at=record.get("createdAt"),
             updated_at=record.get("updatedAt"),
+            metadata=record.get("metadata") if isinstance(record.get("metadata"), dict) else {},
+        )
+
+    def _provider_record_from_dict(self, record: dict[str, Any]) -> ProviderCredentialRecord:
+        account = ProviderAccountReference(
+            provider_id=str(record.get("provider") or ""),
+            channel_type=str(record.get("channelType") or ""),
+            provider_account_id=str(record.get("providerAccountId") or ""),
+        )
+        raw_scopes = record.get("scopes") if isinstance(record.get("scopes"), list) else []
+        return ProviderCredentialRecord(
+            account=account,
+            access_token_ref=str(record.get("accessTokenRef") or ""),
+            access_token_hash=str(record.get("accessTokenHash") or "") or None,
+            source=str(record.get("source") or "unknown"),
+            scopes=tuple(str(scope) for scope in raw_scopes),
+            expires_at=str(record["expiresAt"]) if record.get("expiresAt") else None,
+            created_at=str(record["createdAt"]) if record.get("createdAt") else None,
+            updated_at=str(record["updatedAt"]) if record.get("updatedAt") else None,
             metadata=record.get("metadata") if isinstance(record.get("metadata"), dict) else {},
         )
 

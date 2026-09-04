@@ -12,6 +12,7 @@ from app.domain.models import ChannelId, MethodId, ProvisionedChannel
 from app.domain.registries import DomainRegistry, RegistryError
 from app.domain.runtime_resolver import RuntimeResolver
 from app.platforms.meta import MetaPlatform
+from app.providers.base import ProviderCapabilities
 
 
 @dataclass(frozen=True)
@@ -24,9 +25,21 @@ class InstagramSendRequest:
     attachment_url: str | None = None
 
 
-class InstagramProvider:
+class MetaInstagramProvider:
+    """Meta transport adapter for Instagram, limited to the G1 foundation."""
+
+    provider_id = "meta"
+    channel_type = "instagram"
     channel_id = ChannelId.INSTAGRAM
     method_id = MethodId.OFFICIAL
+
+    _capabilities = ProviderCapabilities(
+        inbound_text="foundation",
+        inbound_media="foundation",
+        outbound_text="foundation",
+        webhook="implemented",
+        reactions="foundation",
+    )
 
     def __init__(
         self,
@@ -40,6 +53,10 @@ class InstagramProvider:
 
     def validate_payload(self, payload: dict[str, Any]) -> bool:
         return payload.get("object") == "instagram" and isinstance(payload.get("entry"), list)
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return self._capabilities
 
     def verify_challenge(
         self,
@@ -67,10 +84,10 @@ class InstagramProvider:
         for entry in payload.get("entry") or []:
             if not isinstance(entry, dict):
                 continue
-            instance = str(entry.get("id") or "")
+            provider_account_id = str(entry.get("id") or "")
             for event in entry.get("messaging") or []:
                 if isinstance(event, dict):
-                    normalized.append(self._normalize_event(event, instance=instance, raw=payload))
+                    normalized.append(self._normalize_event(event, provider_account_id=provider_account_id, raw=payload))
         return tuple(normalized)
 
     async def send(self, request: InstagramSendRequest) -> dict[str, Any]:
@@ -141,16 +158,16 @@ class InstagramProvider:
             }
         }
 
-    def _normalize_event(self, event: dict[str, Any], *, instance: str, raw: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_event(self, event: dict[str, Any], *, provider_account_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         now_ms = int(time.time() * 1000)
         source_timestamp = _to_int(event.get("timestamp"))
         sender_id = _nested_str(event, "sender", "id")
-        recipient_id = _nested_str(event, "recipient", "id") or instance
+        recipient_id = _nested_str(event, "recipient", "id") or provider_account_id
         base = {
             "id": str(uuid.uuid4())[:16],
             "event": "INSTAGRAM_MESSAGE",
             "sourceEvent": "instagram.messaging",
-            "instance": instance,
+            "providerAccountId": provider_account_id,
             "timestamp": now_ms,
             "sourceTimestamp": source_timestamp,
             "layer": "business",
@@ -161,6 +178,8 @@ class InstagramProvider:
             "error": None,
             "metadata": {
                 "channelId": self.channel_id.value,
+                "providerId": self.provider_id,
+                "providerAccountId": provider_account_id,
                 "methodId": self.method_id.value,
                 "platformId": "meta",
             },
@@ -366,3 +385,7 @@ def _to_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+# Kept as an import-compatible name for callers that existed before G1.
+InstagramProvider = MetaInstagramProvider
