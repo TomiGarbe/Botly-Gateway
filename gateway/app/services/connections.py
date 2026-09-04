@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import time
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -30,6 +31,9 @@ from app.services.instances_contract import normalize_instance_list
 from app.services.evolution_webhook import ensure_evolution_webhook
 from app.services.credential_manager import CredentialManager, ProviderAccountReference, get_credential_manager
 from app.services.core_channel_credentials import CoreChannelCredentialStore, get_core_channel_credential_store
+from app.providers.instagram import MetaInstagramProvider
+from app.domain.models import ChannelId, ChannelStatus, MethodId, ProvisionedChannel, RuntimeId
+from app.services.normalization import save_event
 
 
 _MIGRATION_CLIENT_ID = str(uuid5(NAMESPACE_URL, "botly-gateway:migrated-connections"))
@@ -135,14 +139,14 @@ class ConnectionService:
                 health=str(record.get("status_health") or "unknown"),
             ),
             capabilities=ConnectionCapabilities(
-                supports_messaging=not is_instagram,
+                supports_messaging=True,
                 # G3 can receive and verify Meta Instagram callbacks. Message
                 # delivery to Core remains deliberately unavailable until G4.
                 supports_webhook=True,
                 supports_media=not is_instagram,
                 supports_qr=str(record.get("provider_id") or "meta") == "evolution",
                 supports_reconnect=True,
-                supports_api_key=True,
+                supports_api_key=not is_instagram,
                 supports_official_api=str(record.get("provider_id") or "meta") == "meta",
             ),
             webhook=ConnectionWebhook(supported=True),
@@ -326,6 +330,42 @@ class ConnectionService:
         if str(record.get("status_state") or "") != "connected":
             raise UnsupportedConnectionProviderError("Instagram connection is not active")
         return self._stored_connection(record)
+
+    async def send_instagram_text(self, *, connection_id: str, external_id: str, text: str, provider: MetaInstagramProvider | None = None) -> dict[str, Any]:
+        """Send text through the provider adapter; externalId is never normalized as a phone."""
+        record = self.require_instagram_meta_connection(connection_id)
+        recipient = str(external_id or "").strip()
+        content = str(text or "").strip()
+        if not recipient:
+            raise ValueError("Instagram recipient externalId is required")
+        if not content:
+            raise ValueError("Instagram text is required")
+        if not self.instagram_readiness(connection_id).get("ready"):
+            raise UnsupportedConnectionProviderError("Instagram connection is not ready for messaging")
+        binding = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else {}
+        account_id = str(binding.get("providerAccountId") or "").strip()
+        account = ProviderAccountReference("meta", "instagram", account_id)
+        token = self._credentials.get_provider_access_token(account)
+        if not token:
+            raise UnsupportedConnectionProviderError("Instagram credentials are unavailable")
+        channel = ProvisionedChannel(
+            id=f"connection:{connection_id}", channel_id=ChannelId.INSTAGRAM, method_id=MethodId.OFFICIAL,
+            integration_id="instagram.official.meta", runtime_id=RuntimeId.META, display_name=str(record.get("name") or "Instagram"),
+            status=ChannelStatus.ACTIVE, metadata={"graphSendNodeId": account_id},
+        )
+        canonical = {"channel": {"channelType": "instagram"}, "recipient": {"externalId": recipient}, "message": {"type": "text", "text": content}}
+        result = await (provider or MetaInstagramProvider()).send_text(channel=channel, recipient_id=recipient, text=content, access_token=token)
+        message_id = str(result.get("message_id") or result.get("messageId") or "") or None
+        save_event({
+            "id": str(uuid4()), "event": "LOCAL_OUTBOUND_SEND", "layer": "business", "instance": connection_id,
+            "timestamp": int(time.time() * 1000), "type": "message", "subtype": "text", "messageType": "text", "direction": "outbound",
+            "text": content, "content": {"text": content}, "sender": account_id, "recipient": recipient,
+            "message": {"id": message_id, "from": account_id, "fromMe": True, "kind": "text", "text": content}, "provider": "meta",
+            "providerDelivery": {"provider": "meta", "providerMessageId": message_id, "connectionId": connection_id, "channelId": "instagram"},
+            "meta": {"connectionId": connection_id, "channelId": "instagram", "providerAccountId": account_id}, "canonical": canonical,
+        })
+        self._registry.update_connection_record(connection_id, {"last_activity_at": _now(), "updated_at": _now()})
+        return {"ok": True, "providerMessageId": message_id, "recipient": {"externalId": recipient}}
 
     def bind_instagram_core_channel(
         self,

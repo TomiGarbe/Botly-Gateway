@@ -165,6 +165,15 @@ class ConnectionQuickMessageRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4096)
 
 
+class InstagramOutboundMessageRequest(BaseModel):
+    """A text send whose recipient is an opaque Instagram external ID."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    external_id: str = Field(..., min_length=1, max_length=512)
+    text: str = Field(..., min_length=1, max_length=4096)
+
+
 class SendTextRequest(BaseModel):
     number: str = Field(..., min_length=5)
     text: str = Field(..., min_length=1, max_length=4096)

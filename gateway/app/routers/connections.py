@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models.requests import CoreChannelBindingRequest, ConnectionQuickMessageRequest, ConnectionWebhookRequest, CreateConnectionRequest, UpdateConnectionRequest
+from app.models.requests import CoreChannelBindingRequest, ConnectionQuickMessageRequest, ConnectionWebhookRequest, CreateConnectionRequest, InstagramOutboundMessageRequest, UpdateConnectionRequest
 from app.services.connections import (
     ChannelDisabledError,
     ConnectionClientNotFoundError,
@@ -28,6 +28,7 @@ from app.services.authorization import require_reviewer_client_access, require_r
 from app.services.credential_manager import ProviderAccountReference, get_credential_manager
 from app.services.core_control_plane import CoreControlPlaneError, get_core_control_plane_client
 from app.services.gateway_settings import get_gateway_settings_service
+from app.services.normalization import list_logical_messages
 from app.services.instagram_oauth import InstagramOAuthError, InstagramOAuthIntent, InstagramOAuthService, InstagramOAuthStateStore
 
 
@@ -244,6 +245,27 @@ async def instagram_connection_readiness(connection_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Connection not found")
     except (UnsupportedConnectionProviderError, InstagramOAuthError) as exc:
         raise HTTPException(status_code=getattr(exc, "status_code", 422), detail=str(exc))
+
+
+@router.get("/{connection_id}/instagram/messages")
+async def list_instagram_messages(connection_id: str, request: Request, limit: int = Query(default=200, ge=1, le=500)):
+    connection = await _service.get_connection(connection_id)
+    require_reviewer_connection_access(request, connection)
+    _service.require_instagram_meta_connection(connection_id)
+    return {"items": list_logical_messages(connection_id, limit=limit)}
+
+
+@router.post("/{connection_id}/instagram/messages")
+async def send_instagram_message(connection_id: str, body: InstagramOutboundMessageRequest, request: Request):
+    try:
+        _authenticated_actor_id(request)
+        connection = await _service.get_connection(connection_id)
+        require_reviewer_connection_access(request, connection)
+        return await _service.send_instagram_text(connection_id=connection_id, external_id=body.external_id, text=body.text)
+    except ConnectionNotFoundError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except (UnsupportedConnectionProviderError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/{connection_id}/instagram/disconnect")
