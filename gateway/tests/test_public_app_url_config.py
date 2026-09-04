@@ -27,3 +27,13 @@ def test_cors_uses_the_rebranded_gateway_origin() -> None:
 
     assert settings.is_cors_origin_allowed("https://gateway.botly.com.ar")
     assert not settings.is_cors_origin_allowed("https://panel-evolution.botly.com.ar")
+
+
+def test_frontend_app_url_is_independent_from_gateway_public_url() -> None:
+    settings = _settings(
+        PUBLIC_APP_URL="https://gateway-server.botly.com.ar",
+        FRONTEND_APP_URL="https://gateway.botly.com.ar",
+    )
+
+    assert settings.public_app_url == "https://gateway-server.botly.com.ar"
+    assert settings.frontend_app_url == "https://gateway.botly.com.ar"

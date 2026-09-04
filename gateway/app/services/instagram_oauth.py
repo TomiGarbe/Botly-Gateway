@@ -23,9 +23,20 @@ _LOCK = threading.Lock()
 
 
 class InstagramOAuthError(ValueError):
-    def __init__(self, message: str, *, status_code: int = 422) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 422,
+        operation: str | None = None,
+        provider_http_status: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        # These values are operational metadata only. They intentionally omit
+        # request/response bodies, codes, tokens and credentials.
+        self.operation = operation
+        self.provider_http_status = provider_http_status
 
 
 @dataclass(frozen=True)
@@ -201,11 +212,21 @@ class InstagramOAuthService:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             if response.status_code >= 400:
-                raise InstagramOAuthError("Instagram account discovery failed", status_code=502)
+                raise InstagramOAuthError(
+                    "Instagram account discovery failed",
+                    status_code=502,
+                    operation="GET /me",
+                    provider_http_status=response.status_code,
+                )
             try:
                 payload = response.json()
             except ValueError as exc:
-                raise InstagramOAuthError("Instagram account discovery returned malformed data", status_code=502) from exc
+                raise InstagramOAuthError(
+                    "Instagram account discovery returned malformed data",
+                    status_code=502,
+                    operation="GET /me",
+                    provider_http_status=response.status_code,
+                ) from exc
         except httpx.TimeoutException as exc:
             raise InstagramOAuthError("Timeout during Instagram account discovery", status_code=504) from exc
         except httpx.HTTPError as exc:
@@ -242,11 +263,21 @@ class InstagramOAuthService:
                 },
             )
             if response.status_code >= 400:
-                raise InstagramOAuthError("Instagram authorization code exchange failed", status_code=502)
+                raise InstagramOAuthError(
+                    "Instagram authorization code exchange failed",
+                    status_code=502,
+                    operation="POST /oauth/access_token",
+                    provider_http_status=response.status_code,
+                )
             try:
                 payload = response.json()
             except ValueError as exc:
-                raise InstagramOAuthError("Instagram authorization code exchange returned malformed data", status_code=502) from exc
+                raise InstagramOAuthError(
+                    "Instagram authorization code exchange returned malformed data",
+                    status_code=502,
+                    operation="POST /oauth/access_token",
+                    provider_http_status=response.status_code,
+                ) from exc
             if not isinstance(payload, dict):
                 raise InstagramOAuthError("Instagram authorization code exchange returned malformed data", status_code=502)
             return payload

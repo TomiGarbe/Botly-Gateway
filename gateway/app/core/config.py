@@ -30,6 +30,9 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("PUBLIC_APP_URL", "PUBLIC_BASE_URL"),
     )
+    # Browser UI origin. Keep this separate from PUBLIC_APP_URL, which is the
+    # Gateway's canonical external URL and is used by provider webhooks.
+    frontend_app_url: str = Field(default="", validation_alias="FRONTEND_APP_URL")
     log_level: str = "info"
     debug: bool = False
     environment: str = "development"

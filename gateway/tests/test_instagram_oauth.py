@@ -16,10 +16,12 @@ from app.core.config import Settings
 from app.services.credential_manager import CredentialManager, ProviderAccountReference
 from app.services.gateway_settings import GatewaySettingsService
 from app.services.instagram_oauth import (
+    InstagramAccount,
     InstagramOAuthError,
     InstagramOAuthIntent,
     InstagramOAuthService,
     InstagramOAuthStateStore,
+    InstagramOAuthToken,
 )
 from app.routers import connections as connections_router
 
@@ -39,6 +41,7 @@ def _oauth_settings(**changes):
         "instagram_oauth_authorize_url": "https://instagram.example/oauth/authorize",
         "instagram_oauth_token_url": "https://instagram.example/oauth/access_token",
         "instagram_graph_api_url": "https://instagram.example",
+        "frontend_app_url": "https://gateway.example",
         "meta_signup_timeout_seconds": 3,
     }
     values.update(changes)
@@ -319,7 +322,11 @@ def test_ui_callback_is_opt_in_and_never_puts_oauth_data_in_the_redirect(monkeyp
     monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
     monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
     monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
-    monkeypatch.setattr(connections_router, "get_settings", lambda: SimpleNamespace(public_app_url="https://gateway.example"))
+    monkeypatch.setattr(
+        connections_router,
+        "get_settings",
+        lambda: SimpleNamespace(public_app_url="https://api.example", frontend_app_url="https://gateway.example"),
+    )
 
     response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="one-time-code", error=None, error_description=None))
 
@@ -327,3 +334,120 @@ def test_ui_callback_is_opt_in_and_never_puts_oauth_data_in_the_redirect(monkeyp
     assert response.headers["location"] == f"https://gateway.example/connections/{connection.id}/instagram/complete?oauth=success"
     assert "one-time-code" not in response.headers["location"]
     assert "callback-token" not in response.headers["location"]
+
+
+class _CapturedLogger:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def info(self, event: str, **fields) -> None:
+        self.events.append((event, fields))
+
+    def warning(self, event: str, **fields) -> None:
+        self.events.append((event, fields))
+
+
+def _ui_callback_state(monkeypatch, tmp_path):
+    service, _, client, connection = _connection_service(monkeypatch, tmp_path)
+    states = InstagramOAuthStateStore(tmp_path / "callback_failure_states.json")
+    state = states.create(InstagramOAuthIntent(connection.id, client.id, "actor-a", ui_return=True))
+    captured = _CapturedLogger()
+    monkeypatch.setattr(connections_router, "_service", service)
+    monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
+    monkeypatch.setattr(connections_router, "logger", captured)
+    monkeypatch.setattr(
+        connections_router,
+        "get_settings",
+        lambda: SimpleNamespace(public_app_url="https://api.example", frontend_app_url="https://frontend.example"),
+    )
+    return service, connection, state, captured
+
+
+def _callback_failure_event(captured: _CapturedLogger, stage: str) -> dict:
+    matches = [fields for _, fields in captured.events if fields.get("stage") == stage and fields.get("outcome") == "failed"]
+    assert matches, captured.events
+    return matches[0]
+
+
+def test_ui_callback_logs_safe_token_exchange_failure(monkeypatch, tmp_path) -> None:
+    _, connection, state, captured = _ui_callback_state(monkeypatch, tmp_path)
+
+    class _OAuth:
+        async def exchange_code(self, _code):
+            raise InstagramOAuthError(
+                "secret-token-and-code-must-not-be-logged",
+                status_code=502,
+                operation="POST /oauth/access_token",
+                provider_http_status=400,
+            )
+
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="one-time-code-must-not-be-logged", error=None, error_description=None))
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=failed"
+    event = _callback_failure_event(captured, "token_exchange")
+    assert event["provider_http_status"] == 400
+    assert event["operation"] == "POST /oauth/access_token"
+    assert event["error"] == "Instagram authorization code exchange failed"
+    assert "secret-token-and-code-must-not-be-logged" not in json.dumps(captured.events)
+    assert "one-time-code-must-not-be-logged" not in json.dumps(captured.events)
+
+
+def test_ui_callback_logs_safe_account_discovery_failure(monkeypatch, tmp_path) -> None:
+    _, connection, state, captured = _ui_callback_state(monkeypatch, tmp_path)
+
+    class _OAuth:
+        async def exchange_code(self, _code):
+            return InstagramOAuthToken("access-token-must-not-be-logged", None, ("instagram_business_basic",))
+
+        async def discover_account(self, _token):
+            raise InstagramOAuthError("access-token-must-not-be-logged", status_code=502, operation="GET /me", provider_http_status=403)
+
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=failed"
+    event = _callback_failure_event(captured, "account_discovery")
+    assert event["provider_http_status"] == 403
+    assert "access-token-must-not-be-logged" not in json.dumps(captured.events)
+
+
+def test_ui_callback_logs_credential_persistence_and_binding_failures(monkeypatch, tmp_path) -> None:
+    service, connection, state, captured = _ui_callback_state(monkeypatch, tmp_path)
+
+    class _OAuth:
+        def requested_scopes(self):
+            return ("instagram_business_basic",)
+
+        async def exchange_code(self, _code):
+            return InstagramOAuthToken("access-token", None, ("instagram_business_basic",))
+
+        async def discover_account(self, _token):
+            return InstagramAccount("17841400000000000", account_type="BUSINESS")
+
+    class _Credentials:
+        def upsert_provider_credentials(self, **_kwargs):
+            raise RuntimeError("secret-persistence-detail-must-not-be-logged")
+
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: _Credentials())
+    persistence_response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
+    assert persistence_response.status_code == 303
+    assert _callback_failure_event(captured, "credential_persistence")["error"] == "Instagram credential persistence failed"
+    assert "secret-persistence-detail-must-not-be-logged" not in json.dumps(captured.events)
+
+    binding_state = InstagramOAuthStateStore(tmp_path / "binding_failure_states.json")
+    binding_token = binding_state.create(InstagramOAuthIntent(connection.id, connection.client_id, "actor-a", ui_return=True))
+    monkeypatch.setattr(connections_router, "_instagram_oauth_states", binding_state)
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
+    monkeypatch.setattr(
+        service,
+        "assert_instagram_provider_account_available",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(UnsupportedConnectionProviderError("duplicate")),
+    )
+    binding_response = asyncio.run(connections_router.instagram_oauth_callback(state=binding_token, code="code", error=None, error_description=None))
+    assert binding_response.status_code == 303
+    assert _callback_failure_event(captured, "binding")["error"] == "Instagram provider account binding failed"
