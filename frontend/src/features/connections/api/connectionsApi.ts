@@ -1,4 +1,4 @@
-import type { Connection, CreateConnectionInput } from '@/domain/connection'
+import type { Connection, CreateConnectionInput, InstagramReadiness } from '@/domain/connection'
 import { gatewayRequest } from '@/shared/lib/gatewayClient'
 
 interface ApiConnection {
@@ -27,6 +27,9 @@ interface ApiConnection {
   created_at: string | null
   updated_at: string | null
   runtime_name: string | null
+  provider_account: Connection['providerAccount']
+  core_channel: Connection['coreChannel']
+  readiness: InstagramReadiness | null
 }
 
 export function toConnection(payload: ApiConnection): Connection {
@@ -56,6 +59,9 @@ export function toConnection(payload: ApiConnection): Connection {
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
     runtimeName: payload.runtime_name,
+    providerAccount: payload.provider_account,
+    coreChannel: payload.core_channel,
+    readiness: payload.readiness,
   }
 }
 
@@ -94,4 +100,32 @@ export async function updateConnectionName(connectionId: string, name: string): 
 
 export async function deleteConnection(connectionId: string): Promise<void> {
   await gatewayRequest<void>(`/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' })
+}
+
+export interface CoreChannelOption {
+  id: string
+  name: string
+  channel_type: string
+  status: string
+}
+
+export async function getInstagramReadiness(connectionId: string): Promise<InstagramReadiness> {
+  return gatewayRequest<InstagramReadiness>(`/connections/${encodeURIComponent(connectionId)}/instagram/readiness`, { cache: 'no-store' })
+}
+
+export async function listInstagramCoreChannels(connectionId: string): Promise<CoreChannelOption[]> {
+  const payload = await gatewayRequest<{ items: CoreChannelOption[] }>(`/connections/${encodeURIComponent(connectionId)}/instagram/core-channels`, { cache: 'no-store' })
+  return payload.items
+}
+
+export async function bindInstagramCoreChannel(connectionId: string, coreChannelId: string): Promise<Connection> {
+  const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/core-channel`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ core_channel_id: coreChannelId }),
+  })
+  return toConnection(payload)
+}
+
+export async function disconnectInstagram(connectionId: string): Promise<Connection> {
+  const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/disconnect`, { method: 'POST' })
+  return toConnection(payload)
 }

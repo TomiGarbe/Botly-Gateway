@@ -109,7 +109,11 @@ class ConnectionService:
         core_channel_data = record.get("core_channel") if isinstance(record.get("core_channel"), dict) else None
         core_channel = None
         if core_channel_data and str(core_channel_data.get("channelId") or "").strip():
-            core_channel = {"channelId": str(core_channel_data["channelId"]), "configured": True}
+            core_channel = {
+                "channelId": str(core_channel_data["channelId"]),
+                "name": str(core_channel_data.get("name") or "") or None,
+                "configured": True,
+            }
         readiness = self.instagram_readiness(str(record["id"])) if is_instagram else None
         return Connection(
             id=str(record["id"]),
@@ -328,17 +332,19 @@ class ConnectionService:
         *,
         connection_id: str,
         core_channel_id: str,
-        channel_api_key: str,
+        dispatch_credential: str,
+        core_binding_id: str,
+        core_channel_name: str | None = None,
     ) -> Connection:
         """Bind one Core Channel credential to one Meta Instagram connection."""
         self.require_instagram_meta_connection(connection_id)
         clean_channel_id = str(core_channel_id or "").strip()
-        if not clean_channel_id or not str(channel_api_key or "").strip():
-            raise UnsupportedConnectionProviderError("Core channel ID and API key are required")
+        if not clean_channel_id or not str(dispatch_credential or "").strip() or not str(core_binding_id or "").strip():
+            raise UnsupportedConnectionProviderError("Core channel binding response is incomplete")
         credential_ref = self._core_channel_credentials.upsert(
             connection_id=connection_id,
             core_channel_id=clean_channel_id,
-            channel_api_key=channel_api_key,
+            channel_api_key=dispatch_credential,
         )
         updated = self._registry.update_connection_record(
             connection_id,
@@ -346,6 +352,8 @@ class ConnectionService:
                 "core_channel": {
                     "channelId": clean_channel_id,
                     "credentialRef": credential_ref,
+                    "bindingId": str(core_binding_id),
+                    "name": str(core_channel_name or "").strip() or None,
                 },
                 "updated_at": _now(),
             },
@@ -361,7 +369,11 @@ class ConnectionService:
         channel_id = str((binding or {}).get("channelId") or "").strip()
         if not channel_id:
             return None
-        return {"channelId": channel_id, "credentialRef": str(binding.get("credentialRef") or "")}
+        return {
+            "channelId": channel_id,
+            "credentialRef": str(binding.get("credentialRef") or ""),
+            "bindingId": str(binding.get("bindingId") or ""),
+        }
 
     def disconnect_instagram_connection(self, connection_id: str) -> Connection:
         record = self.require_instagram_meta_connection(connection_id)

@@ -40,6 +40,26 @@ export interface Connection {
   createdAt: string | null
   updatedAt: string | null
   runtimeName: string | null
+  providerAccount: {
+    provider: string
+    channelType: string
+    providerAccountId: string
+    metadata: { username?: string; displayName?: string; accountType?: string }
+  } | null
+  coreChannel: { channelId: string; name: string | null; configured: boolean } | null
+  readiness: InstagramReadiness | null
+}
+
+export interface InstagramReadiness {
+  state: string
+  ready: boolean
+  configured?: boolean
+  authenticated?: boolean
+  accountDiscovered?: boolean
+  credentialValid?: boolean
+  requiredScopesPresent?: boolean
+  missingScopes?: string[]
+  tokenExpiry?: string
 }
 
 export interface CreateConnectionInput {

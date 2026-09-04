@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     core_channel_credentials_path: str = "/var/lib/botly/core/core_channel_credentials.json"
     core_channel_credentials_encryption_key: str = ""
     core_inbound_url: str = ""
+    # Dedicated Core control-plane base URL. It is deliberately separate from
+    # CORE_INBOUND_URL, which only receives canonical events from G4.
+    core_control_plane_url: str = ""
+    # Server-to-server credential shared only with Core's narrow Gateway
+    # control-plane. It is never a browser or channel credential.
+    gateway_control_plane_api_key: str = ""
+    core_control_plane_timeout_seconds: int = 10
     core_inbound_deliveries_path: str = "/var/lib/botly/core/inbound_deliveries.json"
     core_inbound_delivery_max_attempts: int = 5
     core_inbound_delivery_backoff_base_seconds: int = 5

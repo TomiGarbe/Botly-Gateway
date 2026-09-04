@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from urllib.parse import quote, urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.requests import CoreChannelBindingRequest, ConnectionQuickMessageRequest, ConnectionWebhookRequest, CreateConnectionRequest, UpdateConnectionRequest
 from app.services.connections import (
@@ -23,6 +26,7 @@ from app.services.connection_operations import (
 from app.services.connection_diagnostics import get_connection_diagnostics_service
 from app.services.authorization import require_reviewer_client_access, require_reviewer_connection_access
 from app.services.credential_manager import ProviderAccountReference, get_credential_manager
+from app.services.core_control_plane import CoreControlPlaneError, get_core_control_plane_client
 from app.services.gateway_settings import get_gateway_settings_service
 from app.services.instagram_oauth import InstagramOAuthError, InstagramOAuthIntent, InstagramOAuthService, InstagramOAuthStateStore
 
@@ -51,6 +55,11 @@ _instagram_oauth = InstagramOAuthService()
 _instagram_oauth_states = InstagramOAuthStateStore()
 
 
+def _core_control_plane_http_error(exc: CoreControlPlaneError) -> HTTPException:
+    # The client deliberately emits only safe, user-actionable messages.
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
 def _authenticated_actor_id(request: Request) -> str:
     user = getattr(request.state, "user", None)
     actor_id = str(getattr(user, "id", "") or "").strip()
@@ -59,8 +68,19 @@ def _authenticated_actor_id(request: Request) -> str:
     return actor_id
 
 
+def _instagram_ui_callback_url(connection_id: str, outcome: str) -> str:
+    """Build a public, credential-free UI return URL after an opt-in OAuth flow."""
+    public_base = str(get_settings().public_app_url or "").strip().rstrip("/")
+    path = f"/connections/{quote(connection_id, safe='')}/instagram/complete"
+    return f"{public_base}{path}?{urlencode({'oauth': outcome})}"
+
+
 @router.get("/meta/instagram/authorize")
-async def authorize_instagram(request: Request, connection_id: str = Query(..., min_length=1, max_length=128)):
+async def authorize_instagram(
+    request: Request,
+    connection_id: str = Query(..., min_length=1, max_length=128),
+    ui_return: bool = False,
+):
     """Create a server-owned OAuth intent and redirect to Meta Instagram Login."""
     try:
         actor_id = _authenticated_actor_id(request)
@@ -71,7 +91,12 @@ async def authorize_instagram(request: Request, connection_id: str = Query(..., 
         get_gateway_settings_service().require_provider_available("meta")
         _instagram_oauth.validate_configuration()
         state = _instagram_oauth_states.create(
-            InstagramOAuthIntent(connection_id=connection_id, client_id=str(record["client_id"]), actor_id=actor_id)
+            InstagramOAuthIntent(
+                connection_id=connection_id,
+                client_id=str(record["client_id"]),
+                actor_id=actor_id,
+                ui_return=ui_return,
+            )
         )
         return RedirectResponse(_instagram_oauth.authorization_url(state=state), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     except ConnectionNotFoundError:
@@ -88,9 +113,12 @@ async def instagram_oauth_callback(
     error_description: str | None = Query(default=None),
 ):
     """Complete a state-bound OAuth intent. This callback intentionally accepts no IDs from clients."""
+    intent: InstagramOAuthIntent | None = None
+    ui_outcome = "failed"
     try:
         intent = _instagram_oauth_states.consume(state)
         if error:
+            ui_outcome = "cancelled" if error == "access_denied" else "failed"
             raise InstagramOAuthError("Instagram authorization was denied" if error == "access_denied" else "Instagram authorization failed")
         if not code:
             raise InstagramOAuthError("OAuth code is required")
@@ -118,10 +146,16 @@ async def instagram_oauth_callback(
             metadata=account_data.metadata(),
             required_scopes=_instagram_oauth.requested_scopes(),
         )
+        if intent.ui_return:
+            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, "success"), status_code=status.HTTP_303_SEE_OTHER)
         return {"ok": True, "connection": connection.public_dict()}
     except ConnectionNotFoundError:
+        if intent and intent.ui_return:
+            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, "failed"), status_code=status.HTTP_303_SEE_OTHER)
         raise HTTPException(status_code=404, detail="Connection not found")
     except (UnsupportedConnectionProviderError, InstagramOAuthError) as exc:
+        if intent and intent.ui_return:
+            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, ui_outcome), status_code=status.HTTP_303_SEE_OTHER)
         raise HTTPException(status_code=getattr(exc, "status_code", 422), detail=str(exc))
 
 
@@ -144,6 +178,17 @@ async def disconnect_instagram(connection_id: str, request: Request):
         _authenticated_actor_id(request)
         connection = await _service.get_connection(connection_id)
         require_reviewer_connection_access(request, connection)
+        binding = _service.instagram_core_channel_binding(connection_id)
+        # Legacy bindings created before the control-plane have no Core binding
+        # identifier. Preserve their existing local disconnect behavior.
+        if binding and binding.get("bindingId"):
+            try:
+                await get_core_control_plane_client().revoke_binding(
+                    gateway_client_id=connection.client_id,
+                    binding_id=binding["bindingId"],
+                )
+            except CoreControlPlaneError as exc:
+                raise _core_control_plane_http_error(exc)
         return _service.disconnect_instagram_connection(connection_id).public_dict()
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -153,20 +198,52 @@ async def disconnect_instagram(connection_id: str, request: Request):
 
 @router.put("/{connection_id}/instagram/core-channel")
 async def bind_instagram_core_channel(connection_id: str, body: CoreChannelBindingRequest, request: Request):
-    """Store a server-side Core Channel binding; the API key is never returned."""
+    """Bind a selected Core Channel without accepting browser credentials."""
     try:
         _authenticated_actor_id(request)
         connection = await _service.get_connection(connection_id)
         require_reviewer_connection_access(request, connection)
+        _service.require_instagram_meta_connection(connection_id)
+        result = await get_core_control_plane_client().bind(
+            gateway_client_id=connection.client_id,
+            gateway_connection_id=connection_id,
+            core_channel_id=body.core_channel_id,
+            channel_type="instagram",
+        )
         return _service.bind_instagram_core_channel(
             connection_id=connection_id,
-            core_channel_id=body.core_channel_id,
-            channel_api_key=body.channel_api_key,
+            core_channel_id=result.channel.id,
+            dispatch_credential=result.dispatch_credential,
+            core_binding_id=result.id,
+            core_channel_name=result.channel.name,
         ).public_dict()
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
+    except CoreControlPlaneError as exc:
+        raise _core_control_plane_http_error(exc)
     except (UnsupportedConnectionProviderError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/{connection_id}/instagram/core-channels")
+async def list_instagram_core_channels(connection_id: str, request: Request):
+    """Expose only tenant-scoped, safe Core Channel metadata to the UI."""
+    try:
+        _authenticated_actor_id(request)
+        connection = await _service.get_connection(connection_id)
+        require_reviewer_connection_access(request, connection)
+        _service.require_instagram_meta_connection(connection_id)
+        channels = await get_core_control_plane_client().discover_channels(
+            gateway_client_id=connection.client_id,
+            channel_type="instagram",
+        )
+        return {"items": [channel.public_dict() for channel in channels]}
+    except ConnectionNotFoundError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except UnsupportedConnectionProviderError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except CoreControlPlaneError as exc:
+        raise _core_control_plane_http_error(exc)
 
 
 @router.get("")

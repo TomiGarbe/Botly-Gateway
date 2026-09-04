@@ -1,4 +1,4 @@
-import { BarChart3, Bell, ChevronRight, LayoutDashboard, LogOut, Settings, Users } from 'lucide-react'
+import { BarChart3, Bell, ChevronRight, Link2, LayoutDashboard, LogOut, Settings, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../providers/AuthProvider'
 
@@ -6,6 +6,7 @@ const navigation = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/clients', label: 'Clientes', icon: Users },
+  { to: '/connections', label: 'Conexiones', icon: Link2 },
   { to: '/alerts', label: 'Alertas', icon: Bell },
   { to: '/settings', label: 'Configuración', icon: Settings },
 ]
@@ -37,7 +38,7 @@ export function AppShell() {
           <span>Botly <strong>Gateway</strong></span>
         </div>
         <nav className="app-navigation">
-        {navigation.filter((item) => !isReviewer || item.to === '/clients' || item.to === '/analytics').map(({ to, label, icon: Icon }) => (
+        {navigation.filter((item) => !isReviewer || item.to === '/clients' || item.to === '/connections' || item.to === '/analytics').map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}>
               <Icon size={17} aria-hidden="true" />
               {label}

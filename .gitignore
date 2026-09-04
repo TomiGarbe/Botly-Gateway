@@ -35,4 +35,5 @@ Thumbs.db
 
 # Extras
 tmp/
-docs/
+docs/*
+!docs/INSTAGRAM_UI_CONNECTION_FLOW.md

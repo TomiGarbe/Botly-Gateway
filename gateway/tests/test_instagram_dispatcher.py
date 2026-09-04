@@ -92,7 +92,12 @@ def _bound_dispatcher(monkeypatch, tmp_path, handler):
         expires_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
     )
     service.bind_instagram_provider_account(connection_id=connection.id, account=account, metadata={}, required_scopes=())
-    service.bind_instagram_core_channel(connection_id=connection.id, core_channel_id="core-channel-a", channel_api_key="channel-api-key-a")
+    service.bind_instagram_core_channel(
+        connection_id=connection.id,
+        core_channel_id="core-channel-a",
+        dispatch_credential="channel-api-key-a",
+        core_binding_id="binding-a",
+    )
     store = CoreInboundDeliveryStore(tmp_path / "deliveries.json")
     dispatcher = CoreInboundDispatcher(
         store=store,

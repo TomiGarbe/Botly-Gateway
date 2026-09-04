@@ -21,6 +21,7 @@ import { deleteConnection, getConnection, updateConnectionName } from '../api/co
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { ConnectionWebhooks } from '../components/ConnectionWebhooks'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
+import { InstagramConnectionPanel } from '../components/InstagramConnectionPanel'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
 
@@ -94,7 +95,9 @@ export function ConnectionDetailPage() {
   }, [connectionId])
 
   useEffect(() => { void loadConnection() }, [loadConnection])
-  useEffect(() => { void loadOperations() }, [loadOperations])
+  useEffect(() => {
+    if (connection && !(connection.provider.id === 'meta' && connection.channel.id === 'instagram')) void loadOperations()
+  }, [connection, loadOperations])
   useEffect(() => {
     if (location.pathname.endsWith('/webhooks')) setActiveTab('webhooks')
     else {
@@ -102,8 +105,14 @@ export function ConnectionDetailPage() {
       setActiveTab(tabs.some((tab) => tab.id === requestedTab) ? requestedTab as WorkspaceTab : 'general')
     }
   }, [location.pathname, location.search])
+  useEffect(() => {
+    if (connection?.provider.id === 'meta' && connection.channel.id === 'instagram') setActiveTab('general')
+  }, [connection])
 
-  async function refreshWorkspace() { await Promise.all([loadConnection(), loadOperations()]) }
+  async function refreshWorkspace() {
+    await loadConnection()
+    if (!(connection?.provider.id === 'meta' && connection?.channel.id === 'instagram')) await loadOperations()
+  }
 
   async function saveName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -164,13 +173,15 @@ export function ConnectionDetailPage() {
 
   const displayedKey = showKey && apiKey?.apiKey ? apiKey.apiKey : apiKey?.maskedApiKey
   const headerState = workspaceState(connection, statusSummary)
+  const isInstagram = connection.provider.id === 'meta' && connection.channel.id === 'instagram'
+  const visibleTabs = isInstagram ? tabs.filter((tab) => tab.id === 'general') : tabs
 
   return <section className="connection-detail workspace-detail">
     <header className="workspace-header">
       <button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button>
       <div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
     </header>
-    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
+    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{visibleTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
 
@@ -179,8 +190,10 @@ export function ConnectionDetailPage() {
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><Field label="Nombre" required><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></Field><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
-        <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
-        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} />
+        {isInstagram ? <InstagramConnectionPanel connection={connection} onConnectionChange={(updated) => { setConnection(updated) }} /> : <>
+          <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl, 'URL de envío')}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
+          <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} />
+        </>}
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
 

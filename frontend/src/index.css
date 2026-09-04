@@ -205,6 +205,33 @@
   .connection-card h3 { @apply m-0 text-base font-medium text-zinc-100; }
   .connection-card > div:first-child > p { @apply mb-0 mt-2 text-sm text-zinc-400; }
   .connection-card-footer { @apply mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 text-xs text-zinc-500; }
+  .connections-page-grid, .connection-choice-grid { @apply mt-7 grid gap-4 md:grid-cols-2; }
+  .connection-choice-page { @apply mx-auto max-w-3xl; }
+  .connection-choice-client { @apply mt-7 flex max-w-md flex-col gap-2 text-sm font-medium text-zinc-300; }
+  .connection-choice-client select, .instagram-channel-binding select { @apply min-h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100; }
+  .connection-choice-grid > article { @apply rounded-xl border border-zinc-800 bg-zinc-900/40 p-6; }
+  .connection-choice-grid h3 { @apply mb-2 mt-4 text-lg font-semibold text-zinc-100; }
+  .connection-choice-grid p { @apply min-h-12 text-sm leading-6 text-zinc-400; }
+  .connection-choice-grid button { @apply mt-5; }
+  .connection-choice-form, .instagram-oauth-card { @apply mt-8 max-w-xl rounded-xl border border-zinc-800 bg-zinc-900/40 p-6; }
+  .connection-choice-form > button { @apply mt-5; }
+  .instagram-oauth-card { @apply grid gap-4 sm:grid-cols-[auto_1fr_auto] sm:items-center; }
+  .instagram-oauth-card h3 { @apply m-0 text-base font-semibold text-zinc-100; }
+  .instagram-oauth-card p { @apply mb-0 mt-1 text-sm text-zinc-400; }
+  .instagram-oauth-card > svg { @apply text-emerald-400; }
+  .instagram-title { @apply flex items-center gap-2; }
+  .instagram-title h3 { @apply m-0; }
+  .instagram-readiness-list { @apply my-5 grid list-none gap-2 p-0 text-sm text-zinc-300 sm:grid-cols-2; }
+  .instagram-readiness-list li { @apply flex items-center gap-2; }
+  .instagram-readiness-list svg { @apply text-emerald-400; }
+  .instagram-readiness-list li:has(svg[data-lucide='circle-alert']) svg { @apply text-amber-400; }
+  .instagram-channel-binding { @apply mt-5 rounded-lg border border-zinc-800 bg-zinc-950/30 p-4; }
+  .instagram-channel-binding h4 { @apply m-0 text-sm font-semibold text-zinc-100; }
+  .instagram-channel-binding p { @apply mb-4 mt-1 text-sm text-zinc-400; }
+  .instagram-channel-binding select { @apply mr-3 w-full sm:w-auto; }
+  .instagram-callback-state { @apply mx-auto mt-20 flex max-w-md flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center; }
+  .instagram-callback-state h2 { @apply mb-2 mt-4 text-xl font-semibold text-zinc-100; }
+  .instagram-callback-state p { @apply text-sm leading-6 text-zinc-400; }
   .new-connection-page, .connection-detail { @apply mx-auto max-w-3xl; }
   .workspace-detail { @apply max-w-5xl; }
   .workspace-header { @apply pt-1; }

@@ -135,12 +135,15 @@ class UpdateConnectionRequest(BaseModel):
 
 
 class CoreChannelBindingRequest(BaseModel):
-    """One Core Channel credential, scoped to one Gateway Connection."""
+    """A browser selects only a safe Core Channel identifier.
+
+    Gateway resolves the dispatch credential server-to-server through Core's
+    control-plane and never accepts one from an interactive client.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     core_channel_id: str = Field(..., min_length=1, max_length=256)
-    channel_api_key: str = Field(..., min_length=1, max_length=4096)
 
 
 WebhookAuthType = Literal["NONE", "BEARER", "API_KEY", "BASIC", "CUSTOM_HEADERS", "QUERY_PARAM"]

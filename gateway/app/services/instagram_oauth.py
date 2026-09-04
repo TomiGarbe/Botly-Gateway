@@ -35,6 +35,8 @@ class InstagramOAuthIntent:
     actor_id: str
     provider_id: str = "meta"
     channel_type: str = "instagram"
+    # Opt-in only. API callers retain the established JSON callback response.
+    ui_return: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ class InstagramOAuthStateStore:
             "actorId": intent.actor_id,
             "provider": intent.provider_id,
             "channelType": intent.channel_type,
+            "uiReturn": intent.ui_return,
             "createdAt": now,
             "expiresAt": now + self._ttl_seconds,
         }
@@ -139,6 +142,7 @@ class InstagramOAuthStateStore:
                 actor_id=str(record["actorId"]),
                 provider_id=str(record["provider"]),
                 channel_type=str(record["channelType"]),
+                ui_return=bool(record.get("uiReturn", False)),
             )
         except (KeyError, TypeError) as exc:
             raise InstagramOAuthError("OAuth state is malformed", status_code=500) from exc

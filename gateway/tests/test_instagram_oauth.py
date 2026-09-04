@@ -274,3 +274,34 @@ def test_authorize_route_requires_a_meta_instagram_connection_and_creates_bound_
     assert intent.connection_id == connection.id
     assert intent.client_id == client.id
     assert intent.actor_id == "operator-a"
+
+
+def test_ui_callback_is_opt_in_and_never_puts_oauth_data_in_the_redirect(monkeypatch, tmp_path) -> None:
+    service, _, client, connection = _connection_service(monkeypatch, tmp_path)
+    states = InstagramOAuthStateStore(tmp_path / "ui_callback_states.json")
+    state = states.create(InstagramOAuthIntent(connection.id, client.id, "actor-a", ui_return=True))
+
+    class _OAuth:
+        def requested_scopes(self):
+            return ("instagram_business_basic",)
+
+        async def exchange_code(self, _code):
+            from app.services.instagram_oauth import InstagramOAuthToken
+            return InstagramOAuthToken("callback-token", None, ("instagram_business_basic",))
+
+        async def discover_account(self, _token):
+            from app.services.instagram_oauth import InstagramAccount
+            return InstagramAccount("17841400000000000", username="ui-callback", account_type="BUSINESS")
+
+    monkeypatch.setattr(connections_router, "_service", service)
+    monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
+    monkeypatch.setattr(connections_router, "get_settings", lambda: SimpleNamespace(public_app_url="https://gateway.example"))
+
+    response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="one-time-code", error=None, error_description=None))
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"https://gateway.example/connections/{connection.id}/instagram/complete?oauth=success"
+    assert "one-time-code" not in response.headers["location"]
+    assert "callback-token" not in response.headers["location"]
