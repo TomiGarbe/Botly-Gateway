@@ -35,7 +35,8 @@ def _oauth_settings(**changes):
     values = {
         "meta_app_id": "1031982409198448",
         "instagram_app_id": "1787511689049505",
-        "meta_app_secret": "app-secret",
+        "meta_app_secret": "fake-meta-app-secret",
+        "instagram_app_secret": "fake-instagram-app-secret",
         "meta_redirect_uri": "https://gateway-server.botly.com.ar/connections/meta/instagram/callback",
         "instagram_oauth_scopes": "instagram_business_basic,instagram_business_manage_messages",
         "instagram_oauth_authorize_url": "https://instagram.example/oauth/authorize",
@@ -120,6 +121,18 @@ def test_settings_keep_meta_and_instagram_app_ids_distinct() -> None:
     assert settings.instagram_app_id == "1787511689049505"
 
 
+def test_settings_keep_meta_and_instagram_app_secrets_distinct() -> None:
+    settings = Settings(
+        gateway_api_key="gateway-test-key",
+        evolution_api_key="evolution-test-key",
+        meta_app_secret="fake-meta-app-secret",
+        instagram_app_secret="fake-instagram-app-secret",
+    )
+
+    assert settings.meta_app_secret == "fake-meta-app-secret"
+    assert settings.instagram_app_secret == "fake-instagram-app-secret"
+
+
 def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaque_ids() -> None:
     calls: list[httpx.Request] = []
 
@@ -144,8 +157,44 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
     assert calls[0].method == "POST"
     assert b"client_id=1787511689049505" in calls[0].content
     assert b"client_id=1031982409198448" not in calls[0].content
-    assert b"client_secret=app-secret" in calls[0].content
+    assert b"client_secret=fake-instagram-app-secret" in calls[0].content
+    assert b"fake-meta-app-secret" not in calls[0].content
+    assert b"grant_type=authorization_code" in calls[0].content
+    assert b"redirect_uri=https%3A%2F%2Fgateway-server.botly.com.ar%2Fconnections%2Fmeta%2Finstagram%2Fcallback" in calls[0].content
     assert calls[1].headers["authorization"] == "Bearer test-token"
+
+
+def test_token_exchange_requires_instagram_secret_not_meta_secret() -> None:
+    service = InstagramOAuthService(settings_factory=lambda: _oauth_settings(instagram_app_secret=""))
+
+    with pytest.raises(InstagramOAuthError, match="INSTAGRAM_APP_SECRET") as exc:
+        asyncio.run(service.exchange_code("one-time-code"))
+
+    assert "fake-meta-app-secret" not in str(exc.value)
+
+
+def test_token_exchange_error_never_serializes_client_secrets() -> None:
+    async def run() -> InstagramOAuthError:
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(400, json={"error": {"message": "provider detail"}})),
+            base_url="https://instagram.example",
+        )
+        service = InstagramOAuthService(settings_factory=lambda: _oauth_settings(), client=client)
+        with pytest.raises(InstagramOAuthError) as exc:
+            await service.exchange_code("one-time-code")
+        await client.aclose()
+        return exc.value
+
+    error = asyncio.run(run())
+
+    assert "fake-instagram-app-secret" not in str(error)
+    assert "fake-meta-app-secret" not in str(error)
+
+
+def test_default_token_exchange_endpoint_is_instagram_api() -> None:
+    settings = Settings(gateway_api_key="gateway-test-key", evolution_api_key="evolution-test-key")
+
+    assert settings.instagram_oauth_token_url == "https://api.instagram.com/oauth/access_token"
 
 
 @pytest.mark.parametrize(

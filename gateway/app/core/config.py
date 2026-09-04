@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     # Both are validated lazily when an Instagram authorization is started, so
     # WhatsApp/Evolution startup remains usable without Instagram configured.
     instagram_app_id: str = ""
+    # Credential issued by Instagram's API setup for Instagram Login. It is
+    # intentionally independent from META_APP_SECRET, which remains used by
+    # the Meta/WhatsApp integrations and webhook signature verification.
+    instagram_app_secret: str = ""
     meta_redirect_uri: str = ""
     instagram_oauth_scopes: str = "instagram_business_basic,instagram_business_manage_messages"
     instagram_oauth_authorize_url: str = "https://www.instagram.com/oauth/authorize"

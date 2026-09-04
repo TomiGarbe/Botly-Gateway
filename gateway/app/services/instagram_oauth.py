@@ -256,7 +256,7 @@ class InstagramOAuthService:
                 "",
                 data={
                     "client_id": settings.instagram_app_id,
-                    "client_secret": settings.meta_app_secret,
+                    "client_secret": settings.instagram_app_secret,
                     "grant_type": "authorization_code",
                     "redirect_uri": settings.meta_redirect_uri,
                     "code": code,
@@ -292,7 +292,7 @@ class InstagramOAuthService:
     def _ensure_configured(self, settings: Any) -> None:
         missing = [name for name, value in {
             "INSTAGRAM_APP_ID": getattr(settings, "instagram_app_id", ""),
-            "META_APP_SECRET": getattr(settings, "meta_app_secret", ""),
+            "INSTAGRAM_APP_SECRET": getattr(settings, "instagram_app_secret", ""),
             "META_REDIRECT_URI": getattr(settings, "meta_redirect_uri", ""),
         }.items() if not str(value or "").strip()]
         if missing:
