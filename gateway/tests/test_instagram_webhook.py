@@ -27,7 +27,13 @@ class _Runtime:
 
 
 def _settings():
-    return SimpleNamespace(meta_webhook_verify_token="verify-token", meta_webhook_require_signature=True, meta_app_secret="app-secret", bot_webhook_max_queue=200)
+    return SimpleNamespace(
+        meta_webhook_verify_token="verify-token",
+        meta_webhook_require_signature=True,
+        meta_app_secret="app-secret",
+        instagram_app_secret="instagram-app-secret",
+        bot_webhook_max_queue=200,
+    )
 
 
 def _bound_service(monkeypatch, tmp_path):
@@ -67,7 +73,7 @@ def _payload(event: dict) -> dict:
 
 def _signed(payload: dict) -> tuple[bytes, str]:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    signature = "sha256=" + hmac.new(b"app-secret", body, hashlib.sha256).hexdigest()
+    signature = "sha256=" + hmac.new(b"instagram-app-secret", body, hashlib.sha256).hexdigest()
     return body, signature
 
 

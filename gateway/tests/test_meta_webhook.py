@@ -13,13 +13,44 @@ from app.routers import meta_webhook
 from app.services import credential_manager
 
 
-def _settings(*, verify_token: str = "verify-token", app_secret: str = "app-secret") -> SimpleNamespace:
+def _settings(
+    *,
+    verify_token: str = "verify-token",
+    app_secret: str = "app-secret",
+    instagram_app_secret: str = "instagram-app-secret",
+) -> SimpleNamespace:
     return SimpleNamespace(
         meta_webhook_verify_token=verify_token,
         meta_webhook_require_signature=True,
         meta_app_secret=app_secret,
+        instagram_app_secret=instagram_app_secret,
         bot_webhook_max_queue=200,
     )
+
+
+def _signature(body: bytes, secret: str) -> str:
+    return "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
+def test_shared_meta_webhook_requires_the_secret_for_its_object(monkeypatch) -> None:
+    settings = _settings()
+    monkeypatch.setattr(meta_webhook, "get_settings", lambda: settings)
+    monkeypatch.setattr(meta_webhook, "process_instagram_webhook", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(meta_webhook, "get_core_inbound_dispatcher", lambda: SimpleNamespace(persist_many=lambda _events: []))
+    client = TestClient(app)
+
+    cases = [
+        ("instagram", settings.instagram_app_secret),
+        ("whatsapp_business_account", settings.meta_app_secret),
+    ]
+    for webhook_object, matching_secret in cases:
+        body = json.dumps({"object": webhook_object, "entry": []}, separators=(",", ":")).encode("utf-8")
+        other_secret = settings.meta_app_secret if webhook_object == "instagram" else settings.instagram_app_secret
+
+        assert client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": _signature(body, matching_secret)}).status_code == 200
+        assert client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": _signature(body, other_secret)}).status_code == 401
+        assert client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": "sha256=invalid"}).status_code == 401
+        assert client.post("/webhooks/meta", content=body).status_code == 401
 
 
 def test_meta_webhook_returns_the_exact_challenge(monkeypatch) -> None:

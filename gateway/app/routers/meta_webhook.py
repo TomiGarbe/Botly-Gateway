@@ -78,6 +78,20 @@ def _signature_is_valid(body: bytes, signature: str | None, app_secret: str) -> 
     return hmac.compare_digest(signature.removeprefix("sha256="), expected)
 
 
+def _webhook_signature_validations(body: bytes, signature: str | None, settings: Any) -> tuple[bool, bool]:
+    """Return signature validity for the two independent Meta app credentials.
+
+    The endpoint is shared, so the signed raw body is checked against both
+    configured secrets before inspecting its provider object.  The caller then
+    requires the matching result for that object; a valid signature from the
+    other app is never sufficient.
+    """
+    return (
+        _signature_is_valid(body, signature, str(getattr(settings, "instagram_app_secret", "") or "")),
+        _signature_is_valid(body, signature, str(getattr(settings, "meta_app_secret", "") or "")),
+    )
+
+
 @router.get("/meta", response_class=PlainTextResponse, include_in_schema=False)
 async def verify_meta_webhook(request: Request) -> PlainTextResponse:
     """Return exactly hub.challenge when Meta validates the subscription."""
@@ -310,23 +324,19 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         has_signature=bool(signature),
     )
     _trace("gateway_received", request_id=request_id, started_at=started_at)
-    if settings.meta_webhook_require_signature and not _signature_is_valid(body, signature, settings.meta_app_secret):
+    instagram_signature_valid, whatsapp_signature_valid = _webhook_signature_validations(body, signature, settings)
+    if settings.meta_webhook_require_signature and not (instagram_signature_valid or whatsapp_signature_valid):
         logger.warning(
             "[META_INBOUND][SIGNATURE][FAILED] invalid Meta webhook signature",
             request_id=request_id,
             has_signature=bool(signature),
-            has_app_secret=bool(settings.meta_app_secret),
+            has_instagram_app_secret=bool(getattr(settings, "instagram_app_secret", "")),
+            has_meta_app_secret=bool(settings.meta_app_secret),
             reason="missing_or_invalid_x_hub_signature_256",
         )
         audit_event("meta_webhook_signature_invalid")
         _trace("signature", request_id=request_id, started_at=started_at, result="invalid")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Meta webhook signature")
-    logger.info(
-        "[META_INBOUND][SIGNATURE][OK] Meta webhook signature accepted",
-        request_id=request_id,
-        validation="required" if settings.meta_webhook_require_signature else "disabled_by_configuration",
-    )
-    _trace("signature", request_id=request_id, started_at=started_at, result="valid")
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -347,7 +357,32 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         _trace("payload_parse", request_id=request_id, started_at=started_at, result="unsupported_object")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported Meta webhook object")
 
-    if payload.get("object") == "instagram":
+    webhook_object = payload.get("object")
+    signature_valid = (
+        instagram_signature_valid if webhook_object == "instagram"
+        else whatsapp_signature_valid if webhook_object == "whatsapp_business_account"
+        else instagram_signature_valid or whatsapp_signature_valid
+    )
+    if settings.meta_webhook_require_signature and not signature_valid:
+        logger.warning(
+            "[META_INBOUND][SIGNATURE][FAILED] signature belongs to a different Meta app",
+            request_id=request_id,
+            webhook_object=webhook_object,
+            has_signature=bool(signature),
+            reason="signature_not_valid_for_webhook_object",
+        )
+        audit_event("meta_webhook_signature_invalid", webhookObject=webhook_object)
+        _trace("signature", request_id=request_id, started_at=started_at, result="invalid")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Meta webhook signature")
+    logger.info(
+        "[META_INBOUND][SIGNATURE][OK] Meta webhook signature accepted",
+        request_id=request_id,
+        webhook_object=webhook_object,
+        validation="required" if settings.meta_webhook_require_signature else "disabled_by_configuration",
+    )
+    _trace("signature", request_id=request_id, started_at=started_at, result="valid")
+
+    if webhook_object == "instagram":
         try:
             canonical = process_instagram_webhook(payload, request_id=request_id)
         except InstagramWebhookError as exc:
@@ -393,7 +428,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         audit_event("instagram_webhook_received", requestId=request_id, canonicalEvents=len(canonical), persistedDeliveries=len(persisted), acknowledged=messaging_count)
         return result
 
-    if payload.get("object") != "whatsapp_business_account":
+    if webhook_object != "whatsapp_business_account":
         logger.warning(
             "[META_INBOUND][PAYLOAD][FAILED] unsupported webhook object",
             request_id=request_id,
