@@ -54,7 +54,7 @@ async def cancel_connection_setup(setup_id: str, request: Request):
         return _service.cancel(setup_id)
     except ConnectionSetupNotFoundError:
         raise HTTPException(status_code=404, detail="Connection setup not found")
-    except InvalidConnectionSetupTransition as exc:
+    except (ConnectionSetupConflictError, InvalidConnectionSetupTransition) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
 

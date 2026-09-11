@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers import connection_setups as setup_router
+from app.routers import meta_signup as meta_signup_router
 from app.services.clients import ClientService
 from app.services.connection_registry import ConnectionRegistry
 from app.services.connection_setups import ConnectionSetupConflictError, ConnectionSetupService, InvalidConnectionSetupTransition
@@ -48,6 +49,43 @@ def _service(tmp_path, monkeypatch, runtime=None):
     return ConnectionSetupService(runtime or _Runtime(), registry, GatewaySettingsService(tmp_path / "settings.json")), registry, client
 
 
+def _meta_signup_client(monkeypatch, service, setup_id, *, observed_states=None, during_run=None):
+    class _Connection:
+        def __init__(self, connection_id: str) -> None:
+            self._connection_id = connection_id
+
+        def public_dict(self) -> dict:
+            return {"id": self._connection_id}
+
+    class _ConnectionService:
+        async def get_connection(self, connection_id: str) -> _Connection:
+            return _Connection(connection_id)
+
+    class _Orchestrator:
+        async def run(self, **_kwargs):
+            if observed_states is not None:
+                observed_states.append(service.raw(setup_id)["state"])
+            if during_run is not None:
+                during_run()
+            return SimpleNamespace(
+                instance=None,
+                credentials=SimpleNamespace(phone_number_id="phone-1", business_account_id="waba-1"),
+            )
+
+    monkeypatch.setattr(meta_signup_router, "get_connection_setup_service", lambda: service)
+    monkeypatch.setattr(meta_signup_router, "get_connection_service", lambda: _ConnectionService())
+    monkeypatch.setattr(meta_signup_router, "get_meta_onboarding_orchestrator", lambda: _Orchestrator())
+    monkeypatch.setattr(meta_signup_router.instance_auth, "ensure_instance_key", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(meta_signup_router, "audit_event", lambda *_args, **_kwargs: None)
+    app = FastAPI()
+    app.include_router(meta_signup_router.router)
+    return TestClient(app)
+
+
+def _signup_payload(setup_id: str) -> dict:
+    return {"setup_id": setup_id, "code": "oauth-code", "business_account_id": "waba-1"}
+
+
 def test_meta_setup_is_not_inventory_until_atomically_promoted(monkeypatch, tmp_path) -> None:
     service, registry, client = _service(tmp_path, monkeypatch)
     setup = service.create(client_id=client.id, channel="whatsapp", name="Oficial", provider="meta", idempotency_key="meta-1")
@@ -65,6 +103,75 @@ def test_meta_setup_is_not_inventory_until_atomically_promoted(monkeypatch, tmp_
         service.cancel(setup["id"])
     with pytest.raises(InvalidConnectionSetupTransition):
         service.transition(setup["id"], "draft")
+
+
+def test_meta_signup_router_retries_failed_setup_through_provisioning(monkeypatch, tmp_path) -> None:
+    service, _registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Retry", provider="meta")
+    service.begin_meta(setup["id"])
+    service.begin_meta_provisioning(setup["id"])
+    assert service.mark_meta_failed(setup["id"])["state"] == "failed"
+
+    observed_states: list[str] = []
+    response = _meta_signup_client(monkeypatch, service, setup["id"], observed_states=observed_states).post(
+        "/meta/signup/complete", json=_signup_payload(setup["id"])
+    )
+
+    assert response.status_code == 201
+    assert observed_states == ["provisioning"]
+    assert service.get(setup["id"])["state"] == "ready"
+
+
+@pytest.mark.parametrize("state", ["draft", "ready", "cancelled", "cleanup_pending", "expired"])
+def test_meta_signup_router_rejects_non_retryable_setup_states(monkeypatch, tmp_path, state: str) -> None:
+    service, registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Invalid", provider="meta")
+    registry.update_setup_record(setup["id"], {"state": state, "connection_id": "existing" if state == "ready" else None})
+
+    response = _meta_signup_client(monkeypatch, service, setup["id"]).post(
+        "/meta/signup/complete", json=_signup_payload(setup["id"])
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Connection setup is not active"}
+
+
+def test_meta_signup_completion_rejects_concurrent_cancel(monkeypatch, tmp_path) -> None:
+    service, _registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Concurrent", provider="meta")
+    service.begin_meta(setup["id"])
+    cancel_errors: list[str] = []
+
+    def attempt_cancel() -> None:
+        with pytest.raises(ConnectionSetupConflictError, match="completion is in progress") as exc_info:
+            service.cancel(setup["id"])
+        cancel_errors.append(str(exc_info.value))
+
+    observed_states: list[str] = []
+    response = _meta_signup_client(
+        monkeypatch, service, setup["id"], observed_states=observed_states, during_run=attempt_cancel
+    ).post("/meta/signup/complete", json=_signup_payload(setup["id"]))
+
+    assert response.status_code == 201
+    assert observed_states == ["provisioning"]
+    assert cancel_errors == ["Connection setup completion is in progress"]
+    assert service.get(setup["id"])["state"] == "ready"
+
+
+def test_cancel_router_rejects_setup_claimed_by_meta_completion(monkeypatch, tmp_path) -> None:
+    service, _registry, client = _service(tmp_path, monkeypatch)
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Cancel endpoint", provider="meta")
+    service.begin_meta(setup["id"])
+    service.begin_meta_provisioning(setup["id"])
+    monkeypatch.setattr(setup_router, "_service", service)
+    app = FastAPI()
+    app.include_router(setup_router.router)
+
+    response = TestClient(app).post(f"/connection-setups/{setup['id']}/cancel")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Connection setup completion is in progress"}
+    assert service.get(setup["id"])["state"] == "provisioning"
 
 
 def test_setup_idempotency_reload_cancel_and_expiration(monkeypatch, tmp_path) -> None:
@@ -99,7 +206,7 @@ def test_meta_failure_and_known_resource_cancellation_follow_lifecycle(monkeypat
     assert service.cancel(cleanup["id"])["state"] == "cleanup_pending"
 
 
-def test_meta_cancel_during_provisioning_preserves_external_assets_for_manual_cleanup(monkeypatch, tmp_path) -> None:
+def test_meta_completion_claim_rejects_cancel_until_provisioning_finishes(monkeypatch, tmp_path) -> None:
     service, _registry, client = _service(tmp_path, monkeypatch)
     setup = service.create(client_id=client.id, channel="whatsapp", name="Cancel", provider="meta")
 
@@ -107,25 +214,19 @@ def test_meta_cancel_during_provisioning_preserves_external_assets_for_manual_cl
     service.begin_meta_provisioning(
         setup["id"], phone_number_id="phone-1", business_account_id="waba-1"
     )
-    cancelled = service.cancel(setup["id"])
 
-    assert cancelled["state"] == "cleanup_pending"
-    assert cancelled["cleanup_required"] is True
-    with pytest.raises(ConnectionSetupConflictError):
-        service.complete_meta(setup["id"], phone_number_id="phone-1", business_account_id="waba-1")
+    with pytest.raises(ConnectionSetupConflictError, match="completion is in progress"):
+        service.cancel(setup["id"])
+    assert service.get(setup["id"])["state"] == "provisioning"
+    assert service.complete_meta(setup["id"], phone_number_id="phone-1", business_account_id="waba-1")["state"] == "ready"
 
 
-def test_meta_waba_checkpoint_without_phone_requires_manual_cleanup_on_cancel(monkeypatch, tmp_path) -> None:
+def test_meta_onboarding_setup_can_still_be_cancelled_before_completion(monkeypatch, tmp_path) -> None:
     service, _registry, client = _service(tmp_path, monkeypatch)
-    setup = service.create(client_id=client.id, channel="whatsapp", name="Coexistence", provider="meta")
+    setup = service.create(client_id=client.id, channel="whatsapp", name="Cancel before completion", provider="meta")
 
     service.begin_meta(setup["id"])
-    provisioning = service.begin_meta_provisioning(setup["id"], business_account_id="waba-1")
-
-    assert provisioning["external_resources"] == [
-        {"kind": "meta_business_account", "identifier": "waba-1", "ownership_confirmed": False}
-    ]
-    assert service.cancel(setup["id"])["state"] == "cleanup_pending"
+    assert service.cancel(setup["id"])["state"] == "cancelled"
 
 
 def test_evolution_setup_promotes_only_after_provisioning(monkeypatch, tmp_path) -> None:

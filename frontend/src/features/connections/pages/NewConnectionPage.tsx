@@ -186,6 +186,7 @@ export function NewConnectionPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isStarting, setIsStarting] = useState(false)
+  const [isCompletingSignup, setIsCompletingSignup] = useState(false)
   const [step, setStep] = useState<ProvisioningStep>('connecting')
   const [registrationPin, setRegistrationPin] = useState('')
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false)
@@ -288,7 +289,7 @@ export function NewConnectionPage() {
   }
 
   async function cancelSetup() {
-    if (!setup) return
+    if (!setup || isCompletingSignup) return
     setIsCancelling(true)
     try {
       const cancelled = await cancelConnectionSetup(setup.id)
@@ -330,8 +331,7 @@ export function NewConnectionPage() {
       setStep('creating')
       progressTimers.push(window.setTimeout(() => setStep('webhook'), 900))
       progressTimers.push(window.setTimeout(() => setStep('testing'), 2100))
-      // The provider request may take time. Keep cancellation available while
-      // the setup is in provisioning; the backend prevents any later promote.
+      setIsCompletingSignup(true)
       setIsStarting(false)
       const completed = await completeMetaSignup(setup.id, code, session, metaSignupConfig.supports_coexistence, registrationPin)
       progressTimers.forEach(window.clearTimeout)
@@ -350,6 +350,7 @@ export function NewConnectionPage() {
       setError(friendlyError(reason))
     } finally {
       signupAbort.abort()
+      setIsCompletingSignup(false)
       setIsStarting(false)
     }
     })()
@@ -380,16 +381,16 @@ export function NewConnectionPage() {
       <h3>Escaneá el código QR</h3><p>Abrí WhatsApp en el teléfono y vinculá un dispositivo para terminar la conexión.</p>
       {qr ? <img src={qr} alt="Código QR para conectar WhatsApp con Evolution" /> : <LoaderCircle size={28} className="animate-spin" aria-label="Cargando código QR" />}
       <div className="evolution-qr-actions"><button type="button" className="client-button-secondary" onClick={() => void loadQr(setup.id).catch((reason) => setError(friendlyError(reason)))} disabled={isStarting}>Actualizar código QR</button><button type="button" className="client-button-primary" onClick={() => setup.connectionId && navigate(`/connections/${setup.connectionId}`)} disabled={!setup.connectionId}>Abrir conexión</button></div>
-      {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting}>Cancelar configuración</button> : null}
+      {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting || isCompletingSignup}>Cancelar configuración</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
     </div> : <div className="connection-provisioning">
       <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
       {!isStarting && step === 'connecting' ? <Field className="new-connection-name meta-pin-field" label="PIN de verificación en dos pasos (6 dígitos)" optional description="Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN."><Input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /></Field> : null}
       {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={startMetaSignup} disabled={isMetaSdkLoading}>{isMetaSdkLoading ? 'Preparando Meta...' : 'Conectar con Meta'}</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p>{canRetry ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button> : null}</div> : null}
-      {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting}>Cancelar configuración</button> : null}
+      {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting || isCompletingSignup}>Cancelar configuración</button> : null}
     </div>}
     {error && !setup ? <p className="client-form-error" role="alert">{error}</p> : null}
-    <ConfirmDialog isOpen={isCancelDialogOpen} title="¿Cancelar la configuración?" description="La conexión todavía no se completó. Si cancelás ahora, el setup se cerrará sin crear una conexión operativa." confirmLabel="Cancelar configuración" isSubmitting={isCancelling} onCancel={() => setIsCancelDialogOpen(false)} onConfirm={() => void cancelSetup()} />
+    <ConfirmDialog isOpen={isCancelDialogOpen} title="¿Cancelar la configuración?" description="La conexión todavía no se completó. Si cancelás ahora, el setup se cerrará sin crear una conexión operativa." confirmLabel="Cancelar configuración" isSubmitting={isCancelling || isCompletingSignup} onCancel={() => setIsCancelDialogOpen(false)} onConfirm={() => void cancelSetup()} />
   </section>
 }

@@ -241,6 +241,8 @@ class ConnectionSetupService:
             return self._public(record)
         if record["state"] == "ready":
             raise InvalidConnectionSetupTransition("Ready setups represent operational connections and cannot be cancelled")
+        if record["state"] == "provisioning" and record.get("provider_id") == "meta":
+            raise ConnectionSetupConflictError("Connection setup completion is in progress")
         target = "cleanup_pending" if record.get("external_resources") else "cancelled"
         changes = {"cleanup_required": target == "cleanup_pending"}
         if target == "cleanup_pending":

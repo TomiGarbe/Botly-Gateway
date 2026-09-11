@@ -36,9 +36,7 @@ async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
             require_reviewer_client_access(request, str(setup["client_id"]))
             if setup.get("provider_id") != "meta":
                 raise HTTPException(status_code=422, detail="Connection setup does not use Meta")
-            if setup.get("state") == "ready" and setup.get("connection_id"):
-                return (await connection_service.get_connection(str(setup["connection_id"]))).public_dict()
-            if setup.get("state") not in {"onboarding", "provisioning"}:
+            if setup.get("state") not in {"onboarding", "provisioning", "failed"}:
                 raise HTTPException(status_code=409, detail="Connection setup is not active")
             instance_name = str(setup["runtime_name"])
             setup_service.begin_meta_provisioning(
