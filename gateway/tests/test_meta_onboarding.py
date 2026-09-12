@@ -22,10 +22,11 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         calls.append((request.method, request.url.path))
         path = request.url.path
         if path.endswith("/oauth/access_token"):
-            return httpx.Response(200, json={"access_token": "secret-token"})
+            return httpx.Response(200, json={"access_token": "secret-token", "token_type": "bearer"})
         if path.endswith("/debug_token"):
             return httpx.Response(200, json={"data": {"is_valid": True, "app_id": "app_123", "scopes": ["whatsapp_business_management", "whatsapp_business_messaging"]}})
         if path.endswith("/waba_456/phone_numbers"):
+            assert request.headers["Authorization"] == "Bearer secret-token"
             return httpx.Response(200, json={"data": [{"id": "phone_123", "display_phone_number": "+549111111111", "verified_name": "Acme"}]})
         if path.endswith("/waba_456/subscribed_apps"):
             if request.method == "GET":

@@ -92,7 +92,7 @@ class MetaOnboardingOrchestrator:
 
             resolved_phone_number_id = await self._discovery.resolve_phone_number_id(
                 business_account_id=business_account_id,
-                access_token=token,
+                access_token=token.access_token,
                 requested_phone_number_id=phone_number_id,
             )
 
