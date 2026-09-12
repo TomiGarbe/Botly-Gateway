@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from types import SimpleNamespace
 
 import httpx
+import pytest
+
+import app.platforms.meta.platform as meta_platform_module
 
 from app.platforms.meta import (
     MetaCredentials,
     MetaDiscoveryService,
     MetaPlatform,
+    MetaPlatformError,
     MetaResource,
     MetaResourceStatus,
     MetaResourceType,
@@ -90,6 +95,91 @@ def test_meta_platform_retries_oauth_190_with_the_graph_query_token_format() -> 
         assert requests[1].headers.get("Authorization") is None
 
     asyncio.run(run())
+
+
+def test_meta_platform_logs_safe_token_correlation_and_retry_metadata(monkeypatch) -> None:
+    access_token = "access-token-that-must-never-appear-in-logs"
+    oauth_code = "oauth-code-that-must-never-appear-in-logs"
+    app_secret = "application-secret-that-must-never-appear-in-logs"
+    app_token = "app_123|app-token-that-must-never-appear-in-logs"
+    records: list[tuple[str, str, dict]] = []
+
+    class CapturingLogger:
+        def info(self, event: str, **kwargs) -> None:
+            records.append(("info", event, kwargs))
+
+        def warning(self, event: str, **kwargs) -> None:
+            records.append(("warning", event, kwargs))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/oauth/access_token"):
+            return httpx.Response(200, json={"access_token": access_token, "token_type": "bearer"})
+        if request.url.path.endswith("/debug_token"):
+            assert request.url.params["input_token"] == access_token
+            return httpx.Response(200, json={"data": {"is_valid": True}})
+        if request.url.path.endswith("/waba/phone_numbers"):
+            if request.headers.get("Authorization"):
+                return httpx.Response(
+                    401,
+                    json={"error": {"message": "Invalid OAuth token", "type": "OAuthException", "code": 190, "fbtrace_id": "FIRST"}},
+                )
+            assert request.url.params["access_token"] == access_token
+            return httpx.Response(
+                400,
+                json={"error": {"message": "Cannot parse access token", "type": "OAuthException", "code": 190, "fbtrace_id": "SECOND"}},
+            )
+        raise AssertionError(f"Unexpected request path: {request.url.path}")
+
+    monkeypatch.setattr(meta_platform_module, "logger", CapturingLogger())
+
+    async def run() -> None:
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://graph.facebook.com/v23.0",
+        )
+        platform = MetaPlatform(client=client, settings_factory=lambda: _settings(meta_app_secret=app_secret))
+        token = await platform.authenticate(code=oauth_code)
+        await platform.request("GET", "/debug_token", params={"input_token": token.access_token, "access_token": app_token})
+        with pytest.raises(MetaPlatformError) as error:
+            await platform.request("GET", "/waba/phone_numbers", headers={"Authorization": f"Bearer {token.access_token}"})
+        await client.aclose()
+
+        assert error.value.status_code == 400
+
+    asyncio.run(run())
+
+    token_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+    oauth_record = next(record for record in records if record[1] == "meta_oauth_access_token_received")
+    assert oauth_record[2] == {
+        "access_token_present": True,
+        "access_token_length": len(access_token),
+        "access_token_sha256": token_hash,
+    }
+
+    graph_records = [record for record in records if record[1] == "meta_graph_request"]
+    debug_record = next(record for record in graph_records if record[2]["path"] == "/debug_token")
+    phone_records = [record for record in graph_records if record[2]["path"] == "/waba/phone_numbers"]
+    assert debug_record[2]["token_transport"] == "debug_input_token"
+    assert debug_record[2]["access_token_sha256"] == token_hash
+    assert [(record[2]["attempt"], record[2]["status"]) for record in phone_records] == [(1, 401), (2, 400)]
+    assert [record[2]["access_token_sha256"] for record in phone_records] == [token_hash, token_hash]
+    assert [record[2]["token_transport"] for record in phone_records] == ["authorization_bearer", "query_access_token"]
+    assert phone_records[0][2]["retry_triggered"] is True
+    assert phone_records[0][2]["meta_fbtrace_id"] == "FIRST"
+    assert phone_records[1][2]["meta_error_code"] == 190
+    assert phone_records[1][2]["meta_error_type"] == "OAuthException"
+    assert phone_records[1][2]["meta_fbtrace_id"] == "SECOND"
+
+    retry_record = next(record for record in records if record[1] == "meta_graph_retry")
+    assert retry_record[2]["retry_reason"] == "oauth_error_190_with_bearer"
+    assert retry_record[2]["token_transport_from"] == "authorization_bearer"
+    assert retry_record[2]["token_transport_to"] == "query_access_token"
+    assert retry_record[2]["access_token_sha256"] == token_hash
+
+    captured_log_data = str(records)
+    for secret in (access_token, oauth_code, app_secret, app_token, "Authorization"):
+        assert secret not in captured_log_data
+    assert MetaPlatform._safe_log_path(f"/waba/phone_numbers?access_token={access_token}") == "/waba/phone_numbers"
 
 
 def test_meta_platform_builds_embedded_signup_credentials() -> None:

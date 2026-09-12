@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import time
 from typing import Any, Callable, Mapping
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -67,6 +69,10 @@ class MetaPlatform:
         access_token = str(token_payload.get("access_token") or "").strip()
         if not access_token:
             raise MetaPlatformError("Meta no devolvio access_token para Embedded Signup.", status_code=502)
+        # The token itself is intentionally never logged.  This fingerprint is
+        # only used to correlate the token returned by OAuth with later Graph
+        # calls in a single production diagnosis.
+        logger.info("meta_oauth_access_token_received", **self._token_observability(access_token))
         expires_in = token_payload.get("expires_in")
         return MetaToken(
             access_token=access_token,
@@ -111,17 +117,56 @@ class MetaPlatform:
         log_response = bool(kwargs.pop("log_response", False))
         client = self.get_graph_client()
         close_client = self._client is None
+        request_started_at = time.perf_counter()
         try:
             request_kwargs = self._with_appsecret_proof(kwargs)
+            token, token_transport = self._request_access_token(request_kwargs)
+            first_started_at = time.perf_counter()
             response = await client.request(method, path, **request_kwargs)
             # Meta validates the Embedded Signup token via /debug_token, but
             # some Graph endpoints reject that same token when it is supplied
             # in the Authorization header (OAuth error 190).  Their documented
             # query-parameter form remains accepted.  Retry only this exact
             # case, and remove the header so credentials are never duplicated.
-            if self._should_retry_with_query_token(response, request_kwargs.get("headers")):
+            should_retry = self._should_retry_with_query_token(response, request_kwargs.get("headers"))
+            retry_reason = "oauth_error_190_with_bearer" if should_retry else None
+            self._log_graph_attempt(
+                method=method,
+                path=path,
+                attempt=1,
+                response=response,
+                duration_ms=(time.perf_counter() - first_started_at) * 1000,
+                token=token,
+                token_transport=token_transport,
+                retry_triggered=should_retry,
+                retry_reason=retry_reason,
+            )
+            if should_retry:
                 retry_kwargs = self._query_token_retry_kwargs(request_kwargs)
+                retry_token = self._bearer_token(request_kwargs.get("headers"))
+                logger.info(
+                    "meta_graph_retry",
+                    method=method.upper(),
+                    path=self._safe_log_path(path),
+                    attempt=2,
+                    retry_reason=retry_reason,
+                    token_transport_from=token_transport,
+                    token_transport_to="query_access_token",
+                    **self._token_observability(retry_token),
+                )
+                retry_started_at = time.perf_counter()
                 response = await client.request(method, path, **retry_kwargs)
+                self._log_graph_attempt(
+                    method=method,
+                    path=path,
+                    attempt=2,
+                    response=response,
+                    duration_ms=(time.perf_counter() - retry_started_at) * 1000,
+                    token=retry_token,
+                    token_transport="query_access_token",
+                    retry_triggered=False,
+                    retry_reason=retry_reason,
+                )
             if log_response:
                 try:
                     logged_body: Any = response.json()
@@ -130,13 +175,21 @@ class MetaPlatform:
                 logger.info(
                     "meta_graph_outbound_response",
                     method=method,
-                    path=path,
+                    path=self._safe_log_path(path),
                     status=response.status_code,
                     response=logged_body,
                 )
             if response.status_code >= 400:
                 detail = self._extract_error(response)
-                logger.warning("meta_graph_error", method=method, path=path, status=response.status_code, detail=detail)
+                logger.warning(
+                    "meta_graph_error",
+                    method=method,
+                    path=self._safe_log_path(path),
+                    status=response.status_code,
+                    meta_error_code=detail.get("code"),
+                    meta_error_type=detail.get("type"),
+                    meta_fbtrace_id=detail.get("fbtrace_id"),
+                )
                 raise MetaPlatformError(
                     detail.get("message") or f"Meta Graph HTTP {response.status_code}",
                     status_code=response.status_code if response.status_code < 500 else 502,
@@ -146,8 +199,24 @@ class MetaPlatform:
                 return response.json()
             return {"ok": True}
         except httpx.TimeoutException as exc:
+            logger.warning(
+                "meta_graph_transport_error",
+                method=method.upper(),
+                path=self._safe_log_path(path),
+                status=None,
+                duration_ms=round((time.perf_counter() - request_started_at) * 1000, 2),
+                error_type="timeout",
+            )
             raise MetaPlatformError("Timeout comunicando con Meta durante Embedded Signup.", status_code=504) from exc
         except httpx.HTTPError as exc:
+            logger.warning(
+                "meta_graph_transport_error",
+                method=method.upper(),
+                path=self._safe_log_path(path),
+                status=None,
+                duration_ms=round((time.perf_counter() - request_started_at) * 1000, 2),
+                error_type="http_error",
+            )
             raise MetaPlatformError(f"Error de transporte comunicando con Meta: {exc}", status_code=502) from exc
         finally:
             if close_client:
@@ -165,6 +234,68 @@ class MetaPlatform:
                 token = candidate[7:].strip()
                 return token or None
         return None
+
+    @staticmethod
+    def _token_observability(token: str | None) -> dict[str, Any]:
+        """Return irreversible access-token correlation fields for structured logs."""
+        if not token:
+            return {
+                "access_token_present": False,
+                "access_token_length": 0,
+                "access_token_sha256": None,
+            }
+        return {
+            "access_token_present": True,
+            "access_token_length": len(token),
+            "access_token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        }
+
+    def _request_access_token(self, kwargs: Mapping[str, Any]) -> tuple[str | None, str]:
+        """Identify only an Embedded Signup token, without inspecting app-token params."""
+        bearer_token = self._bearer_token(kwargs.get("headers"))
+        if bearer_token:
+            return bearer_token, "authorization_bearer"
+        params = kwargs.get("params")
+        if isinstance(params, Mapping):
+            input_token = str(params.get("input_token") or "").strip()
+            if input_token:
+                return input_token, "debug_input_token"
+        return None, "none"
+
+    @staticmethod
+    def _safe_log_path(path: str) -> str:
+        """Discard query and fragment components before writing a Graph path to logs."""
+        return urlsplit(str(path)).path or "/"
+
+    def _log_graph_attempt(
+        self,
+        *,
+        method: str,
+        path: str,
+        attempt: int,
+        response: httpx.Response,
+        duration_ms: float,
+        token: str | None,
+        token_transport: str,
+        retry_triggered: bool,
+        retry_reason: str | None,
+    ) -> None:
+        detail = self._extract_error(response) if response.status_code >= 400 else {}
+        logger.info(
+            "meta_graph_request",
+            method=method.upper(),
+            path=self._safe_log_path(path),
+            attempt=attempt,
+            status=response.status_code,
+            duration_ms=round(duration_ms, 2),
+            token_transport=token_transport,
+            retry_triggered=retry_triggered,
+            retry_reason=retry_reason,
+            meta_error_code=detail.get("code"),
+            meta_error_type=detail.get("type"),
+            meta_fbtrace_id=detail.get("fbtrace_id"),
+            **self._token_observability(token),
+        )
 
     def _should_retry_with_query_token(self, response: httpx.Response, headers: Any) -> bool:
         if response.status_code != 401 or not self._bearer_token(headers):
