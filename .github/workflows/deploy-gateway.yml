@@ -43,6 +43,8 @@ jobs:
         working-directory: gateway
         env:
           DEBUG: "false"
+          GATEWAY_API_KEY: ci-only-gateway-key
+          EVOLUTION_API_KEY: ci-only-evolution-key
         run: python -m pytest -q
 
   deploy:
