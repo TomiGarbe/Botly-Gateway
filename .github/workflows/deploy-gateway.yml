@@ -22,6 +22,7 @@ jobs:
   test:
     name: Tests del Gateway
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +46,10 @@ jobs:
           DEBUG: "false"
           GATEWAY_API_KEY: ci-only-gateway-key
           EVOLUTION_API_KEY: ci-only-evolution-key
-        run: python -m pytest -q
+        # -u/-vv keep the active test visible in Actions.  The faulthandler
+        # snapshot makes a platform-specific deadlock diagnosable instead of
+        # leaving the production deploy queued indefinitely.
+        run: python -u -X faulthandler -m pytest -vv -o faulthandler_timeout=180
 
   deploy:
     name: Deploy en F1
