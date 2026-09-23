@@ -1,3 +1,6 @@
+# This Compose project owns the local Evolution provider stack. Keep that
+# project identity so existing provider containers and volumes stay managed in
+# place; Botly's entry service itself is named `gateway` below.
 name: evolution
 
 services:
@@ -116,13 +119,18 @@ services:
         max-file: "2"
 
   gateway:
+    # Local image built from ../gateway; never pulled from a registry here.
+    image: botly-gateway:local
     build:
       context: ../gateway
       dockerfile: Dockerfile
       args:
         GATEWAY_GIT_SHA: ${GATEWAY_GIT_SHA:-unknown}
         GATEWAY_BUILD_VERSION: ${GATEWAY_BUILD_VERSION:-unknown}
-    container_name: evolution_gateway
+    # This is Botly's Gateway, not the Evolution API provider. The explicit
+    # name follows the rest of this provider stack and lets us recreate only
+    # the Gateway without taking ownership of Evolution/PostgreSQL/Redis.
+    container_name: botly-gateway-1
     restart: unless-stopped
     ports:
       # Solo loopback: el acceso publico entra por Nginx con TLS. Publicarlo en

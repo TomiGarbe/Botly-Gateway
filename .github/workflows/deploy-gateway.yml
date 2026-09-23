@@ -1,0 +1,78 @@
+name: Deploy gateway (F1)
+
+# El runner de F1 solo procesa commits de main o ejecuciones manuales. Nunca
+# agregar pull_request: ningun codigo no confiable debe ejecutarse en F1.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'gateway/**'
+      - '.github/workflows/deploy-gateway.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-gateway-f1
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests del Gateway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            gateway/requirements.txt
+            gateway/requirements-dev.txt
+
+      - name: Dependencias de runtime y test
+        working-directory: gateway
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Pytest
+        working-directory: gateway
+        env:
+          DEBUG: "false"
+        run: python -m pytest -q
+
+  deploy:
+    name: Deploy en F1
+    needs: test
+    runs-on: [self-hosted, f1-botly-gateway]
+    environment:
+      name: production
+      url: https://gateway-server.botly.com.ar
+    # Incluye hasta 55 minutos esperando un deploy anterior y un build Docker
+    # completo en la conexion de F1.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Empaquetar gateway/ del commit
+        run: git archive --format=tar -o "$RUNNER_TEMP/release.tar" "$GITHUB_SHA:gateway"
+
+      # Un job cancelado puede dejar el proceso privilegiado terminando el
+      # deploy. Se espera su lock compartido antes de iniciar el siguiente.
+      - name: Esperar a que termine otro deploy en curso
+        run: |
+          lock=/run/botly-deploy-gateway.lock
+          [ -e "$lock" ] || exit 0
+          flock -w 3300 -s "$lock" true || { echo "Otro deploy sigue en curso despues de 55 minutos." >&2; exit 1; }
+
+      - name: Desplegar (backup, build, health check y rollback)
+        run: sudo -n /usr/local/sbin/botly-deploy-gateway "$GITHUB_SHA" "$RUNNER_TEMP/release.tar"
+
+      - name: Limpiar el paquete
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.tar"

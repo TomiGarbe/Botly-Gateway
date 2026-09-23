@@ -170,7 +170,7 @@ api.include_router(operations.router)
 async def health():
     return {
         "status": "ok",
-        "service": "evolution-gateway",
+        "service": "botly-gateway",
         "version": settings.gateway_build_version,
         "gitSha": settings.gateway_git_sha,
     }
@@ -181,12 +181,12 @@ async def ready():
     try:
         data = await _connection_manager.list_instances()
         count = len(data) if isinstance(data, list) else 0
-        return {"status": "ready", "service": "evolution-gateway", "instances": count}
+        return {"status": "ready", "service": "botly-gateway", "instances": count}
     except Exception as exc:
         logger.warning("readiness_failed", error=str(exc))
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "service": "evolution-gateway", "detail": str(exc)},
+            content={"status": "not_ready", "service": "botly-gateway", "detail": str(exc)},
         )
 
 

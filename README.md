@@ -46,6 +46,27 @@ Evolution API queda disponible en `http://localhost:8080` (o el puerto de
 `EVOLUTION_PORT`). El Gateway de Botly queda disponible en
 `http://localhost:9000` (o el puerto de `GATEWAY_PORT`).
 
+### Local architecture
+
+```text
+Evolution API (service: evolution) -> Botly Gateway (service: gateway) -> Botly API (service: botly-api)
+```
+
+The local Gateway container is `botly-gateway-1`; `evolution_api` remains
+exclusively the Evolution provider container. Gateway and Botly API share the
+external `botly-shared` network, so internal delivery uses
+`http://botly-api:8000/...`, never `localhost:8000`.
+
+To update only the local Gateway from this checkout, without recreating the
+provider or Botly:
+
+```bash
+GATEWAY_GIT_SHA="$(git rev-parse --short HEAD)" \
+GATEWAY_BUILD_VERSION="local-$(git rev-parse --short HEAD)" \
+docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env build gateway
+docker compose -p evolution -f docker/docker-compose.yml --env-file config/.env up -d --no-deps --force-recreate gateway
+```
+
 ## Variables obligatorias
 
 | Variable | Descripción |
