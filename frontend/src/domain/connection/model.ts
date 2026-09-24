@@ -61,6 +61,8 @@ export interface ConnectionReadiness {
   coreBindingPresent?: boolean
   coreCredentialValid?: boolean
   coreDeliveryReady?: boolean
+  metaApiVerified?: boolean
+  webhookSubscribed?: boolean
   missingScopes?: string[]
   tokenExpiry?: string
 }

@@ -193,6 +193,49 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
     assert calls[1].headers["authorization"] == "Bearer test-token"
 
 
+def test_meta_webhook_subscription_is_read_back_before_onboarding_can_finish() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"data": [{"id": "app-id", "subscribed_fields": ["messages"]}]})
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://instagram.example")
+        service = InstagramOAuthService(settings_factory=lambda: _oauth_settings(), client=client)
+        await service.verify_messaging_webhook_subscription("secret-token", "17841400000000000")
+        await client.aclose()
+
+    asyncio.run(run())
+    assert [call.method for call in calls] == ["GET"]
+    assert calls[0].url.path == "/17841400000000000/subscribed_apps"
+    assert calls[0].headers["authorization"] == "Bearer secret-token"
+
+
+def test_missing_meta_messages_subscription_is_provisioned_and_verified() -> None:
+    calls: list[httpx.Request] = []
+    reads = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal reads
+        calls.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"success": True})
+        reads += 1
+        fields = [] if reads == 1 else ["messages"]
+        return httpx.Response(200, json={"data": [{"id": "app-id", "subscribed_fields": fields}]})
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://instagram.example")
+        service = InstagramOAuthService(settings_factory=lambda: _oauth_settings(), client=client)
+        await service.verify_messaging_webhook_subscription("secret-token", "17841400000000000")
+        await client.aclose()
+
+    asyncio.run(run())
+    assert [call.method for call in calls] == ["GET", "POST", "GET"]
+    assert calls[1].url.params["subscribed_fields"] == "messages"
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_provider_account_id"),
     [
@@ -308,7 +351,10 @@ def test_connection_binding_is_tenant_safe_and_disconnect_removes_credential(mon
 
     assert bound.client_id == tenant_a.id
     assert bound.provider_account["providerAccountId"] == "17841400000000000"
-    assert service.instagram_readiness(connection_a.id, required_scopes=("instagram_business_basic",))["state"] == "ready"
+    readiness = service.instagram_readiness(connection_a.id, required_scopes=("instagram_business_basic",))
+    assert readiness["state"] == "meta_verification_pending"
+    assert readiness["ready"] is False
+    assert bound.status.state == "connecting"
     with pytest.raises(UnsupportedConnectionProviderError, match="already bound"):
         service.bind_instagram_provider_account(
             connection_id=connection_b.id,

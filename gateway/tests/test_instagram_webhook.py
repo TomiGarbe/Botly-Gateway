@@ -14,10 +14,12 @@ from app.routers import meta_webhook
 from app.services.clients import ClientService
 from app.services.connection_registry import ConnectionRegistry
 from app.services.connections import ConnectionService, UnsupportedConnectionProviderError
+from app.services.core_channel_credentials import CoreChannelCredentialStore
 from app.services.credential_manager import CredentialManager, ProviderAccountReference
 from app.services.gateway_settings import GatewaySettingsService
 from app.services.instagram_webhook import InstagramWebhookError, process_instagram_webhook
 import app.services.credential_manager as credential_manager_module
+import app.services.core_channel_credentials as core_channel_credentials_module
 import app.services.instagram_webhook as instagram_webhook_module
 
 
@@ -48,11 +50,24 @@ def _bound_service(monkeypatch, tmp_path):
             environment="test",
         ),
     )
+    monkeypatch.setattr(
+        core_channel_credentials_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            core_channel_credentials_path=str(tmp_path / "core-channel-credentials.json"),
+            core_channel_credentials_encryption_key="core-channel-test-key",
+            gateway_api_key="gateway-key",
+            environment="test",
+        ),
+    )
     settings = GatewaySettingsService(tmp_path / "gateway_settings.json")
     settings.update_channels({"instagram": True})
     registry = ConnectionRegistry(tmp_path / "connections.json")
     client = ClientService(registry).create_client("Tenant A")
-    service = ConnectionService(_Runtime(), registry, settings, CredentialManager())
+    service = ConnectionService(
+        _Runtime(), registry, settings, CredentialManager(),
+        CoreChannelCredentialStore(tmp_path / "core-channel-credentials.json"),
+    )
     connection = service.create_connection(client_id=client.id, channel="instagram", provider="meta")
     account = ProviderAccountReference("meta", "instagram", "178400012345678")
     service._credentials.upsert_provider_credentials(
@@ -64,6 +79,12 @@ def _bound_service(monkeypatch, tmp_path):
         expires_at=(datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
     )
     service.bind_instagram_provider_account(connection_id=connection.id, account=account, metadata={"username": "botly"}, required_scopes=())
+    service.bind_instagram_core_channel(
+        connection_id=connection.id,
+        core_channel_id="core-channel-a",
+        dispatch_credential="core-dispatch-credential",
+        core_binding_id="core-binding-a",
+    )
     return service, connection
 
 

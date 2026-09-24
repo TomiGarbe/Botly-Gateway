@@ -280,13 +280,43 @@ class ConnectionService:
                 ))
             except Exception:
                 core_credential_valid = False
+        delivery_ready = bool(core_binding) and core_credential_valid
+        account_metadata = account_data.get("metadata") if isinstance(account_data.get("metadata"), dict) else {}
+        # Existing healthy connections predate these explicit probe markers;
+        # preserve them while requiring every new/incomplete onboarding to
+        # record the live Meta checks.
+        legacy_verified = str(record.get("status_state") or "") == "connected" and delivery_ready
+        meta_api_verified = account_metadata.get("metaApiVerified") is True or account_metadata.get("metaApiVerified") == "true" or legacy_verified
+        webhook_subscribed = account_metadata.get("webhookSubscribed") is True or account_metadata.get("webhookSubscribed") == "true" or legacy_verified
+        fully_ready = delivery_ready and meta_api_verified and webhook_subscribed
         return {
-            "state": "ready", "ready": True, "configured": True, "authenticated": True,
+            "state": "ready" if fully_ready else "meta_verification_pending" if not (meta_api_verified and webhook_subscribed) else "core_delivery_pending",
+            "ready": fully_ready, "configured": True, "authenticated": True,
             "accountDiscovered": True, "credentialValid": True, "requiredScopesPresent": True,
             "tokenExpiry": expiry, "coreBindingPresent": bool(core_binding),
-            "coreCredentialValid": core_credential_valid,
-            "coreDeliveryReady": bool(core_binding) and core_credential_valid,
+            "coreCredentialValid": core_credential_valid, "metaApiVerified": meta_api_verified,
+            "webhookSubscribed": webhook_subscribed, "coreDeliveryReady": delivery_ready,
         }
+
+    def mark_instagram_meta_verified(self, connection_id: str) -> Connection:
+        record = self.require_instagram_meta_connection(connection_id)
+        account_data = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else None
+        if not account_data:
+            raise UnsupportedConnectionProviderError("Instagram provider account is not bound")
+        metadata = account_data.get("metadata") if isinstance(account_data.get("metadata"), dict) else {}
+        updated = self._registry.update_connection_record(
+            connection_id,
+            {
+                "provider_account": {
+                    **account_data,
+                    "metadata": {**metadata, "metaApiVerified": True, "webhookSubscribed": True},
+                },
+                "updated_at": _now(),
+            },
+        )
+        if updated is None:
+            raise ConnectionNotFoundError(connection_id)
+        return self._stored_connection(updated)
 
     def bind_instagram_provider_account(
         self,
@@ -303,6 +333,7 @@ class ConnectionService:
         readiness = self.instagram_readiness(connection_id, required_scopes=required_scopes)
         if readiness["state"] in {"credential_missing", "expired", "missing_scopes"}:
             raise UnsupportedConnectionProviderError("Instagram credentials do not satisfy connection readiness")
+        existing_delivery_ready = bool(readiness.get("coreDeliveryReady"))
         updated = self._registry.update_connection_record(
             connection_id,
             {
@@ -312,8 +343,10 @@ class ConnectionService:
                     "providerAccountId": account.provider_account_id,
                     "metadata": dict(metadata),
                 },
-                "status_state": "connected",
-                "status_health": "healthy",
+                # OAuth is only one onboarding stage.  Webhooks must remain
+                # inactive until the Meta probe and Core binding both pass.
+                "status_state": "connected" if existing_delivery_ready else "connecting",
+                "status_health": "healthy" if existing_delivery_ready else "unknown",
                 "updated_at": _now(),
             },
         )

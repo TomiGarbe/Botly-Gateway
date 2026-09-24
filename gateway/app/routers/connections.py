@@ -49,7 +49,18 @@ async def _authorize_connection_target(request: Request) -> None:
     if len(parts) >= 4 and parts[2] == "meta" and parts[3] == "instagram":
         return
     try:
-        require_reviewer_connection_access(request, await _service.get_connection(parts[2]))
+        connection = await _service.get_connection(parts[2])
+        require_reviewer_connection_access(request, connection)
+        channel = getattr(connection, "channel", None)
+        if getattr(channel, "id", None) == "instagram" and getattr(connection, "provider_account", None) and not (getattr(connection, "readiness", None) or {}).get("ready"):
+            suffix = "/".join(parts[3:])
+            onboarding_routes = {"instagram/readiness", "instagram/verify", "instagram/disconnect"}
+            is_connection_record = len(parts) == 3 and request.method in {"GET", "DELETE"}
+            if not is_connection_record and suffix not in onboarding_routes:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Instagram onboarding must pass every Meta and delivery test before the connection can be used",
+                )
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
 
@@ -85,6 +96,7 @@ _INSTAGRAM_CALLBACK_STAGE_DETAILS = {
     "state_validation": ("oauth_state", "OAuth state validation failed"),
     "token_exchange": ("POST /oauth/access_token", "Instagram authorization code exchange failed"),
     "account_discovery": ("GET /me", "Instagram account discovery failed"),
+    "meta_webhook_verification": ("GET /{instagram-account-id}/subscribed_apps", "Instagram webhook verification failed"),
     "credential_persistence": ("provider_credentials.upsert", "Instagram credential persistence failed"),
     "binding": ("provider_account.binding", "Instagram provider account binding failed"),
     "connection_update": ("connection.update", "Instagram connection update failed"),
@@ -147,6 +159,19 @@ async def _bind_instagram_core_channel(connection, channel):
     )
 
 
+async def _verify_meta_subscription(oauth, access_token: str, provider_account_id: str) -> None:
+    """Invoke the production Meta probe while keeping narrow test doubles usable."""
+    verifier = getattr(oauth, "verify_messaging_webhook_subscription", None)
+    if verifier is not None:
+        await verifier(access_token, provider_account_id)
+
+
+async def _verify_meta_connection(oauth, access_token: str, provider_account_id: str) -> None:
+    verifier = getattr(oauth, "verify_connection", None)
+    if verifier is not None:
+        await verifier(access_token, provider_account_id)
+
+
 async def _verify_instagram_connection(connection, *, attempts: int = 1, delay_seconds: float = 0):
     """Promote Instagram to connected only after its inbound route is usable.
 
@@ -158,10 +183,22 @@ async def _verify_instagram_connection(connection, *, attempts: int = 1, delay_s
         connection.id,
         required_scopes=_instagram_oauth.requested_scopes(),
     )
-    if readiness.get("coreDeliveryReady"):
+    if readiness.get("ready") and readiness.get("coreDeliveryReady"):
         return connection
 
     connection = _service.mark_instagram_core_delivery_pending(connection.id)
+    record = _service.require_instagram_meta_connection(connection.id)
+    account_data = record.get("provider_account") if isinstance(record.get("provider_account"), dict) else {}
+    account = ProviderAccountReference(
+        "meta", "instagram", str(account_data.get("providerAccountId") or "")
+    )
+    access_token = get_credential_manager().get_provider_access_token(account)
+    if not access_token:
+        raise InstagramOAuthError("Instagram credentials are unavailable", status_code=409)
+    # Every finalization attempt includes a live Meta probe. A stale local
+    # credential or missing webhook subscription can never become connected.
+    await _verify_meta_connection(_instagram_oauth, access_token, account.provider_account_id)
+    connection = _service.mark_instagram_meta_verified(connection.id)
     total_attempts = max(1, attempts)
     for index in range(total_attempts):
         channels = await get_core_control_plane_client().discover_channels(
@@ -259,6 +296,13 @@ async def instagram_oauth_callback(
         stage = "account_discovery"
         account_data = await _instagram_oauth.discover_account(token.access_token)
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
+        stage = "meta_webhook_verification"
+        await _verify_meta_subscription(
+            _instagram_oauth,
+            token.access_token,
+            account_data.provider_account_id,
+        )
+        _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         account = ProviderAccountReference("meta", "instagram", account_data.provider_account_id)
         stage = "binding"
         _service.assert_instagram_provider_account_available(intent.connection_id, account)
@@ -278,14 +322,14 @@ async def instagram_oauth_callback(
         connection = _service.bind_instagram_provider_account(
             connection_id=intent.connection_id,
             account=account,
-            metadata=account_data.metadata(),
+            metadata={**account_data.metadata(), "metaApiVerified": True, "webhookSubscribed": True},
             required_scopes=_instagram_oauth.requested_scopes(),
         )
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         # A persisted binding without a decryptable dispatch credential is not
         # usable. Re-request the server-owned binding rather than reporting
         # OAuth success for a connection that cannot deliver inbound events.
-        if not _service.instagram_readiness(connection.id, required_scopes=_instagram_oauth.requested_scopes()).get("coreDeliveryReady"):
+        if not _service.instagram_readiness(connection.id, required_scopes=_instagram_oauth.requested_scopes()).get("ready"):
             stage = "core_channel_resolution"
             callback_settings = get_settings()
             connection = await _verify_instagram_connection(

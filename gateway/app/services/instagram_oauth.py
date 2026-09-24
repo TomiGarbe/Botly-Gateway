@@ -254,6 +254,87 @@ class InstagramOAuthService:
             account_type=account_type,
         )
 
+    async def verify_messaging_webhook_subscription(self, access_token: str, provider_account_id: str) -> None:
+        """Require Meta to confirm that this account can emit message webhooks.
+
+        OAuth success alone only proves that a token was issued.  The account is
+        usable by Botly when the Graph API also reports the app subscription for
+        the ``messages`` field.  If it is missing, provision it idempotently and
+        read it back before allowing onboarding to continue.
+        """
+        account_id = str(provider_account_id or "").strip()
+        if not account_id:
+            raise InstagramOAuthError("Instagram account id is required for webhook verification")
+        settings = self._settings_factory()
+        self._ensure_configured(settings)
+        client, close = self._graph_client(settings)
+        try:
+            if await self._has_messages_subscription(client, access_token, account_id):
+                return
+            response = await client.post(
+                f"/{account_id}/subscribed_apps",
+                params={"subscribed_fields": "messages"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if response.status_code >= 400:
+                raise InstagramOAuthError(
+                    "Instagram messaging webhook subscription failed",
+                    status_code=502,
+                    operation="POST /{instagram-account-id}/subscribed_apps",
+                    provider_http_status=response.status_code,
+                )
+            if not await self._has_messages_subscription(client, access_token, account_id):
+                raise InstagramOAuthError(
+                    "Meta did not confirm the Instagram messaging webhook subscription",
+                    status_code=409,
+                    operation="GET /{instagram-account-id}/subscribed_apps",
+                )
+        except httpx.TimeoutException as exc:
+            raise InstagramOAuthError("Timeout during Instagram webhook verification", status_code=504) from exc
+        except httpx.HTTPError as exc:
+            raise InstagramOAuthError("Transport error during Instagram webhook verification", status_code=502) from exc
+        finally:
+            if close:
+                await client.aclose()
+
+    async def verify_connection(self, access_token: str, expected_account_id: str) -> InstagramAccount:
+        """Actively revalidate identity and inbound webhook readiness with Meta."""
+        account = await self.discover_account(access_token)
+        if account.provider_account_id != str(expected_account_id or "").strip():
+            raise InstagramOAuthError("Meta returned a different Instagram professional account", status_code=409)
+        await self.verify_messaging_webhook_subscription(access_token, account.provider_account_id)
+        return account
+
+    async def _has_messages_subscription(self, client: httpx.AsyncClient, access_token: str, account_id: str) -> bool:
+        response = await client.get(
+            f"/{account_id}/subscribed_apps",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise InstagramOAuthError(
+                "Instagram messaging webhook verification failed",
+                status_code=502,
+                operation="GET /{instagram-account-id}/subscribed_apps",
+                provider_http_status=response.status_code,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise InstagramOAuthError(
+                "Instagram messaging webhook verification returned malformed data",
+                status_code=502,
+                operation="GET /{instagram-account-id}/subscribed_apps",
+                provider_http_status=response.status_code,
+            ) from exc
+        items = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise InstagramOAuthError("Instagram messaging webhook verification returned malformed data", status_code=502)
+        return any(
+            isinstance(item, dict)
+            and "messages" in {str(field) for field in item.get("subscribed_fields", [])}
+            for item in items
+        )
+
     async def _request_token(self, settings: Any, code: str) -> dict[str, Any]:
         client, close = self._token_client(settings)
         try:

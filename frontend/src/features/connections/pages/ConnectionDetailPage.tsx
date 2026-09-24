@@ -47,8 +47,15 @@ export function ConnectionDetailPage() {
   const loadConnection = useCallback(async () => {
     if (!connectionId) return
     setError(null)
-    try { const loaded = await getConnection(connectionId); setConnection(loaded); setName(loaded.name) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo cargar la conexión.') } finally { setIsLoading(false) }
-  }, [connectionId])
+    try {
+      const loaded = await getConnection(connectionId)
+      if (loaded.channel.id === 'instagram' && loaded.providerAccount && !loaded.readiness?.ready) {
+        navigate(`/connections/${loaded.id}/instagram/complete?oauth=pending`, { replace: true })
+        return
+      }
+      setConnection(loaded); setName(loaded.name)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo cargar la conexión.') } finally { setIsLoading(false) }
+  }, [connectionId, navigate])
   const loadOperations = useCallback(async () => {
     if (!connectionId) return
     try {

@@ -232,6 +232,11 @@
   .instagram-callback-state { @apply mx-auto mt-20 flex max-w-md flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center; }
   .instagram-callback-state h2 { @apply mb-2 mt-4 text-xl font-semibold text-zinc-100; }
   .instagram-callback-state p { @apply text-sm leading-6 text-zinc-400; }
+  .instagram-setup-state { @apply max-w-lg; }
+  .instagram-setup-steps { @apply my-6 w-full space-y-2 text-left; }
+  .instagram-setup-steps > div { @apply flex items-center gap-3 rounded-lg border border-zinc-800 px-4 py-3 text-sm text-zinc-500; }
+  .instagram-setup-steps > div.is-active { @apply border-blue-500/50 bg-blue-500/10 text-blue-200; }
+  .instagram-setup-steps > div.is-complete { @apply border-emerald-500/30 bg-emerald-500/5 text-emerald-300; }
   .new-connection-page, .connection-detail { @apply mx-auto max-w-3xl; }
   .workspace-detail { @apply max-w-5xl; }
   .workspace-header { @apply pt-1; }
