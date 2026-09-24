@@ -135,6 +135,16 @@ def test_canonical_delivery_always_declares_its_contract() -> None:
         "X-Botly-Contract-Version": "canonical-v1",
     }
     assert item["customHeaders"]["x-botly-contract-version"] == "legacy-v1"
+    assert webhooks._webhook_payload_for_dispatch(payload, "dispatch-1") == payload
+
+
+def test_legacy_delivery_keeps_dispatch_id_in_body() -> None:
+    payload = {"type": "message", "message": {"id": "message-1"}}
+
+    assert webhooks._webhook_payload_for_dispatch(payload, "dispatch-1") == {
+        **payload,
+        "dispatchId": "dispatch-1",
+    }
 
 
 def test_meta_webhook_returns_the_exact_challenge(monkeypatch) -> None:

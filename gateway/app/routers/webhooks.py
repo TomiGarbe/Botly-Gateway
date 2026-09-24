@@ -78,20 +78,23 @@ async def shutdown_forward_workers(timeout_s: float = 3.0) -> None:
         return
 
 
+def _is_canonical_payload(payload: dict[str, Any]) -> bool:
+    transport = payload.get("transport")
+    return (
+        payload.get("eventType") == "message.created"
+        and isinstance(payload.get("eventId"), str)
+        and isinstance(transport, dict)
+        and isinstance(payload.get("message"), dict)
+    )
+
+
 def _webhook_item_for_payload(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """Attach the explicit contract required to parse canonical events.
 
     The payload owns its transport contract. Delivery must not depend on an
     operator remembering to add a header while configuring each webhook.
     """
-    transport = payload.get("transport")
-    is_canonical = (
-        payload.get("eventType") == "message.created"
-        and isinstance(payload.get("eventId"), str)
-        and isinstance(transport, dict)
-        and isinstance(payload.get("message"), dict)
-    )
-    if not is_canonical:
+    if not _is_canonical_payload(payload):
         return item
     configured = item.get("customHeaders") if isinstance(item.get("customHeaders"), dict) else {}
     contract_header = "x-botly-contract-version"
@@ -100,12 +103,15 @@ def _webhook_item_for_payload(item: dict[str, Any], payload: dict[str, Any]) -> 
     return {**item, "customHeaders": headers}
 
 
+def _webhook_payload_for_dispatch(payload: dict[str, Any], dispatch_id: str) -> dict[str, Any]:
+    # CanonicalInboundEvent is strict (extra="forbid"). The dispatch ID stays
+    # in X-Dispatch-Id instead of mutating the versioned contract body.
+    return dict(payload) if _is_canonical_payload(payload) else {**payload, "dispatchId": dispatch_id}
+
+
 async def _dispatch_single_webhook(payload: dict[str, Any], request_id: str, item: dict[str, Any]) -> None:
     dispatch_id = f"disp_{request_id}_{str(item.get('id') or '')[:6]}"
-    dispatch_payload = {
-        **payload,
-        "dispatchId": dispatch_id,
-    }
+    dispatch_payload = _webhook_payload_for_dispatch(payload, dispatch_id)
     save_pipeline_event(
         stage="dispatch_select_webhook",
         status="ok",
