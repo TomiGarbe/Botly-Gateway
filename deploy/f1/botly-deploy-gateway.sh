@@ -160,7 +160,7 @@ cleanup() {
 
 # Serializa ejecuciones del workflow y ejecuciones manuales del binario.
 exec 9>/run/botly-deploy-gateway.lock
-flock -n 9 || { echo "Ya hay un deploy del Gateway en curso." >&2; exit 3; }
+flock -w 3300 9 || { echo "Otro deploy sigue en curso despues de 55 minutos." >&2; exit 3; }
 trap cleanup EXIT
 
 log "1/6 Validar y preparar el release"

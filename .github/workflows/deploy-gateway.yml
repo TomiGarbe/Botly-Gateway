@@ -71,14 +71,6 @@ jobs:
       - name: Empaquetar gateway/ del commit
         run: git archive --format=tar -o "$RUNNER_TEMP/release.tar" "$GITHUB_SHA:gateway"
 
-      # Un job cancelado puede dejar el proceso privilegiado terminando el
-      # deploy. Se espera su lock compartido antes de iniciar el siguiente.
-      - name: Esperar a que termine otro deploy en curso
-        run: |
-          lock=/run/botly-deploy-gateway.lock
-          [ -e "$lock" ] || exit 0
-          flock -w 3300 -s "$lock" true || { echo "Otro deploy sigue en curso despues de 55 minutos." >&2; exit 1; }
-
       - name: Desplegar (backup, build, health check y rollback)
         run: sudo -n /usr/local/sbin/botly-deploy-gateway "$GITHUB_SHA" "$RUNNER_TEMP/release.tar"
 
