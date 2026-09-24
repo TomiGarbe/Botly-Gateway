@@ -1,5 +1,5 @@
 import { ArrowLeft, BadgeCheck, CheckCircle2, LoaderCircle, MessageCircle, QrCode, RotateCcw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Client } from '@/domain/client'
 import { getClient } from '@/features/clients/api/clientsApi'
@@ -196,6 +196,7 @@ export function NewConnectionPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [metaSignupConfig, setMetaSignupConfig] = useState<MetaSignupConfig | null>(null)
   const [isMetaSdkLoading, setIsMetaSdkLoading] = useState(false)
+  const isIntentionalNavigation = useRef(false)
   const { user } = useAuth()
 
   const loadClient = useCallback(async () => {
@@ -253,7 +254,11 @@ export function NewConnectionPage() {
 
   useEffect(() => {
     if (!setup || ['ready', 'cancelled', 'expired'].includes(setup.state)) return
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    const warn = (event: BeforeUnloadEvent) => {
+      if (isIntentionalNavigation.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [setup])
@@ -332,6 +337,7 @@ export function NewConnectionPage() {
       const url = new URL('/connections/meta/instagram/authorize', environment.gatewayUrl || window.location.origin)
       url.searchParams.set('setup_id', setup.id)
       url.searchParams.set('ui_return', 'true')
+      isIntentionalNavigation.current = true
       window.location.assign(url.toString())
       return
     }
@@ -362,6 +368,7 @@ export function NewConnectionPage() {
       await getConnection(completed.id)
       await getConnectionStatusSummary(completed.id).catch(() => undefined)
       setStep('ready')
+      isIntentionalNavigation.current = true
       window.setTimeout(() => navigate(`/connections/${completed.id}`, { replace: true }), 750)
     } catch (reason) {
       progressTimers.forEach(window.clearTimeout)

@@ -78,6 +78,28 @@ async def shutdown_forward_workers(timeout_s: float = 3.0) -> None:
         return
 
 
+def _webhook_item_for_payload(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach the explicit contract required to parse canonical events.
+
+    The payload owns its transport contract. Delivery must not depend on an
+    operator remembering to add a header while configuring each webhook.
+    """
+    transport = payload.get("transport")
+    is_canonical = (
+        payload.get("eventType") == "message.created"
+        and isinstance(payload.get("eventId"), str)
+        and isinstance(transport, dict)
+        and isinstance(payload.get("message"), dict)
+    )
+    if not is_canonical:
+        return item
+    configured = item.get("customHeaders") if isinstance(item.get("customHeaders"), dict) else {}
+    contract_header = "x-botly-contract-version"
+    headers = {str(key): value for key, value in configured.items() if str(key).lower() != contract_header}
+    headers["X-Botly-Contract-Version"] = "canonical-v1"
+    return {**item, "customHeaders": headers}
+
+
 async def _dispatch_single_webhook(payload: dict[str, Any], request_id: str, item: dict[str, Any]) -> None:
     dispatch_id = f"disp_{request_id}_{str(item.get('id') or '')[:6]}"
     dispatch_payload = {
@@ -93,7 +115,11 @@ async def _dispatch_single_webhook(payload: dict[str, Any], request_id: str, ite
         request_id=request_id,
         details={"webhookId": item.get("id"), "dispatchId": dispatch_id},
     )
-    result = await dispatch_webhook_with_retry(payload=dispatch_payload, request_id=request_id, item=item)
+    result = await dispatch_webhook_with_retry(
+        payload=dispatch_payload,
+        request_id=request_id,
+        item=_webhook_item_for_payload(item, payload),
+    )
     save_pipeline_event(
         stage="dispatch_result",
         status="ok" if result.get("ok") else str(result.get("status") or "failed"),

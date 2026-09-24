@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.routers import meta_webhook
+from app.routers import meta_webhook, webhooks
 from app.services import credential_manager
 from app.services.instagram_webhook import InstagramWebhookError
 
@@ -114,6 +114,27 @@ def test_instagram_messages_use_the_connection_webhook_dispatch(monkeypatch) -> 
     assert forward.await_count == 1
     assert forward.await_args.args[0] == canonical
     assert forward.await_args.kwargs == {"instance_name_override": "setup_runtime_1"}
+
+
+def test_canonical_delivery_always_declares_its_contract() -> None:
+    item = {
+        "id": "hook-1",
+        "customHeaders": {"X-Existing": "kept", "x-botly-contract-version": "legacy-v1"},
+    }
+    payload = {
+        "eventId": "event-1",
+        "eventType": "message.created",
+        "transport": {"provider": "meta", "channelType": "instagram"},
+        "message": {"kind": "text"},
+    }
+
+    prepared = webhooks._webhook_item_for_payload(item, payload)
+
+    assert prepared["customHeaders"] == {
+        "X-Existing": "kept",
+        "X-Botly-Contract-Version": "canonical-v1",
+    }
+    assert item["customHeaders"]["x-botly-contract-version"] == "legacy-v1"
 
 
 def test_meta_webhook_returns_the_exact_challenge(monkeypatch) -> None:
