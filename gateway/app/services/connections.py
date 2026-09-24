@@ -288,10 +288,12 @@ class ConnectionService:
         legacy_verified = str(record.get("status_state") or "") == "connected" and delivery_ready
         meta_api_verified = account_metadata.get("metaApiVerified") is True or account_metadata.get("metaApiVerified") == "true" or legacy_verified
         webhook_subscribed = account_metadata.get("webhookSubscribed") is True or account_metadata.get("webhookSubscribed") == "true" or legacy_verified
-        fully_ready = delivery_ready and meta_api_verified and webhook_subscribed
+        # Gateway onboarding is complete when the provider is usable. Botly
+        # Core channel creation and binding are a separate, manual operation.
+        provider_ready = meta_api_verified and webhook_subscribed
         return {
-            "state": "ready" if fully_ready else "meta_verification_pending" if not (meta_api_verified and webhook_subscribed) else "core_delivery_pending",
-            "ready": fully_ready, "configured": True, "authenticated": True,
+            "state": "ready" if provider_ready else "meta_verification_pending",
+            "ready": provider_ready, "configured": True, "authenticated": True,
             "accountDiscovered": True, "credentialValid": True, "requiredScopesPresent": True,
             "tokenExpiry": expiry, "coreBindingPresent": bool(core_binding),
             "coreCredentialValid": core_credential_valid, "metaApiVerified": meta_api_verified,
@@ -311,6 +313,8 @@ class ConnectionService:
                     **account_data,
                     "metadata": {**metadata, "metaApiVerified": True, "webhookSubscribed": True},
                 },
+                "status_state": "connected",
+                "status_health": "healthy",
                 "updated_at": _now(),
             },
         )
@@ -333,7 +337,7 @@ class ConnectionService:
         readiness = self.instagram_readiness(connection_id, required_scopes=required_scopes)
         if readiness["state"] in {"credential_missing", "expired", "missing_scopes"}:
             raise UnsupportedConnectionProviderError("Instagram credentials do not satisfy connection readiness")
-        existing_delivery_ready = bool(readiness.get("coreDeliveryReady"))
+        provider_ready = metadata.get("metaApiVerified") is True and metadata.get("webhookSubscribed") is True
         updated = self._registry.update_connection_record(
             connection_id,
             {
@@ -343,23 +347,12 @@ class ConnectionService:
                     "providerAccountId": account.provider_account_id,
                     "metadata": dict(metadata),
                 },
-                # OAuth is only one onboarding stage.  Webhooks must remain
-                # inactive until the Meta probe and Core binding both pass.
-                "status_state": "connected" if existing_delivery_ready else "connecting",
-                "status_health": "healthy" if existing_delivery_ready else "unknown",
+                # Core channel creation and selection are deliberately manual;
+                # they do not block a provider connection that passed Meta.
+                "status_state": "connected" if provider_ready else "connecting",
+                "status_health": "healthy" if provider_ready else "unknown",
                 "updated_at": _now(),
             },
-        )
-        if updated is None:
-            raise ConnectionNotFoundError(connection_id)
-        return self._stored_connection(updated)
-
-    def mark_instagram_core_delivery_pending(self, connection_id: str) -> Connection:
-        """Keep a completed OAuth connection out of inbound service until Core binds."""
-        self.require_instagram_meta_connection(connection_id)
-        updated = self._registry.update_connection_record(
-            connection_id,
-            {"status_state": "connecting", "status_health": "unknown", "updated_at": _now()},
         )
         if updated is None:
             raise ConnectionNotFoundError(connection_id)

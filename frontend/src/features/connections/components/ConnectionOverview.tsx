@@ -7,7 +7,7 @@ function readiness(connection: Connection): { label: string; tone: 'healthy' | '
   if (!value) return connection.status.health === 'unhealthy' || connection.status.state === 'disconnected'
     ? { label: 'Error', tone: 'attention' }
     : { label: 'Sin verificar', tone: 'pending' }
-  if (value.ready && (value.coreDeliveryReady === undefined || value.coreDeliveryReady)) return { label: 'Lista', tone: 'healthy' }
+  if (value.ready) return { label: 'Lista', tone: 'healthy' }
   return { label: value.state === 'expired' ? 'Requiere atención' : 'Configuración pendiente', tone: 'attention' }
 }
 

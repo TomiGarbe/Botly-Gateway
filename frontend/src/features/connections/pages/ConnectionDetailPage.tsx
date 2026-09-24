@@ -6,9 +6,9 @@ import { StatusBadge, type StatusTone } from '@/shared/components/StatusBadge'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { Toast } from '@/shared/components/Toast'
-import { Field, Input } from '@/shared/components/FormControls'
+import { Field, Input, Select } from '@/shared/components/FormControls'
 import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
-import { deleteConnection, disconnectInstagram, getConnection, updateConnectionName } from '../api/connectionsApi'
+import { bindInstagramCoreChannel, deleteConnection, disconnectInstagram, getConnection, listInstagramCoreChannels, updateConnectionName, type InstagramCoreChannel } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { ConnectionWebhooks } from '../components/ConnectionWebhooks'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
@@ -43,6 +43,7 @@ export function ConnectionDetailPage() {
   const [isEditingName, setIsEditingName] = useState(false); const [name, setName] = useState(''); const [isSaving, setIsSaving] = useState(false)
   const [showKey, setShowKey] = useState(false); const [isDeleting, setIsDeleting] = useState(false); const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false); const [isRegenerateDialogOpen, setIsRegenerateDialogOpen] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false); const [isProviderDisconnectOpen, setIsProviderDisconnectOpen] = useState(false)
+  const [coreChannels, setCoreChannels] = useState<InstagramCoreChannel[]>([]); const [selectedCoreChannelId, setSelectedCoreChannelId] = useState(''); const [isLoadingCoreChannels, setIsLoadingCoreChannels] = useState(false); const [isBindingCoreChannel, setIsBindingCoreChannel] = useState(false)
 
   const loadConnection = useCallback(async () => {
     if (!connectionId) return
@@ -65,6 +66,22 @@ export function ConnectionDetailPage() {
   }, [connectionId])
   useEffect(() => { void loadConnection() }, [loadConnection])
   useEffect(() => { if (connection) void loadOperations() }, [connection, loadOperations])
+  const loadCoreChannels = useCallback(async () => {
+    if (!connectionId) return
+    setIsLoadingCoreChannels(true)
+    try {
+      const items = await listInstagramCoreChannels(connectionId)
+      setCoreChannels(items)
+      setSelectedCoreChannelId((current) => current && items.some((item) => item.id === current) ? current : items[0]?.id || '')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los canales de Botly.')
+    } finally {
+      setIsLoadingCoreChannels(false)
+    }
+  }, [connectionId])
+  useEffect(() => {
+    if (connection?.channel.id === 'instagram' && connection.provider.id === 'meta' && !connection.coreChannel) void loadCoreChannels()
+  }, [connection, loadCoreChannels])
   useEffect(() => {
     if (location.pathname.endsWith('/webhooks')) setActiveTab('webhooks')
     else { const requested = new URLSearchParams(location.search).get('tab'); setActiveTab(tabs.some((tab) => tab.id === requested) ? requested as WorkspaceTab : 'general') }
@@ -81,6 +98,7 @@ export function ConnectionDetailPage() {
   async function removeConnection() { if (!connection) return; setError(null); setIsDeleting(true); try { await deleteConnection(connection.id); navigate(`/clients/${connection.clientId}`) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo eliminar la conexión.') } finally { setIsDeleting(false) } }
   function authorizeInstagram() { if (!connection) return; const url = new URL('/connections/meta/instagram/authorize', environment.gatewayUrl || window.location.origin); url.searchParams.set('connection_id', connection.id); url.searchParams.set('ui_return', 'true'); window.location.assign(url.toString()) }
   async function disconnectProvider() { if (!connection || connection.channel.id !== 'instagram' || connection.provider.id !== 'meta') return; setIsDisconnecting(true); try { setConnection(await disconnectInstagram(connection.id)); setNotice('La cuenta fue desconectada.') } catch { setError('No se pudo desconectar la cuenta.') } finally { setIsDisconnecting(false) } }
+  async function bindCoreChannel() { if (!connection || !selectedCoreChannelId) return; setIsBindingCoreChannel(true); setError(null); try { const updated = await bindInstagramCoreChannel(connection.id, selectedCoreChannelId); setConnection(updated); setNotice('Canal de Botly vinculado correctamente.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo vincular el canal de Botly.') } finally { setIsBindingCoreChannel(false) } }
 
   if (isLoading) return <LoadingState label="Cargando conexión…" />
   if (!connection) return <div className="clients-state clients-state-error" role="alert"><p>{error || 'Conexión no encontrada.'}</p><button type="button" onClick={() => void loadConnection()}>Reintentar</button></div>
@@ -97,6 +115,7 @@ export function ConnectionDetailPage() {
       {activeTab === 'general' ? <>
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><Field label="Nombre" required><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></Field><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
+        {connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? <section className="connection-section"><div className="connection-section-heading"><div><h3>Vinculación con Botly</h3><p>El canal se crea manualmente en Botly. Gateway sólo vincula el canal que selecciones.</p></div>{!connection.coreChannel ? <button type="button" className="client-button-secondary" onClick={() => void loadCoreChannels()} disabled={isLoadingCoreChannels}>{isLoadingCoreChannels ? 'Actualizando…' : 'Actualizar canales'}</button> : null}</div>{connection.coreChannel ? <dl className="connection-information-list"><div><dt>Canal vinculado</dt><dd>{connection.coreChannel.name || connection.coreChannel.channelId}</dd></div><div><dt>Recepción en Botly</dt><dd><StatusBadge tone="healthy">Configurada</StatusBadge></dd></div></dl> : <><Field label="Canal de Instagram en Botly" description={coreChannels.length ? 'Seleccioná el canal que creaste manualmente.' : 'Primero creá un canal de Instagram en Botly y después actualizá esta lista.'}><Select value={selectedCoreChannelId} onChange={(event) => setSelectedCoreChannelId(event.target.value)} disabled={isLoadingCoreChannels || isBindingCoreChannel}><option value="">{isLoadingCoreChannels ? 'Cargando canales…' : 'Seleccioná un canal'}</option>{coreChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</Select></Field><div className="connection-inline-actions"><button type="button" className="client-button-primary" onClick={() => void bindCoreChannel()} disabled={!selectedCoreChannelId || isBindingCoreChannel}>{isBindingCoreChannel ? 'Vinculando…' : 'Vincular canal'}</button></div></>}</section> : null}
         <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl)}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
         <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} />
         <ConnectionOverview connection={connection} onRefresh={() => void refreshWorkspace()} onAuthorize={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? authorizeInstagram : undefined} onDisconnect={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? () => setIsProviderDisconnectOpen(true) : undefined} />

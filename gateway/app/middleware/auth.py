@@ -42,16 +42,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if expected_key and provided_key and hmac.compare_digest(provided_key, expected_key):
             request.state.auth_method = "gateway_api_key"
             return await self._next(call_next, request)
-        core_service_key = str(getattr(get_settings(), "gateway_control_plane_api_key", "") or "").strip()
-        if (
-            request.url.path == "/v1/outbound/messages"
-            and core_service_key
-            and provided_key
-            and hmac.compare_digest(provided_key, core_service_key)
-        ):
-            request.state.auth_method = "core_control_plane_key"
-            return await self._next(call_next, request)
-
         # Instance API keys are the credentials Botly stores per Evolution
         # channel.  They intentionally have a narrower scope than the global
         # Gateway key: only the legacy unified endpoint and the versioned

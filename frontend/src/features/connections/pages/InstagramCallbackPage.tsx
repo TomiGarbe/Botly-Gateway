@@ -7,13 +7,11 @@ import { getInstagramReadiness, verifyInstagramConnection } from '../api/connect
 const MAX_ATTEMPTS = 120
 const RETRY_DELAY_MS = 1500
 
-type StageId = 'oauth' | 'meta' | 'webhook' | 'core' | 'test'
+type StageId = 'oauth' | 'meta' | 'webhook'
 const stages: Array<{ id: StageId; label: string }> = [
   { id: 'oauth', label: 'Autorizando cuenta de Instagram' },
   { id: 'meta', label: 'Validando credenciales con Meta' },
   { id: 'webhook', label: 'Comprobando webhook de mensajes' },
-  { id: 'core', label: 'Configurando canal en Botly' },
-  { id: 'test', label: 'Validando la ruta de recepción' },
 ]
 
 function completedStages(readiness: InstagramReadiness | null): Set<StageId> {
@@ -21,8 +19,6 @@ function completedStages(readiness: InstagramReadiness | null): Set<StageId> {
   if (readiness?.authenticated) completed.add('oauth')
   if (readiness?.credentialValid && readiness?.requiredScopesPresent) completed.add('meta')
   if (readiness?.webhookSubscribed) completed.add('webhook')
-  if (readiness?.coreBindingPresent && readiness?.coreCredentialValid) completed.add('core')
-  if (readiness?.ready && readiness?.coreDeliveryReady) completed.add('test')
   return completed
 }
 
@@ -47,31 +43,31 @@ export function InstagramCallbackPage() {
         const current = await getInstagramReadiness(connectionId)
         if (stopped) return
         setReadiness(current)
-        if (current.ready && current.coreDeliveryReady) {
-          setMessage('La conexión superó todas las verificaciones.')
+        if (current.ready) {
+          setMessage('La conexión con Meta superó todas las verificaciones.')
           window.setTimeout(() => navigate(`/connections/${connectionId}?instagram=connected`, { replace: true }), 700)
           return
         }
-        setMessage(current.authenticated ? 'Configurando y probando el canal…' : 'Esperando la autorización de Meta…')
+        setMessage(current.authenticated ? 'Validando la configuración con Meta…' : 'Esperando la autorización de Meta…')
         const verified = await verifyInstagramConnection(connectionId)
         if (stopped) return
         const next = verified.readiness || await getInstagramReadiness(connectionId)
         setReadiness(next)
-        if (next.ready && next.coreDeliveryReady) {
-          setMessage('La conexión superó todas las verificaciones.')
+        if (next.ready) {
+          setMessage('La conexión con Meta superó todas las verificaciones.')
           window.setTimeout(() => navigate(`/connections/${connectionId}?instagram=connected`, { replace: true }), 700)
           return
         }
       } catch {
-        // Meta and Core can settle asynchronously. Keep this blocking setup
-        // screen active and resumable instead of opening an unusable channel.
+        // Meta can settle asynchronously. Keep this setup resumable while the
+        // provider checks finish; Botly channel creation happens separately.
       }
 
       if (!stopped && attempt + 1 < MAX_ATTEMPTS) {
         timer = window.setTimeout(() => void check(attempt + 1), RETRY_DELAY_MS)
       } else if (!stopped) {
         setFailed(true)
-        setMessage('No pudimos completar todas las pruebas. La conexión no fue habilitada.')
+        setMessage('No pudimos completar las verificaciones con Meta. La conexión no fue habilitada.')
       }
     }
 

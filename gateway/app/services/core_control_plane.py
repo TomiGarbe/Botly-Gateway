@@ -65,28 +65,6 @@ class CoreControlPlaneClient:
             raise CoreControlPlaneError("Core returned an invalid channel list", status_code=502)
         return [CoreChannel.from_payload(item) for item in raw_items]
 
-    async def provision(
-        self,
-        *,
-        gateway_client_id: str,
-        gateway_connection_id: str,
-        name: str,
-        channel_type: str,
-        provider: str,
-    ) -> CoreBinding:
-        payload = await self._request(
-            "POST",
-            "/channels",
-            gateway_client_id=gateway_client_id,
-            json={
-                "gateway_connection_id": gateway_connection_id,
-                "name": name,
-                "channel_type": channel_type,
-                "provider": provider,
-            },
-        )
-        return self._binding_from_payload(payload)
-
     async def bind(self, *, gateway_client_id: str, gateway_connection_id: str, core_channel_id: str, channel_type: str) -> CoreBinding:
         payload = await self._request(
             "POST", "/bindings", gateway_client_id=gateway_client_id,
