@@ -31,6 +31,7 @@ from app.services.gateway_settings import get_gateway_settings_service
 from app.services.normalization import list_logical_messages
 from app.services.core_inbound_dispatcher import get_core_inbound_dispatcher
 from app.services.connection_webhook_activity import get_connection_webhook_activity_service
+from app.services.connection_setups import ConnectionSetupConflictError, ConnectionSetupNotFoundError, get_connection_setup_service
 from app.services.instagram_oauth import InstagramOAuthError, InstagramOAuthIntent, InstagramOAuthService, InstagramOAuthStateStore
 
 
@@ -87,8 +88,22 @@ def _instagram_ui_callback_url(connection_id: str, outcome: str) -> str:
     frontend_base = str(getattr(get_settings(), "frontend_app_url", "") or "").strip().rstrip("/")
     if not frontend_base:
         raise InstagramOAuthError("FRONTEND_APP_URL is required for Instagram OAuth UI redirects", status_code=503)
-    path = f"/connections/{quote(connection_id, safe='')}/instagram/complete"
+    path = f"/connections/{quote(connection_id, safe='')}"
     return f"{frontend_base}{path}?{urlencode({'oauth': outcome})}"
+
+
+def _instagram_setup_ui_callback_url(client_id: str, setup_id: str, outcome: str) -> str:
+    frontend_base = str(getattr(get_settings(), "frontend_app_url", "") or "").strip().rstrip("/")
+    if not frontend_base:
+        raise InstagramOAuthError("FRONTEND_APP_URL is required for Instagram OAuth UI redirects", status_code=503)
+    path = f"/clients/{quote(client_id, safe='')}/connections/instagram/new"
+    return f"{frontend_base}{path}?{urlencode({'oauth': outcome, 'setup_id': setup_id})}"
+
+
+def _instagram_intent_redirect_url(intent: InstagramOAuthIntent, outcome: str) -> str:
+    if intent.setup_id:
+        return _instagram_setup_ui_callback_url(intent.client_id, intent.setup_id, outcome)
+    return _instagram_ui_callback_url(intent.connection_id, outcome)
 
 
 _INSTAGRAM_CALLBACK_STAGE_DETAILS = {
@@ -127,7 +142,10 @@ def _log_instagram_callback_stage(
         "channel": "instagram",
     }
     if intent:
-        fields["connection_id"] = intent.connection_id
+        if intent.connection_id:
+            fields["connection_id"] = intent.connection_id
+        if intent.setup_id:
+            fields["setup_id"] = intent.setup_id
     if error:
         fields["error_type"] = type(error).__name__
         fields["error"] = safe_error
@@ -201,34 +219,52 @@ async def _verify_instagram_connection(connection):
 @router.get("/meta/instagram/authorize")
 async def authorize_instagram(
     request: Request,
-    connection_id: str = Query(..., min_length=1, max_length=128),
+    connection_id: str | None = None,
+    setup_id: str | None = None,
     ui_return: bool = False,
 ):
     """Create a server-owned OAuth intent and redirect to Meta Instagram Login."""
     try:
         actor_id = _authenticated_actor_id(request)
-        connection = await _service.get_connection(connection_id)
-        require_reviewer_connection_access(request, connection)
-        record = _service.require_instagram_meta_connection(connection_id)
+        if bool(connection_id) == bool(setup_id):
+            raise InstagramOAuthError("Exactly one Instagram connection or setup is required")
+        if setup_id:
+            setup_service = get_connection_setup_service()
+            setup = setup_service.get(setup_id)
+            require_reviewer_client_access(request, str(setup["client_id"]))
+            if setup.get("provider") != "meta" or setup.get("channel") != "instagram":
+                raise InstagramOAuthError("Instagram OAuth requires a Meta + Instagram setup")
+            if setup.get("state") not in {"onboarding", "failed"}:
+                raise InstagramOAuthError("Instagram setup cannot start OAuth from its current state", status_code=409)
+            record = {"client_id": setup["client_id"]}
+            ui_return = True
+        else:
+            connection = await _service.get_connection(str(connection_id))
+            require_reviewer_connection_access(request, connection)
+            record = _service.require_instagram_meta_connection(str(connection_id))
         get_gateway_settings_service().require_channel_available("instagram")
         get_gateway_settings_service().require_provider_available("meta")
         _instagram_oauth.validate_configuration()
         if ui_return:
             # Fail before state creation rather than persist credentials and
             # discover a missing browser UI origin only at the final redirect.
-            _instagram_ui_callback_url(connection_id, "success")
+            if setup_id:
+                _instagram_setup_ui_callback_url(str(record["client_id"]), setup_id, "success")
+            else:
+                _instagram_ui_callback_url(str(connection_id), "success")
         state = _instagram_oauth_states.create(
             InstagramOAuthIntent(
-                connection_id=connection_id,
+                connection_id=str(connection_id or ""),
                 client_id=str(record["client_id"]),
                 actor_id=actor_id,
                 ui_return=ui_return,
+                setup_id=setup_id,
             )
         )
         return RedirectResponse(_instagram_oauth.authorization_url(state=state), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-    except ConnectionNotFoundError:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    except (UnsupportedConnectionProviderError, InstagramOAuthError) as exc:
+    except (ConnectionNotFoundError, ConnectionSetupNotFoundError):
+        raise HTTPException(status_code=404, detail="Connection or setup not found")
+    except (UnsupportedConnectionProviderError, ConnectionSetupConflictError, InstagramOAuthError) as exc:
         raise HTTPException(status_code=getattr(exc, "status_code", 422), detail=str(exc))
 
 
@@ -253,9 +289,16 @@ async def instagram_oauth_callback(
             raise InstagramOAuthError("OAuth code is required")
         if intent.provider_id != "meta" or intent.channel_type != "instagram":
             raise InstagramOAuthError("OAuth state has an invalid provider/channel binding", status_code=500)
-        record = _service.require_instagram_meta_connection(intent.connection_id)
-        if str(record.get("client_id") or "") != intent.client_id:
-            raise InstagramOAuthError("OAuth state tenant binding is invalid", status_code=403)
+        setup_service = get_connection_setup_service() if intent.setup_id else None
+        if setup_service and intent.setup_id:
+            setup = setup_service.get(intent.setup_id)
+            if str(setup.get("client_id") or "") != intent.client_id or setup.get("provider") != "meta" or setup.get("channel") != "instagram":
+                raise InstagramOAuthError("OAuth state tenant binding is invalid", status_code=403)
+            setup_service.begin_meta_provisioning(intent.setup_id)
+        else:
+            record = _service.require_instagram_meta_connection(intent.connection_id)
+            if str(record.get("client_id") or "") != intent.client_id:
+                raise InstagramOAuthError("OAuth state tenant binding is invalid", status_code=403)
         stage = "token_exchange"
         token = await _instagram_oauth.exchange_code(code)
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
@@ -271,7 +314,10 @@ async def instagram_oauth_callback(
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         account = ProviderAccountReference("meta", "instagram", account_data.provider_account_id)
         stage = "binding"
-        _service.assert_instagram_provider_account_available(intent.connection_id, account)
+        if intent.setup_id:
+            _service.assert_instagram_provider_account_unbound(account)
+        else:
+            _service.assert_instagram_provider_account_available(intent.connection_id, account)
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         stage = "credential_persistence"
         get_credential_manager().upsert_provider_credentials(
@@ -285,12 +331,19 @@ async def instagram_oauth_callback(
         )
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         stage = "connection_update"
-        connection = _service.bind_instagram_provider_account(
-            connection_id=intent.connection_id,
-            account=account,
-            metadata={**account_data.metadata(), "metaApiVerified": True, "webhookSubscribed": True},
-            required_scopes=_instagram_oauth.requested_scopes(),
-        )
+        metadata = {**account_data.metadata(), "metaApiVerified": True, "webhookSubscribed": True}
+        if setup_service and intent.setup_id:
+            completed = setup_service.complete_instagram(
+                intent.setup_id, provider_account_id=account.provider_account_id, metadata=metadata,
+            )
+            connection = await _service.get_connection(str(completed["connection_id"]))
+        else:
+            connection = _service.bind_instagram_provider_account(
+                connection_id=intent.connection_id,
+                account=account,
+                metadata=metadata,
+                required_scopes=_instagram_oauth.requested_scopes(),
+            )
         _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         # Botly channels are created and selected manually after Meta onboarding.
         # Completing OAuth must never provision or choose a Core channel.
@@ -300,24 +353,34 @@ async def instagram_oauth_callback(
             _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         if intent.ui_return:
             stage = "final_redirect"
-            redirect_url = _instagram_ui_callback_url(intent.connection_id, "success")
+            redirect_url = _instagram_intent_redirect_url(intent, "success")
             _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
             return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
         return {"ok": True, "connection": connection.public_dict()}
-    except ConnectionNotFoundError as exc:
+    except (ConnectionNotFoundError, ConnectionSetupNotFoundError) as exc:
         _log_instagram_callback_stage(stage=stage, outcome="failed", intent=intent, error=exc)
         if intent and intent.ui_return:
-            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, "failed"), status_code=status.HTTP_303_SEE_OTHER)
+            return RedirectResponse(_instagram_intent_redirect_url(intent, "failed"), status_code=status.HTTP_303_SEE_OTHER)
         raise HTTPException(status_code=404, detail="Connection not found")
-    except (UnsupportedConnectionProviderError, InstagramOAuthError) as exc:
+    except (UnsupportedConnectionProviderError, ConnectionSetupConflictError, InstagramOAuthError) as exc:
+        if intent and intent.setup_id:
+            try:
+                get_connection_setup_service().mark_meta_failed(intent.setup_id)
+            except Exception:
+                pass
         _log_instagram_callback_stage(stage=stage, outcome="failed", intent=intent, error=exc)
         if intent and intent.ui_return:
-            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, ui_outcome), status_code=status.HTTP_303_SEE_OTHER)
+            return RedirectResponse(_instagram_intent_redirect_url(intent, ui_outcome), status_code=status.HTTP_303_SEE_OTHER)
         raise HTTPException(status_code=getattr(exc, "status_code", 422), detail=str(exc))
     except Exception as exc:
+        if intent and intent.setup_id:
+            try:
+                get_connection_setup_service().mark_meta_failed(intent.setup_id)
+            except Exception:
+                pass
         _log_instagram_callback_stage(stage=stage, outcome="failed", intent=intent, error=exc)
         if intent and intent.ui_return:
-            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, ui_outcome), status_code=status.HTTP_303_SEE_OTHER)
+            return RedirectResponse(_instagram_intent_redirect_url(intent, ui_outcome), status_code=status.HTTP_303_SEE_OTHER)
         raise HTTPException(status_code=500, detail="Instagram OAuth callback failed")
 
 

@@ -106,30 +106,6 @@ export async function getInstagramReadiness(connectionId: string): Promise<Insta
   return gatewayRequest<InstagramReadiness>(`/connections/${encodeURIComponent(connectionId)}/instagram/readiness`, { cache: 'no-store' })
 }
 
-export interface InstagramCoreChannel {
-  id: string
-  name: string
-  channel_type: string
-  status: string
-}
-
-export async function listInstagramCoreChannels(connectionId: string): Promise<InstagramCoreChannel[]> {
-  const payload = await gatewayRequest<{ items: InstagramCoreChannel[] }>(
-    `/connections/${encodeURIComponent(connectionId)}/instagram/core-channels`,
-    { cache: 'no-store' },
-  )
-  return payload.items
-}
-
-export async function bindInstagramCoreChannel(connectionId: string, coreChannelId: string): Promise<Connection> {
-  const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/core-channel`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ core_channel_id: coreChannelId }),
-  })
-  return toConnection(payload)
-}
-
 export async function verifyInstagramConnection(connectionId: string): Promise<Connection> {
   const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/verify`, {
     method: 'POST',

@@ -510,7 +510,7 @@ def test_callback_never_discovers_creates_or_binds_a_core_channel(monkeypatch, t
     response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=success"
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}?oauth=success"
     assert service.instagram_core_channel_binding(connection.id) is None
     readiness = service.instagram_readiness(connection.id)
     assert readiness["ready"] is True
@@ -569,7 +569,7 @@ def test_ui_callback_is_opt_in_and_never_puts_oauth_data_in_the_redirect(monkeyp
     response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="one-time-code", error=None, error_description=None))
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"https://gateway.example/connections/{connection.id}/instagram/complete?oauth=success"
+    assert response.headers["location"] == f"https://gateway.example/connections/{connection.id}?oauth=success"
     assert "one-time-code" not in response.headers["location"]
     assert "callback-token" not in response.headers["location"]
 
@@ -624,7 +624,7 @@ def test_ui_callback_logs_safe_token_exchange_failure(monkeypatch, tmp_path) -> 
     response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="one-time-code-must-not-be-logged", error=None, error_description=None))
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=failed"
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}?oauth=failed"
     event = _callback_failure_event(captured, "token_exchange")
     assert event["provider_http_status"] == 400
     assert event["operation"] == "POST /oauth/access_token"
@@ -647,7 +647,7 @@ def test_ui_callback_logs_safe_account_discovery_failure(monkeypatch, tmp_path) 
     response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=failed"
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}?oauth=failed"
     event = _callback_failure_event(captured, "account_discovery")
     assert event["provider_http_status"] == 403
     assert "access-token-must-not-be-logged" not in json.dumps(captured.events)

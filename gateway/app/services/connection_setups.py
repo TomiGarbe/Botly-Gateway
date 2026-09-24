@@ -64,9 +64,7 @@ class ConnectionSetupService:
         if self._registry.get_client(client_id) is None:
             raise ConnectionSetupNotFoundError(client_id)
         self._gateway_settings.require_channel_available(channel)
-        if channel != "whatsapp":
-            raise ValueError("Only WhatsApp is available for new connections")
-        if provider not in {"meta", "evolution"}:
+        if (channel, provider) not in {("whatsapp", "meta"), ("whatsapp", "evolution"), ("instagram", "meta")}:
             raise ValueError(f"Unsupported provider: {provider}")
         self._gateway_settings.require_provider_available(provider)
 
@@ -114,7 +112,8 @@ class ConnectionSetupService:
         now = _now()
         ttl = max(60, int(getattr(get_settings(), "connection_setup_ttl_seconds", 3600)))
         setup_id = str(uuid4())
-        clean_name = str(name or "").strip() or ("WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution")
+        default_name = "Instagram" if channel == "instagram" else ("WhatsApp Oficial" if provider == "meta" else "WhatsApp Evolution")
+        clean_name = str(name or "").strip() or default_name
         record = {
             "id": setup_id, "client_id": client_id, "name": clean_name, "provider_id": provider,
             "channel_id": channel, "state": "draft", "created_at": _iso(now), "updated_at": _iso(now),
@@ -218,18 +217,34 @@ class ConnectionSetupService:
         record = self._registry.update_setup_record(record["id"], {"external_resources": resources, "updated_at": _iso(_now())}) or record
         return self._public(self._promote(record, status_state="connected", status_health="healthy"))
 
+    def complete_instagram(self, setup_id: str, *, provider_account_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
+        record = self._record(setup_id)
+        if record.get("provider_id") != "meta" or record.get("channel_id") != "instagram":
+            raise ConnectionSetupConflictError("This setup is not an Instagram Meta setup")
+        if record.get("state") == "ready":
+            return self._public(record)
+        if record.get("state") != "provisioning":
+            raise ConnectionSetupConflictError("Instagram setup cannot be completed from its current state")
+        resources = [{"kind": "meta_instagram_account", "identifier": provider_account_id, "ownership_confirmed": False}]
+        record = self._registry.update_setup_record(record["id"], {"external_resources": resources, "updated_at": _iso(_now())}) or record
+        provider_account = {
+            "provider": "meta", "channelType": "instagram", "providerAccountId": provider_account_id,
+            "metadata": dict(metadata),
+        }
+        return self._public(self._promote(record, status_state="connected", status_health="healthy", extra={"provider_account": provider_account}))
+
     def mark_meta_failed(self, setup_id: str) -> dict[str, Any]:
         record = self._record(setup_id)
         if record["state"] not in ACTIVE_STATES:
             return self._public(record)
         return self._public(self._transition_record(record, "failed", {"diagnostic": {"code": "meta_onboarding_failed", "message": "No se pudo completar el onboarding de Meta."}}))
 
-    def _promote(self, setup: dict[str, Any], *, status_state: str, status_health: str) -> dict[str, Any]:
+    def _promote(self, setup: dict[str, Any], *, status_state: str, status_health: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         if setup.get("state") != "provisioning":
             raise InvalidConnectionSetupTransition("Only provisioning setups can be promoted")
         now = _iso(_now())
         connection_id = str(uuid4())
-        connection = {"id": connection_id, "legacy_name": setup["runtime_name"], "client_id": setup["client_id"], "name": setup["name"], "provider_id": setup["provider_id"], "provider_display_name": "Meta" if setup["provider_id"] == "meta" else "Evolution", "channel_id": setup["channel_id"], "channel_display_name": "WhatsApp", "status_state": status_state, "status_health": status_health, "created_at": now, "updated_at": now}
+        connection = {"id": connection_id, "legacy_name": setup["runtime_name"], "client_id": setup["client_id"], "name": setup["name"], "provider_id": setup["provider_id"], "provider_display_name": "Meta" if setup["provider_id"] == "meta" else "Evolution", "channel_id": setup["channel_id"], "channel_display_name": "Instagram" if setup["channel_id"] == "instagram" else "WhatsApp", "status_state": status_state, "status_health": status_health, "created_at": now, "updated_at": now, **(extra or {})}
         result = self._registry.promote_setup_to_connection(setup["id"], connection, {"state": "ready", "connection_id": connection_id, "updated_at": now})
         if result is None:
             raise ConnectionSetupNotFoundError(setup["id"])

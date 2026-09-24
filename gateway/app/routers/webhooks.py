@@ -127,8 +127,8 @@ async def _dispatch_single_webhook(payload: dict[str, Any], request_id: str, ite
         )
 
 
-async def _forward_to_instance_webhooks(payload: dict[str, Any], request_id: str) -> None:
-    instance_name = str(payload.get("instance") or "")
+async def _forward_to_instance_webhooks(payload: dict[str, Any], request_id: str, *, instance_name_override: str | None = None) -> None:
+    instance_name = str(instance_name_override or payload.get("instance") or "")
     webhooks = list_enabled_webhooks_for_dispatch(instance_name)
     if not webhooks and settings.bot_webhook_url:
         webhooks = [

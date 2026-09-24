@@ -8,8 +8,6 @@ import { ConnectionDetailPage } from '../../features/connections/pages/Connectio
 import { ConnectionsPage } from '../../features/connections/pages/ConnectionsPage'
 import { NewConnectionPage } from '../../features/connections/pages/NewConnectionPage'
 import { ConnectionChoicePage } from '../../features/connections/pages/ConnectionChoicePage'
-import { InstagramConnectionPage } from '../../features/connections/pages/InstagramConnectionPage'
-import { InstagramCallbackPage } from '../../features/connections/pages/InstagramCallbackPage'
 import { DashboardPage } from '../../features/dashboard/pages/DashboardPage'
 import { AnalyticsPage } from '../../features/analytics/pages/AnalyticsPage'
 import { SettingsPage } from '../../features/settings/pages/SettingsPage'
@@ -50,9 +48,7 @@ export function AppRouter() {
           <Route path="connections" element={<ConnectionsPage />} />
           <Route path="connections/new" element={<ConnectionChoicePage />} />
           <Route path="clients/:clientId/connections/new" element={<ConnectionChoicePage />} />
-          <Route path="clients/:clientId/connections/whatsapp/new" element={<NewConnectionPage />} />
-          <Route path="clients/:clientId/connections/instagram/new" element={<InstagramConnectionPage />} />
-          <Route path="connections/:connectionId/instagram/complete" element={<InstagramCallbackPage />} />
+          <Route path="clients/:clientId/connections/:channel/new" element={<NewConnectionPage />} />
           <Route path="connections/:connectionId" element={<ConnectionDetailPage />} />
           <Route path="connections/:connectionId/webhooks" element={<ConnectionDetailPage />} />
           <Route path="connections/:connectionId/message-logs" element={<ProviderDeliveriesPage />} />

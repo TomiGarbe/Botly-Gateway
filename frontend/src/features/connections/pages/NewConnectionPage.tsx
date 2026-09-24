@@ -12,6 +12,7 @@ import { cancelConnectionSetup, createConnectionSetup, getConnectionSetup, getCo
 import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
 import { GatewayRequestError, gatewayRequest } from '@/shared/lib/gatewayClient'
 import { useAuth } from '@/app/providers/AuthProvider'
+import { environment } from '@/app/config/environment'
 import { Field, Input } from '@/shared/components/FormControls'
 
 type ProviderId = 'meta' | 'evolution'
@@ -176,7 +177,8 @@ function friendlyError(reason: unknown): string {
 
 export function NewConnectionPage() {
   const navigate = useNavigate()
-  const { clientId } = useParams()
+  const { clientId, channel: channelParam } = useParams()
+  const channel = channelParam === 'instagram' ? 'instagram' : 'whatsapp'
   const [client, setClient] = useState<Client | null>(null)
   const [channels, setChannels] = useState<Record<string, GatewayChannelSettings>>({})
   const [providers, setProviders] = useState<Record<string, GatewayProviderSettings>>({})
@@ -206,9 +208,13 @@ export function NewConnectionPage() {
       setClient(nextClient)
       if (catalog) {
         const whatsapp = catalog.items.find((item) => item.id === 'whatsapp')
-        setChannels({ whatsapp: { name: 'WhatsApp', description: '', icon: 'message-circle', implemented: true, enabled: Boolean(whatsapp) } })
+        const instagram = catalog.items.find((item) => item.id === 'instagram')
+        setChannels({
+          whatsapp: { name: 'WhatsApp', description: '', icon: 'message-circle', implemented: true, enabled: Boolean(whatsapp) },
+          instagram: { name: 'Instagram', description: '', icon: 'message-circle', implemented: true, enabled: Boolean(instagram) },
+        })
         setProviders({
-          meta: { name: 'Meta', description: '', icon: 'server', implemented: true, enabled: Boolean(whatsapp?.methods.some((method) => method.id === 'official')) },
+          meta: { name: 'Meta', description: '', icon: 'server', implemented: true, enabled: channel === 'instagram' ? Boolean(instagram) : Boolean(whatsapp?.methods.some((method) => method.id === 'official')) },
           evolution: { name: 'Evolution', description: '', icon: 'server', implemented: true, enabled: Boolean(whatsapp?.methods.some((method) => method.id === 'web')) },
         })
       } else { setChannels(nextChannels); setProviders(nextProviders) }
@@ -217,23 +223,30 @@ export function NewConnectionPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [clientId, user?.role])
+  }, [channel, clientId, user?.role])
 
   useEffect(() => { void loadClient() }, [loadClient])
 
-  const storageKey = clientId ? `botly.connection-setup.${clientId}` : ''
+  const storageKey = clientId ? `botly.connection-setup.${clientId}.${channel}` : ''
 
   useEffect(() => {
     if (!storageKey) return
-    const setupId = sessionStorage.getItem(storageKey)
+    const callbackSetupId = new URLSearchParams(window.location.search).get('setup_id')
+    const setupId = callbackSetupId || sessionStorage.getItem(storageKey)
     if (!setupId) return
+    sessionStorage.setItem(storageKey, setupId)
     void getConnectionSetup(setupId).then((saved) => {
       if (saved.state === 'ready' && saved.connectionId) {
+        setSetup(saved)
+        setStep('ready')
         sessionStorage.removeItem(storageKey)
-        navigate(`/connections/${saved.connectionId}`, { replace: true })
+        window.setTimeout(() => navigate(`/connections/${saved.connectionId}`, { replace: true }), 750)
         return
       }
-      if (!['cancelled', 'expired'].includes(saved.state)) setSetup(saved)
+      if (!['cancelled', 'expired'].includes(saved.state)) {
+        setSetup(saved)
+        if (saved.state === 'failed') setError('No pudimos terminar la autorización con Meta. Podés reintentar sin perder el avance.')
+      }
       else sessionStorage.removeItem(storageKey)
     }).catch(() => sessionStorage.removeItem(storageKey))
   }, [navigate, storageKey])
@@ -246,7 +259,7 @@ export function NewConnectionPage() {
   }, [setup])
 
   useEffect(() => {
-    if (setup?.provider !== 'meta' || setup.state !== 'onboarding') return
+    if (setup?.provider !== 'meta' || setup.channel !== 'whatsapp' || setup.state !== 'onboarding') return
     let active = true
     setIsMetaSdkLoading(true)
     void getMetaSignupConfig()
@@ -277,9 +290,9 @@ export function NewConnectionPage() {
     setError(null)
     setIsStarting(true)
     try {
-      const created = await createConnectionSetup({ clientId, channel: 'whatsapp', name, provider })
+      const created = await createConnectionSetup({ clientId, channel, name, provider })
       setSetup(created)
-      sessionStorage.setItem(`botly.connection-setup.${clientId}`, created.id)
+      sessionStorage.setItem(storageKey, created.id)
       if (provider === 'evolution') await loadQr(created.id)
     } catch (reason) {
       setError(friendlyError(reason))
@@ -312,6 +325,16 @@ export function NewConnectionPage() {
 
   function startMetaSignup() {
     if (!setup || isStarting) return
+    if (setup.channel === 'instagram') {
+      setError(null)
+      setIsStarting(true)
+      setStep('authorizing')
+      const url = new URL('/connections/meta/instagram/authorize', environment.gatewayUrl || window.location.origin)
+      url.searchParams.set('setup_id', setup.id)
+      url.searchParams.set('ui_return', 'true')
+      window.location.assign(url.toString())
+      return
+    }
     if (!metaSignupConfig || !window.FB) {
       setError('La autorizacion de Meta se esta preparando. Espera un instante e intentalo nuevamente.')
       return
@@ -361,6 +384,7 @@ export function NewConnectionPage() {
 
   const activeIndex = provisioningSteps.findIndex((item) => item.id === step)
   const whatsappEnabled = channels.whatsapp?.implemented && channels.whatsapp.enabled
+  const instagramEnabled = channels.instagram?.implemented && channels.instagram.enabled
   const metaEnabled = providers.meta?.implemented && providers.meta.enabled
   const evolutionEnabled = providers.evolution?.implemented && providers.evolution.enabled
   const canRetry = Boolean(setup && ['onboarding', 'provisioning', 'failed'].includes(setup.state))
@@ -373,9 +397,10 @@ export function NewConnectionPage() {
     {!setup ? <>
       <Field className="new-connection-name" label="Nombre de la conexión" required><Input value={connectionName} onChange={(event) => setConnectionName(event.target.value)} maxLength={160} placeholder="Ej.: Ventas Argentina" autoFocus /></Field>
       <div className="channel-selection">
-        {whatsappEnabled && metaEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('meta')} disabled={isStarting}><BadgeCheck size={20} aria-hidden="true" /><span><strong>WhatsApp oficial con Meta</strong><small>Conectá una cuenta de WhatsApp Business mediante Meta.</small></span></button> : null}
-        {whatsappEnabled && evolutionEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('evolution')} disabled={isStarting}><QrCode size={20} aria-hidden="true" /><span><strong>WhatsApp con Evolution</strong><small>Conectá WhatsApp Web escaneando un código QR.</small></span></button> : null}
-        {!whatsappEnabled || (!metaEnabled && !evolutionEnabled) ? <div className="channel-card channel-card-disabled"><MessageCircle size={20} aria-hidden="true" /><span><strong>WhatsApp</strong><small>Habilitá el canal y al menos un proveedor desde Configuración.</small></span></div> : null}
+        {channel === 'instagram' && instagramEnabled && metaEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('meta')} disabled={isStarting}><BadgeCheck size={20} aria-hidden="true" /><span><strong>Instagram con Meta</strong><small>Conectá una cuenta profesional mediante Meta.</small></span></button> : null}
+        {channel === 'whatsapp' && whatsappEnabled && metaEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('meta')} disabled={isStarting}><BadgeCheck size={20} aria-hidden="true" /><span><strong>WhatsApp oficial con Meta</strong><small>Conectá una cuenta de WhatsApp Business mediante Meta.</small></span></button> : null}
+        {channel === 'whatsapp' && whatsappEnabled && evolutionEnabled ? <button type="button" className="channel-card channel-card-active" onClick={() => void selectProvider('evolution')} disabled={isStarting}><QrCode size={20} aria-hidden="true" /><span><strong>WhatsApp con Evolution</strong><small>Conectá WhatsApp Web escaneando un código QR.</small></span></button> : null}
+        {(channel === 'instagram' ? !instagramEnabled || !metaEnabled : !whatsappEnabled || (!metaEnabled && !evolutionEnabled)) ? <div className="channel-card channel-card-disabled"><MessageCircle size={20} aria-hidden="true" /><span><strong>{channel === 'instagram' ? 'Instagram' : 'WhatsApp'}</strong><small>Habilitá el canal y al menos un proveedor desde Configuración.</small></span></div> : null}
       </div>
     </> : setup.provider === 'evolution' ? <div className="connection-provisioning evolution-qr-panel">
       <h3>Escaneá el código QR</h3><p>Abrí WhatsApp en el teléfono y vinculá un dispositivo para terminar la conexión.</p>
@@ -385,7 +410,7 @@ export function NewConnectionPage() {
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
     </div> : <div className="connection-provisioning">
       <ol>{provisioningSteps.map((item, index) => <li key={item.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>{index < activeIndex || step === 'ready' ? <CheckCircle2 size={17} aria-hidden="true" /> : index === activeIndex ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" />}{item.label}</li>)}</ol>
-      {!isStarting && step === 'connecting' ? <Field className="new-connection-name meta-pin-field" label="PIN de verificación en dos pasos (6 dígitos)" optional description="Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN."><Input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /></Field> : null}
+      {!isStarting && step === 'connecting' && setup.channel === 'whatsapp' ? <Field className="new-connection-name meta-pin-field" label="PIN de verificación en dos pasos (6 dígitos)" optional description="Si tu número ya tiene verificación en dos pasos activada, ingresá ese PIN. Si no tiene, elegí uno nuevo y anotalo: va a quedar como el PIN de tu número. Dejalo vacío solo si el número nunca tuvo PIN."><Input value={registrationPin} onChange={(event) => setRegistrationPin(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="Ej.: 123456" autoComplete="off" /></Field> : null}
       {!isStarting && step === 'connecting' && !error ? <button type="button" className="client-button-primary" onClick={startMetaSignup} disabled={isMetaSdkLoading}>{isMetaSdkLoading ? 'Preparando Meta...' : 'Conectar con Meta'}</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p>{canRetry ? <button type="button" className="client-button-primary" onClick={() => void startMetaSignup()} disabled={isStarting}><RotateCcw size={15} aria-hidden="true" /> Reintentar</button> : null}</div> : null}
       {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting || isCompletingSignup}>Cancelar configuración</button> : null}

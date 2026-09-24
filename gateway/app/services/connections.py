@@ -360,9 +360,12 @@ class ConnectionService:
 
     def assert_instagram_provider_account_available(self, connection_id: str, account: ProviderAccountReference) -> None:
         self.require_instagram_meta_connection(connection_id)
+        self.assert_instagram_provider_account_unbound(account, exclude_connection_id=connection_id)
+
+    def assert_instagram_provider_account_unbound(self, account: ProviderAccountReference, *, exclude_connection_id: str | None = None) -> None:
         for candidate in self._registry.connection_records():
             binding = candidate.get("provider_account") if isinstance(candidate.get("provider_account"), dict) else {}
-            if str(binding.get("providerAccountId") or "") == account.provider_account_id and str(candidate.get("id") or "") != connection_id:
+            if str(binding.get("providerAccountId") or "") == account.provider_account_id and str(candidate.get("id") or "") != str(exclude_connection_id or ""):
                 raise UnsupportedConnectionProviderError("Instagram provider account is already bound to another connection")
 
     def resolve_active_instagram_provider_account(self, provider_account_id: str) -> Connection:

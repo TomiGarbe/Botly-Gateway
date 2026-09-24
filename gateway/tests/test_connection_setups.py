@@ -105,6 +105,29 @@ def test_meta_setup_is_not_inventory_until_atomically_promoted(monkeypatch, tmp_
         service.transition(setup["id"], "draft")
 
 
+def test_instagram_uses_the_same_durable_setup_and_promotes_only_after_meta(monkeypatch, tmp_path) -> None:
+    service, registry, client = _service(tmp_path, monkeypatch)
+    service._gateway_settings.update_channels({"instagram": True})
+    setup = service.create(client_id=client.id, channel="instagram", name="Instagram Ventas", provider="meta")
+
+    assert setup["state"] == "draft"
+    assert registry.connection_records() == []
+    assert service.begin_meta(setup["id"])["state"] == "onboarding"
+    assert service.begin_meta_provisioning(setup["id"])["state"] == "provisioning"
+
+    completed = service.complete_instagram(
+        setup["id"],
+        provider_account_id="17841400000000000",
+        metadata={"username": "ventas", "metaApiVerified": True, "webhookSubscribed": True},
+    )
+
+    record = registry.connection_record_by_id(completed["connection_id"])
+    assert completed["state"] == "ready"
+    assert record["channel_id"] == "instagram"
+    assert record["channel_display_name"] == "Instagram"
+    assert record["provider_account"]["providerAccountId"] == "17841400000000000"
+
+
 def test_meta_signup_router_retries_failed_setup_through_provisioning(monkeypatch, tmp_path) -> None:
     service, _registry, client = _service(tmp_path, monkeypatch)
     setup = service.create(client_id=client.id, channel="whatsapp", name="Retry", provider="meta")

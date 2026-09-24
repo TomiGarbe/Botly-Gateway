@@ -5,6 +5,7 @@ import hmac
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -170,17 +171,13 @@ def test_instagram_resolution_rejects_unknown_or_disconnected_connection(monkeyp
 
 def test_meta_webhook_instagram_uses_raw_body_signature_and_acknowledges(monkeypatch, tmp_path) -> None:
     service, connection = _bound_service(monkeypatch, tmp_path)
-    persisted: list[dict] = []
     timeline_events: list[dict] = []
-
-    class _Dispatcher:
-        def persist_many(self, events):
-            persisted.extend(events)
-            return list(events)
+    forward = AsyncMock()
 
     monkeypatch.setattr(meta_webhook, "get_settings", _settings)
     monkeypatch.setattr(instagram_webhook_module, "get_connection_service", lambda: service)
-    monkeypatch.setattr(meta_webhook, "get_core_inbound_dispatcher", lambda: _Dispatcher())
+    monkeypatch.setattr(meta_webhook, "get_connection_service", lambda: service)
+    monkeypatch.setattr(meta_webhook, "_forward_to_instance_webhooks", forward)
     monkeypatch.setattr(meta_webhook, "save_event", lambda event: timeline_events.append(event) or True)
     payload = _payload({"sender": {"id": "instagram_user_abc"}, "recipient": {"id": "178400012345678"}, "message": {"mid": "mid-1", "text": "hola"}})
     body, signature = _signed(payload)
@@ -189,7 +186,9 @@ def test_meta_webhook_instagram_uses_raw_body_signature_and_acknowledges(monkeyp
     response = client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": signature})
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "object": "instagram", "canonicalEvents": 1, "acknowledged": 1}
-    assert len(persisted) == 1 and persisted[0]["trace"]["correlationId"]
+    assert forward.await_count == 1
+    assert forward.await_args.args[0]["trace"]["correlationId"]
+    assert forward.await_args.kwargs == {"instance_name_override": service.connection_runtime_name(connection.id)}
     assert timeline_events[0]["instance"] == connection.id
     assert timeline_events[0]["sender"] == "instagram_user_abc"
     assert timeline_events[0]["message"]["id"] == "mid-1"

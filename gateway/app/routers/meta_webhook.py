@@ -24,7 +24,7 @@ from app.routers.webhooks import _to_bot_payload, _forward_to_instance_webhooks,
 from app.services.audit import audit_event
 from app.services.credential_manager import get_credential_manager
 from app.services.event_pipeline import process_incoming_webhook
-from app.services.core_inbound_dispatcher import CoreInboundPersistenceError, get_core_inbound_dispatcher
+from app.services.connections import get_connection_service
 from app.services.instagram_webhook import InstagramWebhookError, process_instagram_webhook
 from app.services.normalization import save_event, save_pipeline_event
 
@@ -449,21 +449,28 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         for event in canonical:
             transport = event.get("transport") if isinstance(event.get("transport"), dict) else {}
             logger.info("[INSTAGRAM][CONNECTION_RESOLVED] provider account resolved to active connection", request_id=request_id, connection_id=transport.get("connectionRef"), provider_account_id=transport.get("providerAccountRef"))
-        try:
-            persisted = get_core_inbound_dispatcher().persist_many(canonical)
-        except CoreInboundPersistenceError as exc:
-            logger.error(
-                "instagram_webhook_handoff_persistence_failed",
-                request_id=request_id,
-                provider="meta",
-                channel_type="instagram",
-                error=str(exc),
-            )
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Instagram event handoff persistence failed") from exc
+        forwarded = 0
         for event in canonical:
             timeline_event = _instagram_timeline_event(event)
             if timeline_event is not None:
                 save_event(timeline_event)
+            transport = event.get("transport") if isinstance(event.get("transport"), dict) else {}
+            connection_id = str(transport.get("connectionRef") or "")
+            runtime_name = get_connection_service().connection_runtime_name(connection_id)
+            task = asyncio.create_task(
+                _forward_to_instance_webhooks(event, request_id, instance_name_override=runtime_name),
+                name=f"instagram-forward-{request_id}-{forwarded}",
+            )
+            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            trace = event.get("trace") if isinstance(event.get("trace"), dict) else {}
+            _track_background_task(
+                task,
+                request_id=request_id,
+                instance=runtime_name,
+                message_id=str(message.get("providerMessageId") or "") or None,
+                conversation_id=str(trace.get("correlationId") or "") or None,
+            )
+            forwarded += 1
         messaging_count = sum(
             len(entry.get("messaging") or [])
             for entry in payload.get("entry") or []
@@ -482,12 +489,8 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                 provider_message_id=(event.get("message") or {}).get("providerMessageId"),
                 correlation_id=(event.get("trace") or {}).get("correlationId"),
             )
-        for delivery in persisted:
-            logger.info("[INSTAGRAM][OUTBOX_CREATED] canonical event persisted in durable outbox", request_id=request_id, event_id=delivery.get("eventId"), connection_id=delivery.get("connectionId"), provider_account_id=delivery.get("providerAccountId"), status=delivery.get("status"), created=delivery.get("createdAt"))
-        # G3 intentionally stops at the G4 handoff boundary. No Core dispatch,
-        # inbound entity persistence or background task is created here.
         result = {"status": "ok", "object": "instagram", "canonicalEvents": len(canonical), "acknowledged": messaging_count}
-        audit_event("instagram_webhook_received", requestId=request_id, canonicalEvents=len(canonical), persistedDeliveries=len(persisted), acknowledged=messaging_count)
+        audit_event("instagram_webhook_received", requestId=request_id, canonicalEvents=len(canonical), forwardedEvents=forwarded, acknowledged=messaging_count)
         return result
 
     if webhook_object != "whatsapp_business_account":

@@ -38,7 +38,6 @@ def test_shared_meta_webhook_requires_the_secret_for_its_object(monkeypatch) -> 
     settings = _settings()
     monkeypatch.setattr(meta_webhook, "get_settings", lambda: settings)
     monkeypatch.setattr(meta_webhook, "process_instagram_webhook", lambda *_args, **_kwargs: ())
-    monkeypatch.setattr(meta_webhook, "get_core_inbound_dispatcher", lambda: SimpleNamespace(persist_many=lambda _events: []))
     client = TestClient(app)
 
     cases = [
@@ -92,6 +91,29 @@ def test_instagram_resolution_rejection_logs_only_safe_lookup_context(monkeypatc
     assert rejection["channel_type"] == "instagram"
     assert rejection["provider_account_id"] == "222222"
     assert rejection["request_id"]
+
+
+def test_instagram_messages_use_the_connection_webhook_dispatch(monkeypatch) -> None:
+    settings = _settings()
+    body = json.dumps({"object": "instagram", "entry": [{"id": "ig-account", "messaging": [{}]}]}, separators=(",", ":")).encode()
+    canonical = {
+        "eventId": "ig-event-1", "eventType": "message.created", "occurredAt": "2026-09-24T12:00:00Z",
+        "transport": {"provider": "meta", "channelType": "instagram", "connectionRef": "connection-1", "providerAccountRef": "ig-account"},
+        "message": {"providerMessageId": "mid-1", "direction": "inbound", "kind": "text", "content": "hola", "sender": {"externalId": "sender-1"}, "recipient": {"externalId": "ig-account"}, "attachments": []},
+        "metadata": {}, "trace": {"requestId": "request-1", "correlationId": "correlation-1"}, "raw": None,
+    }
+    forward = AsyncMock()
+    monkeypatch.setattr(meta_webhook, "get_settings", lambda: settings)
+    monkeypatch.setattr(meta_webhook, "process_instagram_webhook", lambda *_args, **_kwargs: (canonical,))
+    monkeypatch.setattr(meta_webhook, "get_connection_service", lambda: SimpleNamespace(connection_runtime_name=lambda _id: "setup_runtime_1"))
+    monkeypatch.setattr(meta_webhook, "_forward_to_instance_webhooks", forward)
+
+    response = TestClient(app).post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": _signature(body, settings.instagram_app_secret)})
+
+    assert response.status_code == 200
+    assert forward.await_count == 1
+    assert forward.await_args.args[0] == canonical
+    assert forward.await_args.kwargs == {"instance_name_override": "setup_runtime_1"}
 
 
 def test_meta_webhook_returns_the_exact_challenge(monkeypatch) -> None:
