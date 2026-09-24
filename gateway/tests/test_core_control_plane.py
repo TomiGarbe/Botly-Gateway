@@ -65,6 +65,32 @@ def test_binding_keeps_dispatch_credential_in_server_client_only() -> None:
     assert result.dispatch_credential == "core-channel-credential"
 
 
+def test_provision_creates_and_binds_one_channel_atomically() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(201, json={
+            "binding": {"id": "binding-a"},
+            "channel": {"id": "channel-a", "name": "Instagram ventas", "channel_type": "instagram", "status": "active"},
+            "dispatch_credential": "dispatch-secret",
+        })
+
+    client = CoreControlPlaneClient(
+        settings_factory=lambda: _settings(),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://core.test/api/v1/control-plane/gateway"),
+    )
+    result = asyncio.run(client.provision(
+        gateway_client_id="client-a", gateway_connection_id="connection-a",
+        name="Instagram ventas", channel_type="instagram", provider="meta",
+    ))
+
+    assert result.channel.id == "channel-a"
+    assert captured[0].method == "POST"
+    assert captured[0].url.path == "/api/v1/control-plane/gateway/channels"
+    assert json.loads(captured[0].content)["gateway_connection_id"] == "connection-a"
+
+
 @pytest.mark.parametrize("status", [401, 403, 404, 409, 503])
 def test_core_errors_are_safe_and_preserve_status(status: int) -> None:
     client = CoreControlPlaneClient(

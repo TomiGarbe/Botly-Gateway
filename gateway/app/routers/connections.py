@@ -195,41 +195,31 @@ async def _verify_instagram_connection(connection, *, attempts: int = 1, delay_s
     access_token = get_credential_manager().get_provider_access_token(account)
     if not access_token:
         raise InstagramOAuthError("Instagram credentials are unavailable", status_code=409)
-    # Every finalization attempt includes a live Meta probe. A stale local
-    # credential or missing webhook subscription can never become connected.
-    await _verify_meta_connection(_instagram_oauth, access_token, account.provider_account_id)
-    connection = _service.mark_instagram_meta_verified(connection.id)
-    total_attempts = max(1, attempts)
-    for index in range(total_attempts):
-        channels = await get_core_control_plane_client().discover_channels(
-            gateway_client_id=connection.client_id,
-            channel_type="instagram",
-        )
-        active = [channel for channel in channels if channel.status.lower() == "active"]
-        if len(active) > 1:
-            raise CoreControlPlaneError(
-                "Botly Core requires exactly one active Instagram channel for this client",
-                status_code=409,
-            )
-        if len(active) == 1:
-            bound = await _bind_instagram_core_channel(connection, active[0])
-            verified = _service.instagram_readiness(
-                bound.id,
-                required_scopes=_instagram_oauth.requested_scopes(),
-            )
-            if verified.get("ready") and verified.get("coreDeliveryReady"):
-                return bound
-            raise CoreControlPlaneError(
-                "Instagram connection verification did not produce a usable inbound route",
-                status_code=409,
-            )
-        if index + 1 < total_attempts:
-            await asyncio.sleep(max(0, delay_seconds))
+    # The callback already persisted these live Meta checks. Do not hammer
+    # Graph on every UI poll; only re-run them when the durable markers are
+    # absent (for example after an interrupted older onboarding).
+    if not readiness.get("metaApiVerified") or not readiness.get("webhookSubscribed"):
+        await _verify_meta_connection(_instagram_oauth, access_token, account.provider_account_id)
+        connection = _service.mark_instagram_meta_verified(connection.id)
 
-    raise CoreControlPlaneError(
-        "Botly Core Instagram channel is not ready yet",
-        status_code=409,
+    result = await get_core_control_plane_client().provision(
+        gateway_client_id=connection.client_id,
+        gateway_connection_id=connection.id,
+        name=connection.name,
+        channel_type="instagram",
+        provider="meta",
     )
+    bound = _service.bind_instagram_core_channel(
+        connection_id=connection.id,
+        core_channel_id=result.channel.id,
+        dispatch_credential=result.dispatch_credential,
+        core_binding_id=result.id,
+        core_channel_name=result.channel.name,
+    )
+    verified = _service.instagram_readiness(bound.id, required_scopes=_instagram_oauth.requested_scopes())
+    if verified.get("ready") and verified.get("coreDeliveryReady"):
+        return bound
+    raise CoreControlPlaneError("Instagram connection verification did not produce a usable inbound route", status_code=409)
 
 
 @router.get("/meta/instagram/authorize")
@@ -481,7 +471,7 @@ async def bind_instagram_core_channel(connection_id: str, body: CoreChannelBindi
 
 
 @router.post("/{connection_id}/instagram/verify")
-async def verify_instagram_connection(connection_id: str, request: Request):
+async def verify_instagram_connection(connection_id: str, request: Request, response: Response):
     """Run the server-owned readiness gate and promote only a usable connection."""
     try:
         _authenticated_actor_id(request)
@@ -493,7 +483,12 @@ async def verify_instagram_connection(connection_id: str, request: Request):
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
     except CoreControlPlaneError as exc:
+        if exc.status_code in {409, 502, 503, 504}:
+            response.status_code = status.HTTP_202_ACCEPTED
+            return (await _service.get_connection(connection_id)).public_dict()
         raise _core_control_plane_http_error(exc)
+    except InstagramOAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except (UnsupportedConnectionProviderError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

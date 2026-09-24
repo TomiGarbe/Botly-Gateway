@@ -55,6 +55,24 @@ def test_instance_token_is_accepted_for_canonical_outbound_only(monkeypatch) -> 
     assert request.state.auth_instance == "connection_a"
 
 
+def test_core_service_key_is_scoped_to_canonical_outbound(monkeypatch) -> None:
+    monkeypatch.setattr(
+        auth_middleware,
+        "get_settings",
+        lambda: SimpleNamespace(gateway_api_key="global-token", gateway_control_plane_api_key="core-service-token"),
+    )
+    monkeypatch.setattr(auth_middleware, "authenticate_instance_token", lambda _token: None)
+    allowed = _request("/v1/outbound/messages", "core-service-token")
+    response = asyncio.run(AuthMiddleware(app=lambda *_: None).dispatch(allowed, lambda _request: Response(status_code=204)))
+    assert response.status_code == 204
+    assert allowed.state.auth_method == "core_control_plane_key"
+
+    denied = _request("/connections", "core-service-token")
+    monkeypatch.setattr(auth_middleware, "get_auth_service", lambda: SimpleNamespace(current_user=lambda _cookie: None))
+    response = asyncio.run(AuthMiddleware(app=lambda *_: None).dispatch(denied, lambda _request: Response(status_code=204)))
+    assert response.status_code == 401
+
+
 def test_instance_token_cannot_access_another_instance() -> None:
     request = _request("/messages/connection_b", "instance-token")
     request.state.auth_instance = "connection_a"

@@ -94,6 +94,17 @@ def _connection_service(monkeypatch, tmp_path):
                 dispatch_credential="core-channel-credential",
             )
 
+        async def provision(self, *, gateway_client_id, gateway_connection_id, name, channel_type, provider):
+            assert gateway_client_id == client.id
+            assert gateway_connection_id == connection.id
+            assert channel_type == "instagram"
+            assert provider == "meta"
+            return CoreBinding(
+                id="core-binding-a",
+                channel=CoreChannel(id="core-channel-a", name=name, channel_type="instagram", status="active"),
+                dispatch_credential="core-channel-credential",
+            )
+
     monkeypatch.setattr(connections_router, "get_core_control_plane_client", lambda: _ControlPlane())
     return service, registry, client, connection
 
@@ -471,7 +482,7 @@ def test_callback_uses_state_tenant_binding_not_client_supplied_ids(monkeypatch,
     assert result["ok"] is True
     assert result["connection"]["client_id"] == client.id
     assert result["connection"]["provider_account"]["providerAccountId"] == "17841400000000000"
-    assert result["connection"]["core_channel"] == {"channelId": "core-channel-a", "name": "Botly Instagram", "configured": True}
+    assert result["connection"]["core_channel"] == {"channelId": "core-channel-a", "name": "Instagram", "configured": True}
     assert result["connection"]["status"]["state"] == "connected"
 
     mismatched = states.create(InstagramOAuthIntent(connection.id, "tenant-b", "actor-b"))
@@ -504,6 +515,10 @@ def test_callback_requires_exactly_one_active_core_channel(monkeypatch, tmp_path
 
         async def bind(self, **_kwargs):
             raise AssertionError("an ambiguous Core channel set must never be bound")
+
+        async def provision(self, **_kwargs):
+            from app.services.core_control_plane import CoreControlPlaneError
+            raise CoreControlPlaneError("Core provisioning conflict", status_code=409)
 
     monkeypatch.setattr(connections_router, "_service", service)
     monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
@@ -552,6 +567,14 @@ def test_callback_waits_for_core_channel_before_reporting_success(monkeypatch, t
                 dispatch_credential="dispatch-credential",
             )
 
+        async def provision(self, **kwargs):
+            self.discovery_calls += 1
+            return CoreBinding(
+                id="binding-delayed",
+                channel=CoreChannel(id="core-delayed", name=kwargs["name"], channel_type="instagram", status="active"),
+                dispatch_credential="dispatch-credential",
+            )
+
     control_plane = _DelayedControlPlane()
     async def _no_wait(_delay):
         return None
@@ -576,7 +599,7 @@ def test_callback_waits_for_core_channel_before_reporting_success(monkeypatch, t
 
     assert response.status_code == 303
     assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=success"
-    assert control_plane.discovery_calls == 3
+    assert control_plane.discovery_calls == 1
     assert service.instagram_readiness(connection.id)["coreDeliveryReady"] is True
 
 
@@ -601,6 +624,10 @@ def test_ui_callback_reports_pending_until_core_channel_exists(monkeypatch, tmp_
 
         async def bind(self, **_kwargs):
             raise AssertionError("no absent Core channel may be bound")
+
+        async def provision(self, **_kwargs):
+            from app.services.core_control_plane import CoreControlPlaneError
+            raise CoreControlPlaneError("Core provisioning is pending", status_code=409)
 
     async def _no_wait(_delay):
         return None
