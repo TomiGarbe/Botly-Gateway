@@ -130,6 +130,13 @@ export async function bindInstagramCoreChannel(connectionId: string, coreChannel
   return toConnection(payload)
 }
 
+export async function verifyInstagramConnection(connectionId: string): Promise<Connection> {
+  const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/verify`, {
+    method: 'POST',
+  })
+  return toConnection(payload)
+}
+
 export async function disconnectInstagram(connectionId: string): Promise<Connection> {
   const payload = await gatewayRequest<ApiConnection>(`/connections/${encodeURIComponent(connectionId)}/instagram/disconnect`, { method: 'POST' })
   return toConnection(payload)

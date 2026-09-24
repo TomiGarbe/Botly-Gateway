@@ -473,6 +473,116 @@ def test_callback_requires_exactly_one_active_core_channel(monkeypatch, tmp_path
     assert asyncio.run(service.get_connection(connection.id)).status.state == "connecting"
 
 
+def test_callback_waits_for_core_channel_before_reporting_success(monkeypatch, tmp_path) -> None:
+    service, _, client, connection = _connection_service(monkeypatch, tmp_path)
+    states = InstagramOAuthStateStore(tmp_path / "delayed-core-channel-states.json")
+    state = states.create(InstagramOAuthIntent(connection.id, client.id, "actor-a", ui_return=True))
+
+    class _OAuth:
+        def requested_scopes(self):
+            return ("instagram_business_basic",)
+
+        async def exchange_code(self, _code):
+            return InstagramOAuthToken("callback-token", None, ("instagram_business_basic",))
+
+        async def discover_account(self, _token):
+            return InstagramAccount("17841400000000000", account_type="BUSINESS")
+
+    class _DelayedControlPlane:
+        def __init__(self):
+            self.discovery_calls = 0
+
+        async def discover_channels(self, **_kwargs):
+            self.discovery_calls += 1
+            if self.discovery_calls < 3:
+                return []
+            return [CoreChannel(id="core-delayed", name="Botly Instagram", channel_type="instagram", status="active")]
+
+        async def bind(self, **kwargs):
+            assert kwargs["core_channel_id"] == "core-delayed"
+            return CoreBinding(
+                id="binding-delayed",
+                channel=CoreChannel(id="core-delayed", name="Botly Instagram", channel_type="instagram", status="active"),
+                dispatch_credential="dispatch-credential",
+            )
+
+    control_plane = _DelayedControlPlane()
+    async def _no_wait(_delay):
+        return None
+
+    monkeypatch.setattr(connections_router, "_service", service)
+    monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
+    monkeypatch.setattr(connections_router, "get_core_control_plane_client", lambda: control_plane)
+    monkeypatch.setattr(connections_router.asyncio, "sleep", _no_wait)
+    monkeypatch.setattr(
+        connections_router,
+        "get_settings",
+        lambda: SimpleNamespace(
+            frontend_app_url="https://frontend.example",
+            instagram_core_binding_attempts=3,
+            instagram_core_binding_retry_delay_ms=1,
+        ),
+    )
+
+    response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=success"
+    assert control_plane.discovery_calls == 3
+    assert service.instagram_readiness(connection.id)["coreDeliveryReady"] is True
+
+
+def test_ui_callback_reports_pending_until_core_channel_exists(monkeypatch, tmp_path) -> None:
+    service, _, client, connection = _connection_service(monkeypatch, tmp_path)
+    states = InstagramOAuthStateStore(tmp_path / "pending-core-channel-states.json")
+    state = states.create(InstagramOAuthIntent(connection.id, client.id, "actor-a", ui_return=True))
+
+    class _OAuth:
+        def requested_scopes(self):
+            return ("instagram_business_basic",)
+
+        async def exchange_code(self, _code):
+            return InstagramOAuthToken("callback-token", None, ("instagram_business_basic",))
+
+        async def discover_account(self, _token):
+            return InstagramAccount("17841400000000000", account_type="BUSINESS")
+
+    class _PendingControlPlane:
+        async def discover_channels(self, **_kwargs):
+            return []
+
+        async def bind(self, **_kwargs):
+            raise AssertionError("no absent Core channel may be bound")
+
+    async def _no_wait(_delay):
+        return None
+
+    monkeypatch.setattr(connections_router, "_service", service)
+    monkeypatch.setattr(connections_router, "_instagram_oauth_states", states)
+    monkeypatch.setattr(connections_router, "_instagram_oauth", _OAuth())
+    monkeypatch.setattr(connections_router, "get_credential_manager", lambda: service._credentials)
+    monkeypatch.setattr(connections_router, "get_core_control_plane_client", lambda: _PendingControlPlane())
+    monkeypatch.setattr(connections_router.asyncio, "sleep", _no_wait)
+    monkeypatch.setattr(
+        connections_router,
+        "get_settings",
+        lambda: SimpleNamespace(
+            frontend_app_url="https://frontend.example",
+            instagram_core_binding_attempts=2,
+            instagram_core_binding_retry_delay_ms=1,
+        ),
+    )
+
+    response = asyncio.run(connections_router.instagram_oauth_callback(state=state, code="code", error=None, error_description=None))
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"https://frontend.example/connections/{connection.id}/instagram/complete?oauth=pending"
+    assert service.instagram_readiness(connection.id)["coreDeliveryReady"] is False
+    assert asyncio.run(service.get_connection(connection.id)).status.state == "connecting"
+
+
 def test_authorize_route_requires_a_meta_instagram_connection_and_creates_bound_state(monkeypatch, tmp_path) -> None:
     service, _, client, connection = _connection_service(monkeypatch, tmp_path)
     states = InstagramOAuthStateStore(tmp_path / "authorize_states.json")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -89,6 +90,7 @@ _INSTAGRAM_CALLBACK_STAGE_DETAILS = {
     "connection_update": ("connection.update", "Instagram connection update failed"),
     "core_channel_resolution": ("core_channel.discovery", "Botly Core channel resolution failed"),
     "core_channel_binding": ("core_channel.binding", "Botly Core channel binding failed"),
+    "readiness_verification": ("instagram.readiness", "Instagram connection readiness verification failed"),
     "final_redirect": ("frontend_ui_redirect", "Instagram OAuth final redirect failed"),
 }
 
@@ -128,26 +130,6 @@ def _log_instagram_callback_stage(
     logger.info("instagram_oauth_callback_stage", **fields)
 
 
-async def _resolve_instagram_core_channel(connection):
-    """Resolve exactly one tenant-scoped active Instagram channel.
-
-    OAuth never accepts a Core channel ID or dispatch credential from a browser.
-    Choosing between multiple channels would be a tenant-routing decision, so
-    that case remains explicitly pending instead of binding an arbitrary one.
-    """
-    channels = await get_core_control_plane_client().discover_channels(
-        gateway_client_id=connection.client_id,
-        channel_type="instagram",
-    )
-    eligible = [channel for channel in channels if channel.status.lower() == "active"]
-    if len(eligible) != 1:
-        raise CoreControlPlaneError(
-            "Botly Core requires exactly one active Instagram channel for this client",
-            status_code=409,
-        )
-    return eligible[0]
-
-
 async def _bind_instagram_core_channel(connection, channel):
     """Create the server-owned binding and persist only its encrypted credential."""
     result = await get_core_control_plane_client().bind(
@@ -162,6 +144,54 @@ async def _bind_instagram_core_channel(connection, channel):
         dispatch_credential=result.dispatch_credential,
         core_binding_id=result.id,
         core_channel_name=result.channel.name,
+    )
+
+
+async def _verify_instagram_connection(connection, *, attempts: int = 1, delay_seconds: float = 0):
+    """Promote Instagram to connected only after its inbound route is usable.
+
+    Meta OAuth and the Core channel are created by independent requests.  A
+    missing channel is therefore retryable; multiple active channels remain an
+    explicit tenant-routing error and are never selected arbitrarily.
+    """
+    readiness = _service.instagram_readiness(
+        connection.id,
+        required_scopes=_instagram_oauth.requested_scopes(),
+    )
+    if readiness.get("coreDeliveryReady"):
+        return connection
+
+    connection = _service.mark_instagram_core_delivery_pending(connection.id)
+    total_attempts = max(1, attempts)
+    for index in range(total_attempts):
+        channels = await get_core_control_plane_client().discover_channels(
+            gateway_client_id=connection.client_id,
+            channel_type="instagram",
+        )
+        active = [channel for channel in channels if channel.status.lower() == "active"]
+        if len(active) > 1:
+            raise CoreControlPlaneError(
+                "Botly Core requires exactly one active Instagram channel for this client",
+                status_code=409,
+            )
+        if len(active) == 1:
+            bound = await _bind_instagram_core_channel(connection, active[0])
+            verified = _service.instagram_readiness(
+                bound.id,
+                required_scopes=_instagram_oauth.requested_scopes(),
+            )
+            if verified.get("ready") and verified.get("coreDeliveryReady"):
+                return bound
+            raise CoreControlPlaneError(
+                "Instagram connection verification did not produce a usable inbound route",
+                status_code=409,
+            )
+        if index + 1 < total_attempts:
+            await asyncio.sleep(max(0, delay_seconds))
+
+    raise CoreControlPlaneError(
+        "Botly Core Instagram channel is not ready yet",
+        status_code=409,
     )
 
 
@@ -256,12 +286,15 @@ async def instagram_oauth_callback(
         # usable. Re-request the server-owned binding rather than reporting
         # OAuth success for a connection that cannot deliver inbound events.
         if not _service.instagram_readiness(connection.id, required_scopes=_instagram_oauth.requested_scopes()).get("coreDeliveryReady"):
-            connection = _service.mark_instagram_core_delivery_pending(connection.id)
             stage = "core_channel_resolution"
-            channel = await _resolve_instagram_core_channel(connection)
+            callback_settings = get_settings()
+            connection = await _verify_instagram_connection(
+                connection,
+                attempts=max(1, int(getattr(callback_settings, "instagram_core_binding_attempts", 8))),
+                delay_seconds=max(0, int(getattr(callback_settings, "instagram_core_binding_retry_delay_ms", 750))) / 1000,
+            )
             _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
-            stage = "core_channel_binding"
-            connection = await _bind_instagram_core_channel(connection, channel)
+            stage = "readiness_verification"
             _log_instagram_callback_stage(stage=stage, outcome="passed", intent=intent)
         if intent.ui_return:
             stage = "final_redirect"
@@ -282,7 +315,11 @@ async def instagram_oauth_callback(
     except CoreControlPlaneError as exc:
         _log_instagram_callback_stage(stage=stage, outcome="failed", intent=intent, error=exc)
         if intent and intent.ui_return:
-            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, "failed"), status_code=status.HTTP_303_SEE_OTHER)
+            # OAuth and provider credential persistence already succeeded. The
+            # browser continues the idempotent server-side readiness check
+            # while Core finishes creating the tenant channel.
+            outcome = "pending" if exc.status_code == 409 and stage in {"core_channel_resolution", "readiness_verification"} else "failed"
+            return RedirectResponse(_instagram_ui_callback_url(intent.connection_id, outcome), status_code=status.HTTP_303_SEE_OTHER)
         raise _core_control_plane_http_error(exc)
     except Exception as exc:
         _log_instagram_callback_stage(stage=stage, outcome="failed", intent=intent, error=exc)
@@ -391,6 +428,24 @@ async def bind_instagram_core_channel(connection_id: str, body: CoreChannelBindi
             core_binding_id=result.id,
             core_channel_name=result.channel.name,
         ).public_dict()
+    except ConnectionNotFoundError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except CoreControlPlaneError as exc:
+        raise _core_control_plane_http_error(exc)
+    except (UnsupportedConnectionProviderError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/{connection_id}/instagram/verify")
+async def verify_instagram_connection(connection_id: str, request: Request):
+    """Run the server-owned readiness gate and promote only a usable connection."""
+    try:
+        _authenticated_actor_id(request)
+        connection = await _service.get_connection(connection_id)
+        require_reviewer_connection_access(request, connection)
+        _service.require_instagram_meta_connection(connection_id)
+        verified = await _verify_instagram_connection(connection)
+        return verified.public_dict()
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
     except CoreControlPlaneError as exc:

@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # control-plane. It is never a browser or channel credential.
     gateway_control_plane_api_key: str = ""
     core_control_plane_timeout_seconds: int = 10
+    # OAuth and Core create their records independently. Give the Core channel
+    # a short window to appear before returning the browser to the UI; the UI
+    # can continue the same server-side verification if the race lasts longer.
+    instagram_core_binding_attempts: int = 8
+    instagram_core_binding_retry_delay_ms: int = 750
     core_inbound_deliveries_path: str = "/var/lib/botly/core/inbound_deliveries.json"
     core_inbound_delivery_max_attempts: int = 5
     core_inbound_delivery_backoff_base_seconds: int = 5

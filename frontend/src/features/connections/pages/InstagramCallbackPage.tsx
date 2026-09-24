@@ -2,10 +2,9 @@ import { CheckCircle2, LoaderCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  bindInstagramCoreChannel,
   getConnection,
   getInstagramReadiness,
-  listInstagramCoreChannels,
+  verifyInstagramConnection,
 } from '../api/connectionsApi'
 
 export function InstagramCallbackPage() {
@@ -17,7 +16,7 @@ export function InstagramCallbackPage() {
 
   useEffect(() => {
     if (!connectionId) return
-    if (outcome !== 'success') {
+    if (outcome !== 'success' && outcome !== 'pending') {
       setMessage(outcome === 'cancelled' ? 'La autorización de Instagram fue cancelada.' : 'No se pudo completar la conexión de Instagram.')
       return
     }
@@ -37,14 +36,10 @@ export function InstagramCallbackPage() {
           }
 
           setMessage('Vinculando Instagram con Botly…')
-          const channels = await listInstagramCoreChannels(connectionId)
-          const activeChannels = channels.filter((channel) => channel.status.toLowerCase() === 'active')
-          if (activeChannels.length === 1) {
-            const bound = await bindInstagramCoreChannel(connectionId, activeChannels[0].id)
-            if (!stopped && bound.readiness?.coreDeliveryReady) {
-              navigate(`/connections/${connectionId}?instagram=connected`, { replace: true })
-              return
-            }
+          const verified = await verifyInstagramConnection(connectionId)
+          if (!stopped && verified.readiness?.coreDeliveryReady) {
+            navigate(`/connections/${connectionId}?instagram=connected`, { replace: true })
+            return
           }
         }
       } catch {
