@@ -890,6 +890,34 @@
   .qr-relink-state { @apply flex flex-col items-center gap-2 rounded-xl border p-6 text-center; }
   .qr-relink-state.is-success { @apply border-emerald-900/70 bg-emerald-950/25 text-emerald-200; }
   .qr-relink-state span { @apply text-sm text-zinc-400; }
+  .chat-layout { @apply lg:grid-cols-[minmax(0,1.4fr)_minmax(20rem,1fr)]; }
+  .chat-panel { @apply relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/60; }
+  .chat-thread { @apply flex h-[min(38rem,62dvh)] flex-col gap-1 overflow-y-auto overscroll-contain p-3 sm:p-4; }
+  .chat-item { @apply flex flex-col; }
+  .chat-day { @apply sticky top-0 z-[1] my-2 flex justify-center; }
+  .chat-day span { @apply rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1 text-[11px] font-medium first-letter:uppercase text-zinc-400 shadow-sm; }
+  .chat-bubble { @apply flex max-w-[85%] flex-col gap-1 rounded-2xl px-3 py-2 text-left text-sm leading-6 transition-colors sm:max-w-[75%]; }
+  .chat-bubble.is-inbound { @apply self-start rounded-bl-md bg-zinc-800/80 text-zinc-100 hover:bg-zinc-800; }
+  .chat-bubble.is-outbound { @apply self-end rounded-br-md bg-blue-600/90 text-white hover:bg-blue-600; }
+  .chat-bubble.is-failed { @apply border border-red-900/70 bg-red-950/60 text-red-100 hover:bg-red-950/80; }
+  .chat-bubble.is-selected { @apply ring-2 ring-blue-300/60; }
+  .chat-contact { @apply text-xs font-semibold text-violet-300; }
+  .chat-media { @apply inline-flex min-w-0 items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5 text-xs; }
+  .chat-media span { @apply truncate; }
+  .chat-text { @apply whitespace-pre-wrap break-words; }
+  .chat-meta { @apply inline-flex items-center gap-1 self-end text-[11px] leading-4 opacity-75; }
+  .chat-status.is-read { @apply text-sky-200; }
+  .chat-status.is-error { @apply text-red-300; }
+  .chat-failed-note { @apply mr-1 mt-0.5 self-end text-[11px] text-red-300; }
+  .chat-new-below { @apply absolute bottom-32 left-1/2 z-[2] inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg shadow-black/40; animation: ui-fade-in 150ms ease-out; }
+  .chat-composer { @apply grid gap-1.5 border-t border-zinc-800 bg-zinc-900/60 p-2 sm:p-3; }
+  .chat-recipient { @apply flex items-center gap-2 px-1 text-xs text-zinc-500; }
+  .chat-recipient .ui-control { @apply min-h-8 !border-0 !bg-transparent !px-0 !py-1 font-mono !shadow-none !ring-0; }
+  .chat-input-row { @apply flex items-end gap-2; }
+  .chat-input-row .ui-textarea { @apply max-h-40 min-h-10 resize-none rounded-2xl py-2 leading-6; field-sizing: content; }
+  .chat-send { @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500; }
+  .app-nav-icon { @apply relative inline-flex shrink-0; }
+  .app-nav-badge { @apply absolute -right-2 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-zinc-950; }
   .detail-sheet-close { @apply sticky top-0 z-10 float-right -mr-1 -mt-1 h-10 w-10 items-center justify-center rounded-lg bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100; }
 }
 

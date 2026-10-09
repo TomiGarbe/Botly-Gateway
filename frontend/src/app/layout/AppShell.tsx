@@ -1,5 +1,6 @@
 import { BarChart3, Bell, ChevronRight, Link2, LayoutDashboard, LogOut, Settings, Users } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { ALERTS_CHANGED_EVENT, listAlerts } from '@/features/alerts/api/alertsApi'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../providers/AuthProvider'
 
@@ -33,6 +34,18 @@ export function AppShell() {
   const breadcrumbs = breadcrumbsFor(pathname)
   const isReviewer = user?.role === 'meta_reviewer'
   const userMenu = useRef<HTMLDetailsElement>(null)
+  const [activeAlerts, setActiveAlerts] = useState(0)
+
+  // Badge de alertas: se refresca al navegar, cada minuto y cuando la página de alertas cambia algo.
+  useEffect(() => {
+    if (!user || isReviewer) return undefined
+    let active = true
+    const refresh = () => { void listAlerts().then((alerts) => { if (active) setActiveAlerts(alerts.filter((alert) => alert.status !== 'resolved').length) }).catch(() => undefined) }
+    refresh()
+    const interval = window.setInterval(refresh, 60000)
+    window.addEventListener(ALERTS_CHANGED_EVENT, refresh)
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener(ALERTS_CHANGED_EVENT, refresh) }
+  }, [user, isReviewer, pathname])
 
   // <details> no se cierra solo: lo cerramos al navegar o al tocar fuera.
   useEffect(() => { userMenu.current?.removeAttribute('open') }, [pathname])
@@ -52,7 +65,10 @@ export function AppShell() {
         <nav className="app-navigation">
         {navigation.filter((item) => !isReviewer || item.to === '/clients' || item.to === '/connections' || item.to === '/analytics').map(({ to, label, shortLabel, icon: Icon }) => (
             <NavLink key={to} to={to} className={({ isActive }) => `app-nav-link${isActive ? ' is-active' : ''}`}>
-              <Icon size={17} aria-hidden="true" />
+              <span className="app-nav-icon">
+                <Icon size={17} aria-hidden="true" />
+                {to === '/alerts' && activeAlerts > 0 ? <span className="app-nav-badge" aria-label={`${activeAlerts} alertas activas`}>{activeAlerts > 99 ? '99+' : activeAlerts}</span> : null}
+              </span>
               <span className="app-nav-label">{label}</span>
               <span className="app-nav-short-label" aria-hidden="true">{shortLabel}</span>
             </NavLink>

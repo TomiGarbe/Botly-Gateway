@@ -1,5 +1,9 @@
 import { gatewayRequest } from '@/shared/lib/gatewayClient'
 
+/** Se emite tras reconocer, resolver o eliminar alertas para que la navegación actualice su contador. */
+export const ALERTS_CHANGED_EVENT = 'botly:alerts-changed'
+function notifyAlertsChanged() { window.dispatchEvent(new Event(ALERTS_CHANGED_EVENT)) }
+
 export type AlertSeverity = 'critical' | 'warning' | 'info'
 export type AlertStatus = 'new' | 'acknowledged' | 'resolved'
 
@@ -50,18 +54,24 @@ export async function listAlerts(): Promise<GatewayAlert[]> {
 }
 
 export async function acknowledgeAlert(alertId: string): Promise<GatewayAlert> {
-  return toAlert(await gatewayRequest<ApiAlert>(`/alerts/${encodeURIComponent(alertId)}/acknowledge`, { method: 'POST' }))
+  const alert = toAlert(await gatewayRequest<ApiAlert>(`/alerts/${encodeURIComponent(alertId)}/acknowledge`, { method: 'POST' }))
+  notifyAlertsChanged()
+  return alert
 }
 
 export async function resolveAlert(alertId: string): Promise<GatewayAlert> {
-  return toAlert(await gatewayRequest<ApiAlert>(`/alerts/${encodeURIComponent(alertId)}/resolve`, { method: 'POST' }))
+  const alert = toAlert(await gatewayRequest<ApiAlert>(`/alerts/${encodeURIComponent(alertId)}/resolve`, { method: 'POST' }))
+  notifyAlertsChanged()
+  return alert
 }
 
 export async function deleteAlert(alertId: string): Promise<void> {
   await gatewayRequest<void>(`/alerts/${encodeURIComponent(alertId)}`, { method: 'DELETE' })
+  notifyAlertsChanged()
 }
 
 export async function deleteResolvedAlerts(): Promise<number> {
   const payload = await gatewayRequest<{ deleted: number }>('/alerts/resolved', { method: 'DELETE' })
+  notifyAlertsChanged()
   return payload.deleted
 }
