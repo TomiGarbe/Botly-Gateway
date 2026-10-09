@@ -1,4 +1,4 @@
-import { CircleAlert, CheckCircle2, RefreshCw, Unplug } from 'lucide-react'
+import { CircleAlert, CheckCircle2, LoaderCircle, RefreshCw, Unplug } from 'lucide-react'
 import type { Connection } from '@/domain/connection'
 import { StatusBadge } from '@/shared/components/StatusBadge'
 
@@ -11,7 +11,7 @@ function readiness(connection: Connection): { label: string; tone: 'healthy' | '
   return { label: value.state === 'expired' ? 'Requiere atención' : 'Configuración pendiente', tone: 'attention' }
 }
 
-export function ConnectionOverview({ connection, onAuthorize, onDisconnect, isRefreshing, onRefresh }: { connection: Connection; onAuthorize?: () => void; onDisconnect?: () => void; isRefreshing?: boolean; onRefresh: () => void }) {
+export function ConnectionOverview({ connection, onAuthorize, authorizeLabel, isAuthorizing, onDisconnect, isRefreshing, onRefresh }: { connection: Connection; onAuthorize?: () => void; authorizeLabel?: string; isAuthorizing?: boolean; onDisconnect?: () => void; isRefreshing?: boolean; onRefresh: () => void }) {
   const account = connection.providerAccount?.metadata || {}; const state = readiness(connection); const hasAccount = Boolean(connection.providerAccount)
   return <section className="connection-section connection-overview">
     <div className="connection-section-heading"><div><h3>Configuración de la conexión</h3><p>Estado operativo y cuenta asociada.</p></div><StatusBadge tone={state.tone}>{state.label}</StatusBadge></div>
@@ -19,6 +19,6 @@ export function ConnectionOverview({ connection, onAuthorize, onDisconnect, isRe
     {connection.readiness ? <ul className="connection-readiness-list">{[
       ['Autenticación', connection.readiness.authenticated], ['Credenciales', connection.readiness.credentialValid], ['Cuenta detectada', connection.readiness.accountDiscovered], ['Permisos requeridos', connection.readiness.requiredScopesPresent],
     ].filter(([, value]) => value !== undefined).map(([label, value]) => <li key={String(label)}>{value ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}<span>{label}</span></li>)}</ul> : null}
-    <div className="connection-inline-actions"><button type="button" className="client-button-secondary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} /> Actualizar estado</button>{onAuthorize ? <button type="button" className="client-button-primary" onClick={onAuthorize}>{hasAccount ? 'Reautorizar' : 'Conectar'}</button> : null}{onDisconnect && hasAccount ? <button type="button" className="client-button-danger" onClick={onDisconnect}><Unplug size={15} /> Desconectar</button> : null}</div>
+    <div className="connection-inline-actions"><button type="button" className="client-button-secondary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} /> Actualizar estado</button>{onAuthorize ? <button type="button" className="client-button-primary" onClick={onAuthorize} disabled={isAuthorizing}>{isAuthorizing ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : null}{authorizeLabel || (hasAccount ? 'Reautorizar' : 'Conectar')}</button> : null}{onDisconnect && hasAccount ? <button type="button" className="client-button-danger" onClick={onDisconnect}><Unplug size={15} /> Desconectar</button> : null}</div>
   </section>
 }

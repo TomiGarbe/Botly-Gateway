@@ -16,12 +16,15 @@ interface EmbeddedSignupSession {
   raw: Record<string, unknown>
 }
 
+/** Un setup nuevo o una conexión existente que se reautoriza. */
+export type MetaSignupTarget = { setupId: string } | { connectionId: string }
+
 export async function getMetaSignupConfig(): Promise<MetaSignupConfig> {
   return gatewayRequest<MetaSignupConfig>('/meta/signup/config')
 }
 
 export async function completeMetaSignup(
-  setupId: string,
+  target: MetaSignupTarget,
   code: string,
   session: EmbeddedSignupSession,
   coexistenceRequested: boolean,
@@ -32,7 +35,7 @@ export async function completeMetaSignup(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      setup_id: setupId,
+      ...('setupId' in target ? { setup_id: target.setupId } : { connection_id: target.connectionId }),
       code,
       ...(session.phoneNumberId ? { phone_number_id: session.phoneNumberId } : {}),
       business_account_id: session.businessAccountId,

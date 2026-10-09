@@ -22,11 +22,13 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         calls.append((request.method, request.url.path))
         path = request.url.path
         if path.endswith("/oauth/access_token"):
-            return httpx.Response(200, json={"access_token": "secret-token", "token_type": "bearer"})
+            code = request.url.params.get("code") or (dict(httpx.QueryParams(request.content.decode())).get("code") if request.content else None)
+            token = "rotated-token" if code == "new-oauth-code" else "secret-token"
+            return httpx.Response(200, json={"access_token": token, "token_type": "bearer"})
         if path.endswith("/debug_token"):
             return httpx.Response(200, json={"data": {"is_valid": True, "app_id": "app_123", "scopes": ["whatsapp_business_management", "whatsapp_business_messaging"]}})
         if path.endswith("/waba_456/phone_numbers"):
-            assert request.headers["Authorization"] == "Bearer secret-token"
+            assert request.headers["Authorization"] in {"Bearer secret-token", "Bearer rotated-token"}
             return httpx.Response(200, json={"data": [{"id": "phone_123", "display_phone_number": "+549111111111", "verified_name": "Acme"}]})
         if path.endswith("/waba_456/subscribed_apps"):
             if request.method == "GET":
@@ -105,6 +107,8 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         )
         await client.aclose()
 
+        # Reautorizar una conexión lista debe reemplazar el token guardado aunque no repita el registro.
+        assert orchestrator._credentials_store.get_official_access_token("standard_instance") == "rotated-token"
         assert first.record.public_dict()["status"] == "READY"
         assert second.record.public_dict()["steps"] == {
             "oauth": True, "token": True, "discovery": True, "subscription": True,

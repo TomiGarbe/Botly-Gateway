@@ -189,23 +189,24 @@ class MetaOnboardingOrchestrator:
                 logger.info("cloud_channel_ready", instance=instance_name)
                 save_pipeline_event(stage="cloud_provisioning", status="completed", instance=instance_name, event="CLOUD_PROVISIONED", component="Meta")
 
-            if not record.completed(MetaOnboardingState.CREDENTIALS_PERSISTED):
-                self._credentials_store.upsert_official_credentials(
-                    instance_name=instance_name,
-                    access_token=credentials.access_token,
-                    phone_number_id=credentials.phone_number_id,
-                    business_account_id=credentials.business_account_id,
-                    source="embedded_signup",
-                    metadata={
-                        "onboarding": "embedded_signup",
-                        "onboardingType": onboarding_type.value,
-                        "onboardingState": MetaOnboardingState.READY.value,
-                        "onboardedAt": record.updated_at,
-                    },
-                )
-                self._store.advance(record, MetaOnboardingState.CREDENTIALS_PERSISTED)
-                logger.info("credentials_saved", instance=instance_name)
-                save_pipeline_event(stage="credentials", status="completed", instance=instance_name, event="CREDENTIALS_UPDATED", component="Gateway")
+            # Siempre se persiste: una reautorización sobre un onboarding READY
+            # trae un token nuevo y no debe quedar descartada por el checkpoint.
+            self._credentials_store.upsert_official_credentials(
+                instance_name=instance_name,
+                access_token=credentials.access_token,
+                phone_number_id=credentials.phone_number_id,
+                business_account_id=credentials.business_account_id,
+                source="embedded_signup",
+                metadata={
+                    "onboarding": "embedded_signup",
+                    "onboardingType": onboarding_type.value,
+                    "onboardingState": MetaOnboardingState.READY.value,
+                    "onboardedAt": record.updated_at,
+                },
+            )
+            self._store.advance(record, MetaOnboardingState.CREDENTIALS_PERSISTED)
+            logger.info("credentials_saved", instance=instance_name)
+            save_pipeline_event(stage="credentials", status="completed", instance=instance_name, event="CREDENTIALS_UPDATED", component="Gateway")
 
             self._store.advance(record, MetaOnboardingState.READY)
             logger.info("meta_onboarding_completed", instance=instance_name, onboarding_type=onboarding_type.value)

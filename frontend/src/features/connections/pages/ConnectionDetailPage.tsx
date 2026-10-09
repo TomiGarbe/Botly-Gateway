@@ -15,6 +15,9 @@ import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
 import { ConnectionOverview } from '../components/ConnectionOverview'
 import { ConnectionSecurity } from '../components/ConnectionSecurity'
 import { environment } from '@/app/config/environment'
+import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
+import { loadFacebookSdk, loginWithFacebook, waitForSession } from '../lib/metaEmbeddedSignup'
+import { EvolutionQrRelink } from '../components/EvolutionQrRelink'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
 const tabs: Array<{ id: WorkspaceTab; label: string }> = [{ id: 'general', label: 'General' }, { id: 'security', label: 'Seguridad' }, { id: 'messages', label: 'Mensajes' }, { id: 'webhooks', label: 'Webhooks' }]
@@ -26,6 +29,21 @@ function workspaceState(connection: Connection, status: ConnectionStatusSummary 
   if (connection.status.health === 'unhealthy' || connection.status.state === 'disconnected') return { label: 'Problema crítico', tone: 'critical' }
   return { label: 'Atención requerida', tone: 'attention' }
 }
+const oauthNotice: Record<string, { tone: 'success' | 'error' | 'warning'; message: string }> = {
+  success: { tone: 'success', message: 'Instagram quedó autorizado nuevamente.' },
+  cancelled: { tone: 'warning', message: 'La autorización de Instagram se canceló. La conexión no cambió.' },
+  failed: { tone: 'error', message: 'No se pudo reautorizar Instagram. Revisá el diagnóstico e intentá de nuevo.' },
+}
+
+function signupErrorMessage(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : ''
+  if (message === 'signup_cancelled') return 'La autorización de Meta se canceló. La conexión no cambió.'
+  if (message === 'signup_timeout') return 'La autorización de Meta tardó demasiado. Intentá nuevamente.'
+  if (message === 'signup_unavailable') return 'No pudimos abrir la autorización de Meta. Revisá tu conexión e intentá nuevamente.'
+  if (message === 'signup_incomplete') return 'La autorización de Meta no pudo completarse. Intentá nuevamente.'
+  return message || 'No se pudo reautorizar la cuenta de WhatsApp.'
+}
+
 function dateTime(value: string | null | undefined, fallback = 'Sin actividad registrada'): string {
   if (!value) return fallback
   const date = new Date(value)
@@ -43,6 +61,9 @@ export function ConnectionDetailPage() {
   const [isEditingName, setIsEditingName] = useState(false); const [name, setName] = useState(''); const [isSaving, setIsSaving] = useState(false)
   const [showKey, setShowKey] = useState(false); const [isDeleting, setIsDeleting] = useState(false); const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false); const [isRegenerateDialogOpen, setIsRegenerateDialogOpen] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false); const [isProviderDisconnectOpen, setIsProviderDisconnectOpen] = useState(false)
+  const [isQrRelinkOpen, setIsQrRelinkOpen] = useState(false)
+  const [metaSignupConfig, setMetaSignupConfig] = useState<MetaSignupConfig | null>(null); const [isReauthorizing, setIsReauthorizing] = useState(false)
+  const [oauthToast, setOauthToast] = useState<{ tone: 'success' | 'error' | 'warning'; message: string } | null>(null)
 
   const loadConnection = useCallback(async () => {
     if (!connectionId) return
@@ -66,6 +87,28 @@ export function ConnectionDetailPage() {
     else { const requested = new URLSearchParams(location.search).get('tab'); setActiveTab(tabs.some((tab) => tab.id === requested) ? requested as WorkspaceTab : 'general') }
   }, [location.pathname, location.search])
 
+  // Resultado del OAuth de Instagram: el Gateway vuelve a esta página con ?oauth=<resultado>.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const outcome = params.get('oauth')
+    if (!outcome) return
+    setOauthToast(oauthNotice[outcome] || oauthNotice.failed)
+    params.delete('oauth')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
+  }, [location.pathname, location.search, navigate])
+  const isMetaWhatsapp = connection?.provider.id === 'meta' && connection.channel.id === 'whatsapp'
+  // FB.login tiene que llamarse sincrónicamente en el click, así que el SDK se precarga.
+  useEffect(() => {
+    if (!isMetaWhatsapp) return
+    let active = true
+    void getMetaSignupConfig().then(async (config) => {
+      if (!active || !config.enabled || !config.app_id || !config.config_id) return
+      await loadFacebookSdk(config.app_id, config.graph_version)
+      if (active) setMetaSignupConfig(config)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [isMetaWhatsapp])
+
   async function refreshWorkspace() { await loadConnection(); await loadOperations() }
   async function saveName(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!connection) return; setError(null); setIsSaving(true); try { setConnection(await updateConnectionName(connection.id, name)); setIsEditingName(false) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo actualizar la conexión.') } finally { setIsSaving(false) } }
   async function regenerateKey() { if (!connection) return; setError(null); try { const updated = await regenerateConnectionApiKey(connection.id); setApiKey(updated); setShowKey(true); setNotice('Nueva API Key generada. Podés mostrarla o copiarla cuando la necesites.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo regenerar la API Key.') } }
@@ -76,6 +119,27 @@ export function ConnectionDetailPage() {
   async function reconnect() { if (!connection) return; setError(null); try { await reconnectConnection(connection.id); await refreshWorkspace() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo iniciar la reconexión.') } }
   async function removeConnection() { if (!connection) return; setError(null); setIsDeleting(true); try { await deleteConnection(connection.id); navigate(`/clients/${connection.clientId}`) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo eliminar la conexión.') } finally { setIsDeleting(false) } }
   function authorizeInstagram() { if (!connection) return; const url = new URL('/connections/meta/instagram/authorize', environment.gatewayUrl || window.location.origin); url.searchParams.set('connection_id', connection.id); url.searchParams.set('ui_return', 'true'); window.location.assign(url.toString()) }
+  function reauthorizeWhatsapp() {
+    if (!connection) return
+    if (!metaSignupConfig?.config_id || !window.FB) { setError('La autorización de Meta todavía se está preparando. Esperá un instante e intentá de nuevo.'); return }
+    setError(null); setIsReauthorizing(true)
+    const signupAbort = new AbortController()
+    const sessionPromise = waitForSession(signupAbort.signal)
+    const codePromise = loginWithFacebook(metaSignupConfig.config_id)
+    void (async () => {
+      try {
+        const [code, session] = await Promise.all([codePromise, sessionPromise])
+        await completeMetaSignup({ connectionId: connection.id }, code, session, metaSignupConfig.supports_coexistence)
+        await refreshWorkspace()
+        setNotice('La cuenta de WhatsApp quedó autorizada nuevamente.')
+      } catch (reason) { setError(signupErrorMessage(reason)) } finally { signupAbort.abort(); setIsReauthorizing(false) }
+    })()
+  }
+  function handleQrLinked() {
+    setNotice('WhatsApp quedó vinculado nuevamente.')
+    void refreshWorkspace()
+    window.setTimeout(() => setIsQrRelinkOpen(false), 1500)
+  }
   async function disconnectProvider() { if (!connection || connection.channel.id !== 'instagram' || connection.provider.id !== 'meta') return; setIsDisconnecting(true); try { setConnection(await disconnectInstagram(connection.id)); setNotice('La cuenta fue desconectada.') } catch { setError('No se pudo desconectar la cuenta.') } finally { setIsDisconnecting(false) } }
 
   if (isLoading) return <LoadingState label="Cargando conexión…" />
@@ -83,6 +147,16 @@ export function ConnectionDetailPage() {
   const displayedKey = showKey && apiKey?.apiKey ? apiKey.apiKey : apiKey?.maskedApiKey
   const headerState = workspaceState(connection, statusSummary)
   const messageId = new URLSearchParams(location.search).get('message_id')
+  const isEvolution = connection.provider.id === 'evolution'
+  const isConnected = Boolean(statusSummary?.connected) || connection.status.state === 'connected'
+  // Cada proveedor se recupera distinto: Instagram re-hace OAuth, WhatsApp Cloud repite Embedded Signup y Evolution re-escanea el QR.
+  const authorization = connection.channel.id === 'instagram' && connection.provider.id === 'meta'
+    ? { onAuthorize: authorizeInstagram }
+    : isMetaWhatsapp
+      ? { onAuthorize: reauthorizeWhatsapp, authorizeLabel: 'Reautorizar con Meta', isAuthorizing: isReauthorizing }
+      : isEvolution && !isConnected
+        ? { onAuthorize: () => setIsQrRelinkOpen(true), authorizeLabel: 'Vincular con QR' }
+        : {}
 
   return <section className="connection-detail workspace-detail">
     <header className="workspace-header"><button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button><div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div></header>
@@ -94,13 +168,15 @@ export function ConnectionDetailPage() {
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><Field label="Nombre" required><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></Field><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
         <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl)}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
-        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} />
-        <ConnectionOverview connection={connection} onRefresh={() => void refreshWorkspace()} onAuthorize={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? authorizeInstagram : undefined} onDisconnect={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? () => setIsProviderDisconnectOpen(true) : undefined} />
+        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} onRelinkQr={isEvolution ? () => setIsQrRelinkOpen(true) : undefined} />
+        <ConnectionOverview connection={connection} onRefresh={() => void refreshWorkspace()} {...authorization} onDisconnect={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? () => setIsProviderDisconnectOpen(true) : undefined} />
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
       {activeTab === 'security' ? <><ConnectionSecurity connection={connection} onAuthorize={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? authorizeInstagram : undefined} /><section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl>{apiKey?.hasApiKey && !apiKey.canRevealApiKey ? <p className="connection-endpoint-note">Esta clave fue creada antes de habilitar la visualización. Regenerala una vez para poder mostrarla y copiarla luego.</p> : null}<div className="connection-inline-actions">{apiKey?.canRevealApiKey ? <button type="button" className="client-button-secondary" onClick={() => void toggleKeyVisibility()}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!apiKey?.canRevealApiKey && !apiKey?.apiKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section></> : null}
       {activeTab === 'messages' ? <MessagesWorkspace connectionId={connection.id} messageId={messageId} /> : null}
     </div>
+    <Toast message={oauthToast?.message || null} tone={oauthToast?.tone} onDismiss={() => setOauthToast(null)} />
+    {isQrRelinkOpen ? <EvolutionQrRelink connectionId={connection.id} onClose={() => setIsQrRelinkOpen(false)} onLinked={handleQrLinked} /> : null}
     <ConfirmDialog isOpen={isDeleteDialogOpen} title="Eliminar conexión" description="Esta acción eliminará la conexión y su acceso al Workspace." confirmLabel="Eliminar conexión" isSubmitting={isDeleting} onCancel={() => setIsDeleteDialogOpen(false)} onConfirm={() => void removeConnection()} />
     <ConfirmDialog isOpen={isRegenerateDialogOpen} title="Regenerar API Key" description="La API Key actual dejará de ser válida. Asegurate de copiar la nueva clave al finalizar." confirmLabel="Regenerar API Key" tone="default" onCancel={() => setIsRegenerateDialogOpen(false)} onConfirm={() => { setIsRegenerateDialogOpen(false); void regenerateKey() }} />
     <ConfirmDialog isOpen={isProviderDisconnectOpen} title="Desconectar cuenta" description="La cuenta dejara de recibir y enviar mensajes hasta que la conectes nuevamente." confirmLabel="Desconectar" isSubmitting={isDisconnecting} onCancel={() => { if (!isDisconnecting) setIsProviderDisconnectOpen(false) }} onConfirm={() => { setIsProviderDisconnectOpen(false); void disconnectProvider() }} />

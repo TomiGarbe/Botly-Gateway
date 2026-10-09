@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, RotateCw, Unplug, Webhook, X } from 'lucide-react'
+import { Activity, CheckCircle2, CircleAlert, LoaderCircle, QrCode, RefreshCw, RotateCw, Unplug, Webhook, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Toast } from '@/shared/components/Toast'
 import type { ConnectionAvailability, ConnectionDiagnosticCheck, ConnectionDiagnostics } from '../api/connectionOperationsApi'
@@ -42,9 +42,10 @@ interface Props {
   onReconnect: () => Promise<void>
   onRefreshConnection: () => Promise<void>
   onManageWebhooks: () => void
+  onRelinkQr?: () => void
 }
 
-export function OperationsDiagnostics({ connectionId, providerId, onReconnect, onRefreshConnection, onManageWebhooks }: Props) {
+export function OperationsDiagnostics({ connectionId, providerId, onReconnect, onRefreshConnection, onManageWebhooks, onRelinkQr }: Props) {
   const [data, setData] = useState<ConnectionDiagnostics | null>(null)
   const [refreshing, setRefreshing] = useState(true)
   const [running, setRunning] = useState<string | null>(null)
@@ -148,6 +149,8 @@ export function OperationsDiagnostics({ connectionId, providerId, onReconnect, o
       <div className="operation-section-heading"><div><p>Acciones</p><h3 id="actions-heading">Acciones disponibles</h3><span>Solo se muestran operaciones que pueden ejecutarse ahora.</span></div></div>
       <div className="operation-actions-row">
         {canReconnect ? operationButton('reconnect', 'Reconectar', RotateCw, () => void reconnect(), 'action') : null}
+        {/* Reiniciar no alcanza si la sesión se cerró desde el teléfono: hay que volver a escanear. */}
+        {!isMeta && onRelinkQr && runtimeCheck && runtimeCheck.status !== 'healthy' ? <button type="button" className="operation-button operation-button-diagnostic" onClick={onRelinkQr}><QrCode size={16} aria-hidden="true" /><span>Vincular con QR</span></button> : null}
       </div>
       <button type="button" className="connection-text-action" onClick={onManageWebhooks}>Administrar webhooks</button>
     </section>
