@@ -1,6 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // Clases de componentes armadas dinámicamente (`status-badge-${tone}`, etc.): sin esto Tailwind las purga.
+  safelist: [
+    { pattern: /^(status-badge|toast|confirm-dialog-icon|connection-card|connection-setup-state|diagnostic-check-status|diagnostics-overall|empty-state|operation-status-summary|operation-button|ui-button|workspace-message-direction|loading-state-line|dashboard-overall)-/ },
+    { pattern: /^is-/ },
+  ],
   theme: {
     extend: {
       fontFamily: {

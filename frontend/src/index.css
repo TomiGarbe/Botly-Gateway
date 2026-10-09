@@ -864,37 +864,112 @@
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
 
-@media (min-width: 641px) and (max-width: 1023px) {
+@layer components {
+  .app-header-product, .app-nav-short-label, .detail-sheet-close, .detail-sheet-backdrop { @apply hidden; }
+  .app-main { overflow-x: clip; }
+
+  /* El input interno no lleva borde propio: el wrapper hace de campo. Necesita !important porque la regla base de inputs tiene más especificidad. */
+  .workspace-message-search .ui-control, .webhook-activity-search .ui-control { @apply min-h-10 !border-0 !bg-transparent !px-0 !shadow-none !ring-0; }
+  .workspace-message-search, .webhook-activity-search { @apply transition-[border-color,box-shadow] focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/25; }
+  .webhook-activity-search { @apply mt-5; }
+
+  .connection-section-heading, .webhooks-heading, .clients-page-heading, .alerts-heading { @apply flex-wrap; }
+  .connection-section-heading > div:first-child, .webhooks-heading > div:first-child { flex: 1 1 14rem; @apply min-w-0; }
+  .connection-section-title-icon { @apply inline-flex items-center gap-2; }
+
+  .webhooks-list, .connection-webhooks-list { grid-template-columns: minmax(0, 1fr); }
+  .webhook-card-heading > div { @apply flex-1; }
+  .webhook-last-result strong { @apply min-w-0 break-words; }
+  .connection-webhook-summary > div { @apply block; }
+  .connection-webhook-summary dd { @apply max-w-none text-left; }
+
+  .detail-sheet-close { @apply sticky top-0 z-10 float-right -mr-1 -mt-1 h-10 w-10 items-center justify-center rounded-lg bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100; }
+}
+
+@media (hover: none) {
+  .client-card:hover, .connection-card:hover, .alert-card:hover, .dashboard-attention-list li:hover { transform: none; }
+}
+
+@keyframes ui-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Por debajo de lg el detalle de mensajes/actividad se abre como bottom sheet en lugar de quedar debajo de la lista. */
+@media (max-width: 1023px) {
+  .workspace-message-list, .webhook-activity-list { @apply max-h-none; }
+  .workspace-message-detail, .webhook-activity-detail { @apply hidden; }
+  .has-selection > .workspace-message-detail, .has-selection > .webhook-activity-detail { @apply fixed inset-x-0 bottom-0 z-50 block max-h-[85dvh] min-h-0 overflow-y-auto rounded-b-none rounded-t-2xl border-x-0 border-b-0 bg-zinc-950 shadow-2xl shadow-black; padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); animation: ui-sheet-in 200ms ease-out; }
+  .has-selection > .detail-sheet-backdrop { @apply fixed inset-0 z-40 block bg-black/60; animation: ui-fade-in 150ms ease-out; }
+  .detail-sheet-close { @apply inline-flex; }
+  .workspace-message-detail-heading, .webhook-activity-detail-heading { @apply pr-12; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
   .app-shell { grid-template-columns: 12rem minmax(0, 1fr); }
   .app-main { @apply px-6; }
   .clients-list, .client-connections-list { @apply grid-cols-1; }
   .dashboard-metrics { @apply grid-cols-2; }
 }
 
-@media (max-width: 640px) {
-  .app-shell { @apply grid grid-cols-1 grid-rows-[auto_minmax(0,1fr)]; }
-  .app-sidebar { @apply h-auto border-b border-r-0 py-3; }
-  .app-sidebar .app-product { @apply mb-3 px-2; }
-  .app-navigation { @apply flex gap-1 overflow-x-auto space-y-0; }
-  .app-nav-link { @apply shrink-0; }
-  .app-header { @apply min-h-14 px-5; }
-  .app-header-context { @apply gap-3; }
-  .app-product img { @apply h-6 w-6; }
-  .app-product { @apply text-xs; }
-  .app-main { @apply px-5 py-8; }
+@media (max-width: 767px) {
+  /* Shell: header compacto arriba y navegación inferior al alcance del pulgar. */
+  .app-shell { @apply grid-cols-1; }
+  .app-sidebar { @apply fixed inset-x-0 bottom-0 top-auto z-40 h-auto overflow-visible border-r-0 border-t bg-zinc-950/95 px-1 pt-1 backdrop-blur; padding-bottom: calc(0.25rem + env(safe-area-inset-bottom)); }
+  .app-sidebar .app-product { @apply hidden; }
+  .app-navigation { @apply flex gap-0 space-y-0; }
+  .app-nav-link { @apply min-h-14 min-w-0 flex-1 flex-col justify-center gap-1 rounded-lg px-0 py-1.5 text-[10.5px] font-medium tracking-tight text-zinc-500 hover:bg-transparent; }
+  .app-nav-link.is-active { @apply bg-transparent text-zinc-50 shadow-none; }
+  .app-nav-link.is-active svg { @apply text-blue-300; }
+  .app-nav-label { @apply hidden; }
+  .app-nav-short-label { @apply block max-w-full truncate; }
+  .app-header { @apply min-h-14 px-4; padding-top: env(safe-area-inset-top); }
+  .app-header-product { @apply flex text-sm; }
+  .app-header-product img { @apply h-6 w-6; }
+  .app-main { @apply px-4 pt-6; padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
+  .app-user-popover { @apply w-64 max-w-[calc(100vw-2rem)]; }
+  .toast { top: calc(1rem + env(safe-area-inset-top)); @apply right-4 w-[calc(100%-2rem)]; }
+
+  /* 16px evita el zoom automático de iOS al enfocar un campo. */
+  input:not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea, select, .ui-control, .ui-rich-select-trigger { font-size: 16px; }
+
+  .clients-page-heading h2, .client-detail-heading h2, .dashboard-heading h2, .alerts-heading h2, .webhooks-heading h2, .settings-heading h2, .new-connection-heading h2, .workspace-header-main h2 { @apply text-xl; }
   .clients-page-heading, .client-detail-heading, .client-connections-heading, .alerts-heading { @apply flex-col items-stretch; }
   .dashboard-heading { @apply flex-col items-stretch; }
-  .dashboard-overall { @apply self-start; }
-  .dashboard-attention-list .client-button-secondary { @apply justify-self-start; }
+  .dashboard-overall { @apply self-start px-0 py-0; }
+  .dashboard-metrics { @apply mt-6 grid-cols-2 gap-2; }
+  .dashboard-metric { @apply p-4; }
+  .dashboard-metric span { @apply mt-3; }
+  .dashboard-section { @apply mt-8; }
+  .dashboard-attention-list li { @apply p-4; }
+  .dashboard-attention-list .status-badge { @apply justify-self-start; }
+  .dashboard-attention-list .client-button-secondary { @apply justify-self-stretch; }
   .client-detail-actions { @apply justify-start; }
   .connection-detail-heading { @apply flex-col; }
-  .client-card { @apply min-h-0; }
-  .connection-card { @apply min-h-0; }
-  .alert-card { @apply flex-col p-5; }
-  .alert-card-actions .client-button-primary { @apply order-first; }
-  .workspace-header { @apply -mx-5 px-5; }
-  .workspace-header-main { @apply flex-col items-stretch; }
+  .client-card, .connection-card { @apply min-h-0; }
+  .alert-card { @apply flex-col gap-3 p-4; }
+  .alert-card-actions { @apply grid grid-cols-2; }
+  .alert-card-actions .client-button-primary { @apply order-first col-span-2; }
+  .workspace-header { @apply -mx-4 px-4; }
+  .workspace-header-main { @apply mt-3 flex-col items-stretch pb-3; }
   .workspace-header-actions { @apply shrink justify-start; }
+  .workspace-tabs { @apply -top-6 -mx-4 px-4; }
   .workspace-tabs button { @apply px-3; }
+  .connection-section { @apply mt-8 pt-6; }
+  .connection-information-list dd { @apply min-w-0 break-words text-right; }
+  .connection-endpoint .client-button-secondary { @apply w-full; }
   .meta-signup-card .client-button-primary { @apply ml-0; }
+  .settings-channel-card { @apply flex-wrap gap-3 p-4; }
+  .settings-channel-card > div { flex: 1 1 calc(100% - 3rem); }
+  .settings-channel-card .settings-channel-toggle { @apply w-full border-t border-zinc-800 px-0 pb-0 pt-3 hover:bg-transparent; }
+  .analytics-cards { @apply grid-cols-2 gap-2; }
+  .analytics-card { @apply p-4; }
+  .analytics-card strong { @apply text-xl; }
+  .analytics-definition { @apply grid-cols-2; }
+  .analytics-filters label { flex: 1 1 11rem; @apply min-w-0; }
+  .analytics-filters input, .analytics-filters select { @apply w-full min-w-0; }
+  .webhook-delivery-filters label { @apply min-w-0 flex-1; }
+  .webhook-delivery-filters input, .webhook-delivery-filters select { @apply w-full min-w-0; }
+  .confirm-dialog-backdrop { @apply items-end p-0; }
+  .confirm-dialog { @apply max-w-none rounded-b-none rounded-t-2xl; padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+  .confirm-dialog-actions { @apply grid grid-cols-2; }
+  .activity-panel { @apply max-w-none; }
 }
