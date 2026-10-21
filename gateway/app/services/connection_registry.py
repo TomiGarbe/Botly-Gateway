@@ -243,6 +243,19 @@ class ConnectionRegistry:
             self._write_unlocked(store)
         return deepcopy(record)
 
+    def update_group_transport_policy(self, policy: dict[str, Any]) -> None:
+        """Validate and replace Core authorization against the binding atomically."""
+        from app.services.group_transport import require_policy
+        with _LOCK:
+            store = self._read_unlocked()
+            for record in store["connections"].values():
+                if isinstance(record, dict) and record.get("id") == policy.get("connectionRef"):
+                    require_policy(record, policy=policy)
+                    record["core_channel"]["groupTransport"] = deepcopy(policy)
+                    self._write_unlocked(store)
+                    return
+            raise ValueError("Group connection does not exist")
+
     def update_connection_record(self, connection_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
         with _LOCK:
             store = self._read_unlocked()

@@ -36,3 +36,5 @@ Thumbs.db
 # Extras
 tmp/
 docs/*
+# Versioned transport contracts shared with Core
+!docs/contracts/

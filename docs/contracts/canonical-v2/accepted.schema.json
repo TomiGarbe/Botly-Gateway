@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "CanonicalTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "correlationId": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Correlationid"
+        }
+      },
+      "title": "CanonicalTrace",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "accepted",
+      "title": "Status",
+      "type": "string"
+    },
+    "providerMessageId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Providermessageid"
+    },
+    "idempotencyKey": {
+      "title": "Idempotencykey",
+      "type": "string"
+    },
+    "trace": {
+      "$ref": "#/$defs/CanonicalTrace"
+    },
+    "provider": {
+      "enum": [
+        "evolution",
+        "meta"
+      ],
+      "title": "Provider",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "providerMessageId",
+    "idempotencyKey",
+    "trace",
+    "provider"
+  ],
+  "title": "OutboundAccepted",
+  "type": "object"
+}

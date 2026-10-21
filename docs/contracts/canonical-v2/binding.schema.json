@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connectionRef": {
+      "title": "Connectionref",
+      "type": "string"
+    },
+    "coreChannelId": {
+      "title": "Corechannelid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "connectionRef",
+    "coreChannelId"
+  ],
+  "title": "GroupBindingRequest",
+  "type": "object"
+}

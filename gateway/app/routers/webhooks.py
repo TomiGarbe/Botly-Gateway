@@ -350,7 +350,6 @@ async def receive_webhook(request: Request):
         request_id=request_id,
         instance=instance,
         auth_source=provided_source,
-        received_prefix=provided_key[:8] if provided_key else "",
         normalized=extracted["normalized"],
     )
 
@@ -360,10 +359,6 @@ async def receive_webhook(request: Request):
         request_id=request_id,
         instance=instance,
         auth_source=provided_source,
-        expected_global_prefix=auth_validation["expectedGlobalPrefix"],
-        expected_webhook_secret_prefix=auth_validation["expectedWebhookSecretPrefix"],
-        expected_instance_prefix=auth_validation["expectedInstancePrefix"],
-        received_prefix=auth_validation["receivedPrefix"],
         comparison_mode="webhook_secret_or_legacy",
         result="ok" if auth_validation["accepted"] else "fail",
         accepted_mode=auth_validation["mode"],
@@ -376,29 +371,26 @@ async def receive_webhook(request: Request):
         event=str(payload.get("event") or "UNKNOWN"),
         details={
             "source": provided_source,
-            "receivedPrefix": auth_validation["receivedPrefix"],
-            "expectedGlobalPrefix": auth_validation["expectedGlobalPrefix"],
-            "expectedWebhookSecretPrefix": auth_validation["expectedWebhookSecretPrefix"],
-            "expectedInstancePrefix": auth_validation["expectedInstancePrefix"],
             "acceptedMode": auth_validation["mode"],
         },
     )
 
     if not auth_validation["accepted"]:
+        from app.services.group_messages import is_group_message
+        if is_group_message(payload):
+            raise HTTPException(status_code=403, detail="Authenticated provider webhook required for groups")
         if settings.allow_insecure_evolution_webhooks:
             logger.warning(
                 "evolution_webhook_auth_insecure_bypass",
                 request_id=request_id,
                 instance=instance,
                 source=provided_source,
-                received_prefix=auth_validation["receivedPrefix"],
             )
             save_pipeline_event(
                 stage="evolution_auth",
                 status="insecure_bypass",
                 instance=instance,
                 request_id=request_id,
-                details={"source": provided_source, "receivedPrefix": auth_validation["receivedPrefix"]},
             )
         elif not provided_key:
             logger.warning("evolution_webhook_auth_missing", instance=instance, source=provided_source)
@@ -409,9 +401,6 @@ async def receive_webhook(request: Request):
                 "evolution_webhook_auth_failed",
                 instance=instance,
                 source=provided_source,
-                received_prefix=auth_validation["receivedPrefix"],
-                expected_global_prefix=auth_validation["expectedGlobalPrefix"],
-                expected_instance_prefix=auth_validation["expectedInstancePrefix"],
             )
             audit_event("webhook_auth_failed", instance=instance, reason="invalid_credentials", source=provided_source)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Autenticacion de webhook invalida. Revisa la API key configurada en Botly Gateway.")
@@ -449,6 +438,8 @@ async def receive_webhook(request: Request):
     pipeline_result = process_incoming_webhook(payload, request_id)
     normalized = pipeline_result.get("normalized") or {}
 
+    if str(pipeline_result.get("status") or "").startswith("group_"):
+        return {"status": pipeline_result["status"]}
     if pipeline_result.get("status") == "ignored_technical":
         logger.debug(
             "webhook_technical_ignored",
@@ -492,7 +483,6 @@ async def receive_webhook(request: Request):
         is_forwarded=bool((normalized.get("metadata") or {}).get("forwarded")),
         is_group=bool((((normalized.get("context") or {}).get("chat")) or {}).get("isGroup")),
         quoted_type=(((normalized.get("context") or {}).get("quoted")) or {}).get("type"),
-        quoted_preview=(((normalized.get("context") or {}).get("quoted")) or {}).get("preview"),
         unknown_type_detected=bool((normalized.get("metadata") or {}).get("unknownTypeDetected")),
         interaction_type=((normalized.get("interaction") or {}).get("interactionType")),
         selected_id=((normalized.get("interaction") or {}).get("id")),

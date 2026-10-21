@@ -1,0 +1,15 @@
+{
+  "connectionRef": "synthetic-connection",
+  "coreChannelId": "00000000-0000-4000-8000-000000000001",
+  "bindingId": "synthetic-binding",
+  "contractVersion": "canonical-v2",
+  "enabled": false,
+  "evolutionApiProfile": "evolution-v2-sendText",
+  "authorizedGroups": [
+    "synthetic-team@g.us"
+  ],
+  "botAccount": {
+    "externalId": "bot@lid",
+    "displayName": "Synthetic bot"
+  }
+}

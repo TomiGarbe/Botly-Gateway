@@ -1,0 +1,19 @@
+{
+  "contractVersion": "canonical-v2",
+  "connectionRef": "synthetic-connection",
+  "bindingId": "synthetic-binding",
+  "channel": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "type": "whatsapp",
+    "provider": "evolution"
+  },
+  "recipient": {
+    "type": "group",
+    "externalId": "synthetic-team@g.us"
+  },
+  "message": {
+    "kind": "text",
+    "content": "Synthetic group reply"
+  },
+  "idempotencyKey": "synthetic-outbound"
+}

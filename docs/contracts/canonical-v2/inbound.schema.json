@@ -1,0 +1,266 @@
+{
+  "$defs": {
+    "Chat": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "direct",
+            "group"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "externalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Externalid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "externalId"
+      ],
+      "title": "Chat",
+      "type": "object"
+    },
+    "Identity": {
+      "additionalProperties": false,
+      "properties": {
+        "externalId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Externalid"
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Displayname"
+        }
+      },
+      "required": [
+        "externalId",
+        "displayName"
+      ],
+      "title": "Identity",
+      "type": "object"
+    },
+    "InboundMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "providerMessageId": {
+          "minLength": 1,
+          "title": "Providermessageid",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Text"
+        },
+        "fromMe": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fromme"
+        },
+        "mentions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Identity"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mentions"
+        },
+        "quoted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Quote"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "providerMessageId",
+        "kind",
+        "text",
+        "fromMe",
+        "mentions",
+        "quoted"
+      ],
+      "title": "InboundMessage",
+      "type": "object"
+    },
+    "Quote": {
+      "additionalProperties": false,
+      "properties": {
+        "providerMessageId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Providermessageid"
+        },
+        "author": {
+          "$ref": "#/$defs/Identity"
+        },
+        "chatExternalId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Chatexternalid"
+        }
+      },
+      "required": [
+        "providerMessageId",
+        "author",
+        "chatExternalId"
+      ],
+      "title": "Quote",
+      "type": "object"
+    },
+    "Transport": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "const": "evolution",
+          "title": "Provider",
+          "type": "string"
+        },
+        "channelType": {
+          "const": "whatsapp",
+          "title": "Channeltype",
+          "type": "string"
+        },
+        "providerAccountRef": {
+          "title": "Provideraccountref",
+          "type": "string"
+        },
+        "connectionRef": {
+          "title": "Connectionref",
+          "type": "string"
+        },
+        "coreChannelId": {
+          "title": "Corechannelid",
+          "type": "string"
+        },
+        "bindingId": {
+          "title": "Bindingid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "channelType",
+        "providerAccountRef",
+        "connectionRef",
+        "coreChannelId",
+        "bindingId"
+      ],
+      "title": "Transport",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "const": "canonical-v2",
+      "title": "Contractversion",
+      "type": "string"
+    },
+    "eventId": {
+      "title": "Eventid",
+      "type": "string"
+    },
+    "eventType": {
+      "const": "message",
+      "title": "Eventtype",
+      "type": "string"
+    },
+    "occurredAt": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Occurredat"
+    },
+    "transport": {
+      "$ref": "#/$defs/Transport"
+    },
+    "chat": {
+      "$ref": "#/$defs/Chat"
+    },
+    "author": {
+      "$ref": "#/$defs/Identity"
+    },
+    "botAccount": {
+      "$ref": "#/$defs/Identity"
+    },
+    "message": {
+      "$ref": "#/$defs/InboundMessage"
+    }
+  },
+  "required": [
+    "contractVersion",
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "transport",
+    "chat",
+    "author",
+    "botAccount",
+    "message"
+  ],
+  "title": "CanonicalInboundV2",
+  "type": "object"
+}
