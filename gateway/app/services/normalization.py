@@ -792,7 +792,12 @@ def _build_chat_context(data: dict[str, Any], instance: Any) -> dict[str, Any]:
 
 
 def _build_context_and_metadata(data: dict[str, Any], message: dict[str, Any], message_type: str, instance: Any, from_me: bool) -> tuple[dict[str, Any], dict[str, Any]]:
-    context_info = _extract_context_info(message, message_type)
+    # Evolution may lift the current message's context next to `message`.
+    # Nested context remains authoritative, including an explicit empty mention list.
+    context_info = {
+        **_ensure_dict(data.get("contextInfo")),
+        **_extract_context_info(message, message_type),
+    }
     quoted = _extract_quoted_summary(context_info)
     mentions = _extract_mentions(context_info)
     chat = _build_chat_context(data, instance)

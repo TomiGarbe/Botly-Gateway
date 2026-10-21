@@ -527,3 +527,27 @@ def test_conflicting_participant_directory_does_not_authorize_alias():
         {'id': 'person@lid', 'phoneNumber': '5491100000002@s.whatsapp.net'},
     ]}])
     assert result == {'group@g.us': {}}
+
+
+@pytest.mark.parametrize('message_type', ['conversation', 'extendedTextMessage'])
+def test_evolution_top_level_context_preserves_current_mentions_and_quote(harness, message_type):
+    _, _, _, store, _ = harness
+    payload = provider_payload()
+    info = payload['data']['message']['extendedTextMessage']['contextInfo']
+    payload['data']['contextInfo'] = info
+    payload['data']['message'] = ({'conversation': '@123456789 prueba'} if message_type == 'conversation'
+                                else {'extendedTextMessage': {'text': '@123456789 prueba'}})
+    assert process_incoming_webhook(payload, 'top-level-context')['status'] == 'group_queued'
+    event = store.list()[0]['canonicalEvent']
+    assert event['message']['mentions'] == [{'externalId': 'bot@lid', 'displayName': None}]
+    assert event['message']['quoted']['providerMessageId'] == 'synthetic-quote'
+    assert event['message']['quoted']['author']['externalId'] == 'bot@lid'
+
+
+def test_nested_current_context_overrides_top_level_without_lifting_quoted_mentions(harness):
+    _, _, _, store, _ = harness
+    payload = provider_payload()
+    payload['data']['contextInfo'] = {'mentionedJid': ['top-level@lid']}
+    payload['data']['message']['extendedTextMessage']['contextInfo']['mentionedJid'] = []
+    assert process_incoming_webhook(payload, 'nested-context')['status'] == 'group_queued'
+    assert store.list()[0]['canonicalEvent']['message']['mentions'] == []
