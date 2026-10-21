@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.canonical_v2 import CanonicalInboundV2, GroupPolicy, valid_group_id
 from app.services.connection_registry import get_connection_registry
+from app.services.group_participants import author_phone
 
 logger = get_logger(__name__)
 
@@ -57,7 +58,7 @@ def projection(payload, normalized, record, policy):
                       'providerAccountRef': record['legacy_name'], 'connectionRef': record['id'],
                       'coreChannelId': policy.coreChannelId, 'bindingId': policy.bindingId},
         'chat': {'type': 'group', 'externalId': group_id, 'displayName': names.get(group_id)},
-        'author': author, 'botAccount': policy.botAccount.model_dump(),
+        'author': author, 'authorPhoneNumber': author_phone(key, record, group_id), 'botAccount': policy.botAccount.model_dump(),
         'message': {'providerMessageId': message_id, 'kind': normalized.get('subtype') or 'unknown',
                     'text': normalized.get('text'), 'fromMe': key.get('fromMe'),
                     'mentions': [{'externalId': item, 'displayName': None} for item in info.get('mentionedJid', [])]

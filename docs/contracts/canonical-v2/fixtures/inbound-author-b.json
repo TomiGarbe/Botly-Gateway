@@ -20,6 +20,7 @@
     "externalId": "author-b@lid",
     "displayName": "Synthetic author"
   },
+  "authorPhoneNumber": null,
   "botAccount": {
     "externalId": "bot@lid",
     "displayName": "Synthetic bot"

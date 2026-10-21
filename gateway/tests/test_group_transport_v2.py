@@ -496,3 +496,34 @@ def test_self_lid_is_only_accepted_from_explicit_provider_link():
         {'id': 'unrelated@lid', 'phoneNumber': 'other@s.whatsapp.net'},
     ]}]
     assert linked_account_identities(['self@s.whatsapp.net'], directory) == ['self@s.whatsapp.net', 'self@lid']
+
+
+def test_group_author_phone_is_verified_and_scoped_to_the_group(harness):
+    from app.services.group_participants import participant_directory
+    registry, record, policy, store, dispatcher = harness
+    record['core_channel']['participantPhones'] = participant_directory([
+        {'id': 'synthetic-team@g.us', 'participants': [{'id': 'person@lid', 'phoneNumber': '5491100000001@s.whatsapp.net'}]},
+        {'id': 'synthetic-other@g.us', 'participants': [{'id': 'other@lid', 'phoneNumber': '5491100000002@s.whatsapp.net'}]},
+    ])
+    for identity, alternate, group_id, expected in [
+        ('person@lid', None, 'synthetic-team@g.us', '5491100000001'),
+        ('person@lid', None, 'synthetic-other@g.us', None),
+        ('5491100000001@lid', None, 'synthetic-team@g.us', None),
+        ('5491100000001@s.whatsapp.net', None, 'synthetic-team@g.us', '5491100000001'),
+        ('new@lid', '5491100000001@s.whatsapp.net', 'synthetic-team@g.us', '5491100000001'),
+        ('person@lid', '5491100000002@s.whatsapp.net', 'synthetic-team@g.us', None),
+    ]:
+        payload = provider_payload(author=identity, group=group_id)
+        payload['data']['key']['participantAlt'] = alternate
+        projected = groups.projection(payload, normalize_webhook(payload), record, policy)
+        assert projected['author']['externalId'] == identity
+        assert projected['authorPhoneNumber'] == expected
+
+
+def test_conflicting_participant_directory_does_not_authorize_alias():
+    from app.services.group_participants import participant_directory
+    result = participant_directory([{'id': 'group@g.us', 'participants': [
+        {'id': 'person@lid', 'phoneNumber': '5491100000001@s.whatsapp.net'},
+        {'id': 'person@lid', 'phoneNumber': '5491100000002@s.whatsapp.net'},
+    ]}])
+    assert result == {'group@g.us': {}}

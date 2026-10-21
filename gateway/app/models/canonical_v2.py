@@ -57,6 +57,7 @@ class CanonicalInboundV2(_CanonicalModel):
     transport: Transport
     chat: Chat
     author: Identity
+    authorPhoneNumber: StrictStr | None = Field(default=None, pattern=r"^[1-9][0-9]{6,14}$")
     botAccount: Identity
     message: InboundMessage
 

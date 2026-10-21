@@ -12,6 +12,7 @@ from app.models.canonical_v2 import AutomaticRegistration, GroupPolicy, valid_gr
 from app.services.connection_registry import get_connection_registry
 from app.services.core_channel_credentials import get_core_channel_credential_store
 from app.services.instance_webhooks import build_auth_headers, list_instance_webhooks
+from app.services.group_participants import participant_directory
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -113,6 +114,7 @@ async def automatic_binding(body, request, *, registry=None, adapter=None, clien
             raw_groups = await adapter.group_directory(runtime)
             groups = group_directory(raw_groups)
             identities = linked_account_identities(identities, raw_groups)
+            participants = participant_directory(raw_groups)
             registration = AutomaticRegistration(connectionRef=connection, coreChannelId=body.coreChannelId,
                 gatewayClientId=record["client_id"], providerAccountRef=runtime,
                 botExternalIds=identities, groups=groups)
@@ -137,7 +139,7 @@ async def automatic_binding(body, request, *, registry=None, adapter=None, clien
                                      channel_api_key=authorization[7:].strip())
             binding = {"channelId": body.coreChannelId, "bindingId": policy.bindingId,
                 "credentialRef": reference, "inboundUrl": hook["url"], "groupTransport": policy.model_dump(),
-                "groupDirectory": groups}
+                "groupDirectory": groups, "participantPhones": participants}
             if registry.update_connection_record(connection, {"core_channel": binding}) is None:
                 raise ValueError("connection_deleted")
         except (asyncio.CancelledError, HTTPException):
