@@ -551,3 +551,16 @@ def test_nested_current_context_overrides_top_level_without_lifting_quoted_menti
     payload['data']['message']['extendedTextMessage']['contextInfo']['mentionedJid'] = []
     assert process_incoming_webhook(payload, 'nested-context')['status'] == 'group_queued'
     assert store.list()[0]['canonicalEvent']['message']['mentions'] == []
+
+
+@pytest.mark.parametrize('scope,expected', [('', ['production', 'new-production']), ('dev', [])])
+def test_production_recovery_excludes_accounts_owned_by_another_gateway(monkeypatch, scope, expected):
+    from app.adapters.evolution.adapter import EvolutionAdapter
+    from app.core.config import get_settings
+    class Client:
+        async def request(self, *args, **kwargs):
+            return [{'name': 'production'}, {'instance': {'instanceName': 'dev'}}, {'name': 'new-production'}]
+    monkeypatch.setattr(get_settings(), 'evolution_instance_scope', scope)
+    monkeypatch.setattr(get_settings(), 'evolution_excluded_instances', ' dev, other-dev ')
+    records = asyncio.run(EvolutionAdapter(Client()).list_instances())
+    assert [item['name'] for item in records] == expected

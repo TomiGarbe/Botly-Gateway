@@ -66,7 +66,8 @@ class EvolutionAdapter:
     async def list_instances(self) -> list:
         records = await self._client.request("GET", "/instance/fetchInstances", retries=1)
         scope = get_settings().evolution_instance_scope.strip()
-        if not scope:
+        excluded = {name.strip() for name in get_settings().evolution_excluded_instances.split(",") if name.strip()}
+        if not scope and not excluded:
             return records
         if not isinstance(records, list):
             raise ValueError("Invalid instance directory")
@@ -75,7 +76,8 @@ class EvolutionAdapter:
             if not isinstance(item, dict):
                 continue
             instance = item.get("instance") if isinstance(item.get("instance"), dict) else item
-            if (instance.get("name") or instance.get("instanceName")) == scope:
+            name = instance.get("name") or instance.get("instanceName")
+            if name not in excluded and (not scope or name == scope):
                 result.append(item)
         return result
 
