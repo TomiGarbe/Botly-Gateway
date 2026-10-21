@@ -65,7 +65,7 @@ class Connection(Protocol):
     async def list_instances(self) -> list:
         ...
 
-    async def send_text(self, instance_name: str, number: str, text: str) -> dict:
+    async def send_text(self, instance_name: str, number: str, text: str, *, quoted: dict | None = None) -> dict:
         ...
 
     async def send_media(

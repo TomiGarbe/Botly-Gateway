@@ -226,6 +226,47 @@
       ],
       "title": "RecipientV2",
       "type": "object"
+    },
+    "ReplyTo": {
+      "additionalProperties": false,
+      "properties": {
+        "providerMessageId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Providermessageid",
+          "type": "string"
+        },
+        "chatExternalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Chatexternalid",
+          "type": "string"
+        },
+        "authorExternalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Authorexternalid",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 32000,
+          "title": "Text",
+          "type": "string"
+        },
+        "fromMe": {
+          "default": false,
+          "title": "Fromme",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "providerMessageId",
+        "chatExternalId",
+        "authorExternalId",
+        "text"
+      ],
+      "title": "ReplyTo",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -264,6 +305,17 @@
     "bindingId": {
       "title": "Bindingid",
       "type": "string"
+    },
+    "replyTo": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReplyTo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

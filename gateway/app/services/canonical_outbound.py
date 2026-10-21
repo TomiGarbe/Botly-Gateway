@@ -122,6 +122,8 @@ class CanonicalOutboundService:
                 raise CanonicalOutboundError("Group transport binding or destination is not authorized.", status_code=403, code="group_not_authorized")
         if is_v2 and not is_group and not (message.recipient.external_id.isascii() and message.recipient.external_id.isdecimal()):
             raise CanonicalOutboundError("This Evolution API profile requires an explicit numeric direct destination; opaque IDs are never converted.", status_code=422, code="direct_destination_unsupported")
+        if is_group and message.replyTo is None:
+            raise CanonicalOutboundError("Group responses require the source message quote.", status_code=422, code="group_quote_required")
         if is_group and (message.message.kind != "text" or message.message.attachments):
             raise CanonicalOutboundError("Group outbound supports text only.", status_code=422, code="message_kind_unsupported")
         if not is_group and connection.channel_type == "whatsapp" and "@g.us" in message.recipient.external_id.lower():
@@ -241,6 +243,14 @@ class CanonicalOutboundService:
                   else _recipient_for_transport(_EVOLUTION_WHATSAPP, message.recipient.external_id))
         attachment = _validate_message_for_transport(_EVOLUTION_WHATSAPP, message)
         if message.message.kind == "text":
+            if isinstance(message, CanonicalOutboundV2) and message.replyTo:
+                quote = message.replyTo
+                return await self._connection_manager.send_text(
+                    connection.runtime_name, number, message.message.content or "",
+                    quoted={"key": {"remoteJid": quote.chatExternalId, "id": quote.providerMessageId,
+                                    "participant": quote.authorExternalId, "fromMe": quote.fromMe},
+                            "message": {"conversation": quote.text}},
+                )
             return await self._connection_manager.send_text(connection.runtime_name, number, message.message.content or "")
         assert attachment is not None
         return await self._connection_manager.send_media(

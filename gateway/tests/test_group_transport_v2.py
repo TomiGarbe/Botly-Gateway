@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.models.canonical_v2 import CanonicalInboundV2, CanonicalOutboundV2, GroupPolicy, GroupBindingRequest, GroupReplayRequest, OutboundAccepted
@@ -156,6 +156,8 @@ def outbound_body(policy):
     return {'contractVersion': 'canonical-v2', 'connectionRef': policy.connectionRef, 'bindingId': policy.bindingId,
             'channel': {'id': policy.coreChannelId, 'type': 'whatsapp', 'provider': 'evolution'},
             'recipient': {'type': 'group', 'externalId': 'synthetic-team@g.us'},
+            'replyTo': {'providerMessageId': 'synthetic-message', 'chatExternalId': 'synthetic-team@g.us',
+                        'authorExternalId': 'author-a@lid', 'text': 'Botly example', 'fromMe': False},
             'message': {'kind': 'text', 'content': 'Synthetic group reply'}, 'idempotencyKey': 'synthetic-outbound'}
 
 
@@ -180,7 +182,10 @@ def test_outbound_http_adapter_exact_jid_and_idempotency(harness, tmp_path):
         assert first['providerMessageId'] == second['providerMessageId']
         await client.close()
     asyncio.run(deliver())
-    assert requests == [{'number': 'synthetic-team@g.us', 'text': 'Synthetic group reply'}]
+    assert requests == [{'number': 'synthetic-team@g.us', 'text': 'Synthetic group reply',
+                         'quoted': {'key': {'remoteJid': 'synthetic-team@g.us', 'id': 'synthetic-message',
+                                             'participant': 'author-a@lid', 'fromMe': False},
+                                    'message': {'conversation': 'Botly example'}}}]
 
 
 @pytest.mark.parametrize('field,value', [('bindingId', 'wrong'), ('connectionRef', 'wrong')])
@@ -261,6 +266,7 @@ def test_outbound_invalid_combinations(harness, case):
         body['message']['kind'] = 'image'
     else:
         body['recipient'] = {'type': 'direct', 'externalId': 'opaque-author@lid'}
+    body.pop('replyTo')
     with pytest.raises(CanonicalOutboundError):
         asyncio.run(CanonicalOutboundService(registry=registry).deliver(
             message=CanonicalOutboundV2.model_validate(body), authenticated_instance='synthetic-instance'))
@@ -272,7 +278,7 @@ def test_v1_and_legacy_reject_group_before_number_conversion(harness):
     from app.models.requests import SendMessageRequest, SendTextRequest, ConnectionQuickMessageRequest
     registry, record, policy, store, dispatcher = harness
     body = outbound_body(policy)
-    for field in ['contractVersion', 'connectionRef', 'bindingId']:
+    for field in ['contractVersion', 'connectionRef', 'bindingId', 'replyTo']:
         del body[field]
     del body['recipient']['type']
     with pytest.raises(CanonicalOutboundError):
@@ -395,3 +401,98 @@ def test_corrupt_outbox_never_replaces_history(harness, corrupt):
     with pytest.raises(CoreInboundPersistenceError):
         process_incoming_webhook(provider_payload(), 'req')
     assert store._path.read_text() == corrupt
+
+
+def test_group_reply_requires_quote_and_rejects_cross_group(harness):
+    from pydantic import ValidationError
+    registry, record, policy, store, dispatcher = harness
+    body = outbound_body(policy)
+    body['replyTo']['chatExternalId'] = 'other@g.us'
+    with pytest.raises(ValidationError):
+        CanonicalOutboundV2.model_validate(body)
+    body.pop('replyTo')
+    with pytest.raises(CanonicalOutboundError) as error:
+        asyncio.run(CanonicalOutboundService(registry=registry).deliver(
+            message=CanonicalOutboundV2.model_validate(body), authenticated_instance='synthetic-instance'))
+    assert error.value.code == 'group_quote_required'
+
+
+def test_account_admission_discovers_new_group_but_blocks_excluded_and_changed_hook(harness, monkeypatch):
+    registry, record, policy, store, dispatcher = harness
+    record['core_channel']['inboundUrl'] = 'https://dev.invalid/api/v1/webhook/inbound'
+    record['core_channel']['groupTransport'].update(admission='account', authorizedGroups=[], excludedGroups=['blocked@g.us'])
+    hooks = [{'enabled': True, 'url': record['core_channel']['inboundUrl']}]
+    monkeypatch.setattr('app.services.instance_webhooks.list_instance_webhooks', lambda *a, **kw: hooks)
+    registry.save_connection_record(record['legacy_name'], record)
+    payload = provider_payload(group='new-group@g.us')
+    assert groups.ingest_group(payload, normalize_webhook(payload)) == 'group_queued'
+    payload = provider_payload(group='blocked@g.us')
+    assert groups.ingest_group(payload, normalize_webhook(payload)) == 'ignored_group'
+    hooks[0]['url'] = 'https://production.invalid/api/v1/webhook/inbound'
+    payload = provider_payload(group='new-group@g.us')
+    assert groups.ingest_group(payload, normalize_webhook(payload)) == 'ignored_group'
+
+
+def test_automatic_binding_uses_only_existing_account_webhook_and_service_credentials(harness, monkeypatch, tmp_path):
+    from app.services import group_automatic as automatic
+    from app.models.canonical_v2 import AutomaticRequest
+    from app.services.core_channel_credentials import CoreChannelCredentialStore
+    registry, record, policy, store, dispatcher = harness
+    record.pop('core_channel')
+    registry.save_connection_record(record['legacy_name'], record)
+    hook = {'enabled': True, 'url': 'https://dev.invalid/api/v1/webhook/inbound'}
+    monkeypatch.setattr(automatic, 'list_instance_webhooks', lambda *a, **kw: [hook])
+    monkeypatch.setattr(automatic, 'build_auth_headers', lambda h: {'Authorization': 'Bearer synthetic-channel-credential'})
+    calls = []
+    async def instances():
+        return [{'name': 'synthetic-instance', 'ownerJid': 'bot@s.whatsapp.net', 'ownerLid': 'bot@lid'}]
+    async def directory(runtime):
+        assert runtime == 'synthetic-instance'
+        return [{'id': 'automatic@g.us', 'subject': 'Equipo automático'}]
+    def receive(request):
+        calls.append(json.loads(request.content))
+        assert str(request.url) == 'https://dev.invalid/api/v1/webhook/group-transport'
+        assert request.headers['Authorization'] == 'Bearer synthetic-channel-credential'
+        result = policy.model_dump()
+        result.update(admission='account', authorizedGroups=[])
+        return httpx.Response(200, json={'policy': result, 'revision': 2})
+    client_factory = lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(receive))
+    credentials = CoreChannelCredentialStore(tmp_path / 'automatic-credentials.json')
+    body = AutomaticRequest(coreChannelId=policy.coreChannelId, connectionRef=policy.connectionRef)
+    kwargs = dict(registry=registry, adapter=SimpleNamespace(list_instances=instances, group_directory=directory),
+                  client_factory=client_factory, credentials=credentials)
+    request = SimpleNamespace(state=SimpleNamespace(auth_method='instance_api_key', auth_instance='synthetic-instance'))
+    result = asyncio.run(automatic.automatic_binding(body, request, **kwargs))
+    assert result['groups'] == 1
+    assert calls[0]['botExternalIds'] == ['bot@s.whatsapp.net', 'bot@lid']
+    binding = registry.connection_record_by_id('conn-a')['core_channel']
+    assert binding['inboundUrl'] == hook['url']
+    assert binding['groupDirectory'][0]['displayName'] == 'Equipo automático'
+    request.state.auth_instance = 'other-instance'
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(automatic.automatic_binding(body, request, **kwargs))
+    assert error.value.status_code == 403 and len(calls) == 1
+    request.state.auth_instance = 'synthetic-instance'
+    hook['url'] = 'https://production.invalid/api/v1/webhook/inbound'
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(automatic.automatic_binding(body, request, **kwargs))
+    assert error.value.status_code == 409 and len(calls) == 1
+
+
+def test_development_instance_scope_excludes_other_callbacks(monkeypatch):
+    from app.adapters.evolution.adapter import EvolutionAdapter
+    from app.core.config import get_settings
+    class Client:
+        async def request(self, *args, **kwargs):
+            return [{'name': 'dev'}, {'instance': {'instanceName': 'production'}}]
+    monkeypatch.setattr(get_settings(), 'evolution_instance_scope', 'dev')
+    assert asyncio.run(EvolutionAdapter(Client()).list_instances()) == [{'name': 'dev'}]
+
+
+def test_self_lid_is_only_accepted_from_explicit_provider_link():
+    from app.services.group_automatic import linked_account_identities
+    directory = [{'participants': [
+        {'id': 'self@lid', 'phoneNumber': 'self@s.whatsapp.net'},
+        {'id': 'unrelated@lid', 'phoneNumber': 'other@s.whatsapp.net'},
+    ]}]
+    assert linked_account_identities(['self@s.whatsapp.net'], directory) == ['self@s.whatsapp.net', 'self@lid']

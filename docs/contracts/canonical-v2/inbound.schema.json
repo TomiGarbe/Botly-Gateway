@@ -16,6 +16,19 @@
           "minLength": 1,
           "title": "Externalid",
           "type": "string"
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displayname"
         }
       },
       "required": [

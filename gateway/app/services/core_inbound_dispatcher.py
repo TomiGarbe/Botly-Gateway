@@ -334,9 +334,6 @@ class CoreInboundDispatcher:
         core_channel_id = _text(delivery.get("coreChannelId"))
         connection_id = _text(delivery.get("connectionId"))
         url = _text(getattr(settings, "core_inbound_url", ""))
-        if not url:
-            self._permanent(delivery, "core_inbound_url_missing")
-            return
         if not core_channel_id:
             self._permanent(delivery, "core_channel_binding_missing")
             return
@@ -351,9 +348,13 @@ class CoreInboundDispatcher:
                 if (policy.bindingId != transport["bindingId"] or policy.coreChannelId != core_channel_id
                         or record["legacy_name"] != transport["providerAccountRef"]):
                     raise ValueError("Binding changed")
+                url = (record.get("core_channel") or {}).get("inboundUrl") or url
             except (ValueError, TypeError, KeyError, AttributeError):
                 self._permanent(delivery, "group_authorization_revoked_or_binding_changed")
                 return
+        if not url:
+            self._permanent(delivery, "core_inbound_url_missing")
+            return
         try:
             api_key = self._credentials.get_api_key(connection_id=connection_id, core_channel_id=core_channel_id)
         except Exception:

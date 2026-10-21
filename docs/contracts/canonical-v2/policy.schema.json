@@ -73,6 +73,23 @@
     },
     "botAccount": {
       "$ref": "#/$defs/Identity"
+    },
+    "admission": {
+      "default": "explicit",
+      "enum": [
+        "explicit",
+        "account"
+      ],
+      "title": "Admission",
+      "type": "string"
+    },
+    "excludedGroups": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 1000,
+      "title": "Excludedgroups",
+      "type": "array"
     }
   },
   "required": [

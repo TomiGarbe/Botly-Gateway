@@ -11,5 +11,7 @@
   "botAccount": {
     "externalId": "bot@lid",
     "displayName": "Synthetic bot"
-  }
+  },
+  "admission": "explicit",
+  "excludedGroups": []
 }

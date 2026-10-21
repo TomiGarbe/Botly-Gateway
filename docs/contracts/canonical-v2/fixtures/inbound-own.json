@@ -13,7 +13,8 @@
   },
   "chat": {
     "type": "group",
-    "externalId": "synthetic-team@g.us"
+    "externalId": "synthetic-team@g.us",
+    "displayName": null
   },
   "author": {
     "externalId": "bot@lid",

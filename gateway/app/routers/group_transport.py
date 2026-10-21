@@ -2,12 +2,18 @@
 import hmac
 from fastapi import APIRouter, Header, HTTPException, Request
 from app.core.config import get_settings
-from app.models.canonical_v2 import CanonicalOutboundV2, GroupPolicy, GroupBindingRequest, GroupReplayRequest
+from app.models.canonical_v2 import CanonicalOutboundV2, GroupPolicy, GroupBindingRequest, GroupReplayRequest, AutomaticRequest
 from app.services.connection_registry import get_connection_registry
 from app.services.group_transport import require_policy
 from app.services.canonical_outbound import CanonicalOutboundService, CanonicalOutboundError
 
 router = APIRouter(tags=['group-transport'])
+
+
+@router.post('/v2/group-transport/automatic')
+async def automatic_transport(body: AutomaticRequest, request: Request):
+    from app.services.group_automatic import automatic_binding
+    return await automatic_binding(body, request)
 
 
 def require_core_service(request: Request):

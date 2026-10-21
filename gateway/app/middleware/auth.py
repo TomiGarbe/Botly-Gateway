@@ -37,7 +37,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if request.url.path in _PUBLIC_PATHS:
             return await self._next(call_next, request)
-        if request.url.path.startswith("/v2/group-transport/"):
+        if request.url.path.startswith("/v2/group-transport/") and request.url.path != "/v2/group-transport/automatic":
             # Endpoint verifies the separate Core service credential, never a browser session.
             return await self._next(call_next, request)
         expected_key = str(get_settings().gateway_api_key or "").strip()
@@ -52,7 +52,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         instance_auth = authenticate_instance_token(provided_key)
         if instance_auth and (
             request.url.path.startswith("/messages/")
-            or request.url.path in {"/v1/outbound/messages", "/v2/outbound/messages"}
+            or request.url.path in {"/v1/outbound/messages", "/v2/outbound/messages", "/v2/group-transport/automatic"}
         ):
             request.state.auth_method = "instance_api_key"
             request.state.auth_instance = instance_auth["instance"]

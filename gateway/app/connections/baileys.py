@@ -86,8 +86,10 @@ class BaileysConnection(Connection):
         evolution = _evolution_client()
         return await evolution.list_instances()
 
-    async def send_text(self, instance_name: str, number: str, text: str) -> dict:
+    async def send_text(self, instance_name: str, number: str, text: str, *, quoted: dict | None = None) -> dict:
         evolution = _evolution_client()
+        if quoted is not None:
+            return await evolution.send_text(instance_name, number, text, quoted=quoted)
         return await evolution.send_text(instance_name, number, text)
 
     async def send_media(

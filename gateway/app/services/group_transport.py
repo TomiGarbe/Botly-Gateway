@@ -20,7 +20,13 @@ def require_policy(record, *, group_id=None, policy=None):
         raise ValueError('Group binding mismatch')
     if policy is None and (not get_settings().enable_group_messages or not parsed.enabled):
         raise ValueError('Group transport disabled')
-    if group_id is not None and (not valid_group_id(group_id) or group_id not in parsed.authorizedGroups):
+    if policy is None and parsed.admission == 'account':
+        from app.services.instance_webhooks import list_instance_webhooks
+        hooks = [h for h in list_instance_webhooks(record['legacy_name']) if h.get('enabled')]
+        if len(hooks) != 1 or hooks[0].get('url') != binding.get('inboundUrl'):
+            raise ValueError('Account webhook changed')
+    if group_id is not None and (not valid_group_id(group_id) or group_id in parsed.excludedGroups
+                                 or (parsed.admission == 'explicit' and group_id not in parsed.authorizedGroups)):
         raise ValueError('Group not authorized')
     return parsed
 
@@ -32,6 +38,8 @@ def projection(payload, normalized, record, policy):
     info = context.get('contextInfo')
     quote = context.get('quoted')
     group_id = key.get('remoteJid')
+    names = {item['externalId']: item['displayName'] for item in
+             (record.get('core_channel') or {}).get('groupDirectory', [])}
     # Missing author is unknown, never the group or its digits.
     author = {'externalId': key.get('participant') or None, 'displayName': data.get('pushName') or None}
     timestamp = data.get('messageTimestamp')
@@ -48,7 +56,7 @@ def projection(payload, normalized, record, policy):
         'transport': {'provider': 'evolution', 'channelType': 'whatsapp',
                       'providerAccountRef': record['legacy_name'], 'connectionRef': record['id'],
                       'coreChannelId': policy.coreChannelId, 'bindingId': policy.bindingId},
-        'chat': {'type': 'group', 'externalId': group_id},
+        'chat': {'type': 'group', 'externalId': group_id, 'displayName': names.get(group_id)},
         'author': author, 'botAccount': policy.botAccount.model_dump(),
         'message': {'providerMessageId': message_id, 'kind': normalized.get('subtype') or 'unknown',
                     'text': normalized.get('text'), 'fromMe': key.get('fromMe'),

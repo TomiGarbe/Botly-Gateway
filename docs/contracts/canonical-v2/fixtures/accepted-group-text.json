@@ -2,6 +2,9 @@
   "status": "accepted",
   "providerMessageId": "synthetic-provider-outbound",
   "idempotencyKey": "synthetic-outbound",
-  "trace": {"requestId": null, "correlationId": null},
+  "trace": {
+    "requestId": null,
+    "correlationId": null
+  },
   "provider": "evolution"
 }

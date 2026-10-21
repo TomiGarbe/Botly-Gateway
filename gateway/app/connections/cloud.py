@@ -151,7 +151,7 @@ class CloudConnection(Connection):
     async def list_instances(self) -> list:
         return [record.public_instance() for record in self._records.values()]
 
-    async def send_text(self, instance_name: str, number: str, text: str) -> dict:
+    async def send_text(self, instance_name: str, number: str, text: str, *, quoted: dict | None = None) -> dict:
         raise self._unsupported("send_text")
 
     async def send_media(
