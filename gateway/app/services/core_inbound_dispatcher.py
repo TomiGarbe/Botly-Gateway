@@ -55,10 +55,12 @@ class CoreInboundDeliveryStore:
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("core_inbound_delivery_store_read_failed", path=str(self._path), error=str(exc))
-            return self._empty()
-        deliveries = raw.get("deliveries") if isinstance(raw, dict) and isinstance(raw.get("deliveries"), list) else []
-        return {"schemaVersion": 1, "deliveries": [item for item in deliveries if isinstance(item, dict)]}
+            raise CoreInboundPersistenceError("Canonical outbox could not be read") from exc
+        if not isinstance(raw, dict) or not isinstance(raw.get("deliveries"), list) or any(
+            not isinstance(item, dict) for item in raw["deliveries"]
+        ):
+            raise CoreInboundPersistenceError("Canonical outbox has an invalid structure")
+        return {"schemaVersion": 1, "deliveries": raw["deliveries"]}
 
     def _write_unlocked(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -71,7 +73,7 @@ class CoreInboundDeliveryStore:
         os.replace(temporary, self._path)
 
     @staticmethod
-    def _provider_message_scope(event: dict[str, Any]) -> tuple[str, str, str, str] | None:
+    def _provider_message_scope(event: dict[str, Any]) -> tuple[str, ...] | None:
         transport = event.get("transport") if isinstance(event.get("transport"), dict) else {}
         message = event.get("message") if isinstance(event.get("message"), dict) else {}
         provider_message_id = _text(message.get("providerMessageId"))
@@ -81,6 +83,10 @@ class CoreInboundDeliveryStore:
             _text(transport.get("providerAccountRef")),
             provider_message_id,
         )
+        if event.get("contractVersion") == "canonical-v2":
+            values += (_text(transport.get("connectionRef")), _text(transport.get("bindingId")),
+                       _text((event.get("chat") or {}).get("externalId")),
+                       _text(event.get("eventType")), str(message.get("fromMe")))
         return values if all(values) else None
 
     def enqueue(self, *, event: dict[str, Any], core_channel_id: str | None, initial_error: str | None = None) -> tuple[dict[str, Any], bool]:
@@ -126,6 +132,22 @@ class CoreInboundDeliveryStore:
         except Exception as exc:
             raise CoreInboundPersistenceError("Canonical Core delivery could not be persisted") from exc
         return deepcopy(delivery), True
+
+    def replay_group(self, delivery_id: str, *, connection_id: str, core_channel_id: str, binding_id: str) -> dict[str, Any]:
+        """Requeue the same persisted event; completed/in-flight deliveries stay put."""
+        with _LOCK:
+            data = self._read_unlocked()
+            item = next((value for value in data["deliveries"] if value.get("id") == delivery_id), None)
+            event = (item or {}).get("canonicalEvent") or {}
+            transport = event.get("transport") or {}
+            if (event.get("contractVersion") != "canonical-v2" or transport.get("connectionRef") != connection_id
+                    or transport.get("coreChannelId") != core_channel_id or transport.get("bindingId") != binding_id):
+                raise ValueError("Replay binding mismatch")
+            if item["status"] in {"failed", "dead_letter", "retry"}:
+                item.update(status="pending", nextAttemptAt=_now(), leaseExpiresAt=None,
+                            lastError=None, updatedAt=_now(), attemptCount=0)
+                self._write_unlocked(data)
+            return {"id": item["id"], "eventId": item["eventId"], "status": item["status"]}
 
     def get(self, delivery_id: str) -> dict[str, Any] | None:
         with _LOCK:
@@ -239,6 +261,14 @@ class CoreInboundDispatcher:
     def persist(self, event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         transport = event.get("transport") if isinstance(event.get("transport"), dict) else {}
         connection_id = _text(transport.get("connectionRef"))
+        if event.get("contractVersion") == "canonical-v2":
+            from app.services.group_transport import require_policy
+            from app.services.connection_registry import get_connection_registry
+            record = get_connection_registry().connection_record_by_id(connection_id)
+            policy = require_policy(record, group_id=event["chat"]["externalId"])
+            if policy.bindingId != transport.get("bindingId") or policy.coreChannelId != transport.get("coreChannelId"):
+                raise CoreInboundPersistenceError("Group binding mismatch")
+            return self._store.enqueue(event=event, core_channel_id=policy.coreChannelId)
         try:
             binding = self._connections.instagram_core_channel_binding(connection_id)
         except Exception:
@@ -304,11 +334,26 @@ class CoreInboundDispatcher:
         core_channel_id = _text(delivery.get("coreChannelId"))
         connection_id = _text(delivery.get("connectionId"))
         url = _text(getattr(settings, "core_inbound_url", ""))
-        if not url:
-            self._permanent(delivery, "core_inbound_url_missing")
-            return
         if not core_channel_id:
             self._permanent(delivery, "core_channel_binding_missing")
+            return
+        event = delivery.get("canonicalEvent") or {}
+        if event.get("contractVersion") == "canonical-v2":
+            from app.services.group_transport import require_policy
+            from app.services.connection_registry import get_connection_registry
+            try:
+                record = get_connection_registry().connection_record_by_id(connection_id)
+                policy = require_policy(record, group_id=event["chat"]["externalId"])
+                transport = event["transport"]
+                if (policy.bindingId != transport["bindingId"] or policy.coreChannelId != core_channel_id
+                        or record["legacy_name"] != transport["providerAccountRef"]):
+                    raise ValueError("Binding changed")
+                url = (record.get("core_channel") or {}).get("inboundUrl") or url
+            except (ValueError, TypeError, KeyError, AttributeError):
+                self._permanent(delivery, "group_authorization_revoked_or_binding_changed")
+                return
+        if not url:
+            self._permanent(delivery, "core_inbound_url_missing")
             return
         try:
             api_key = self._credentials.get_api_key(connection_id=connection_id, core_channel_id=core_channel_id)
@@ -337,7 +382,7 @@ class CoreInboundDispatcher:
                     json=delivery["canonicalEvent"],
                     headers={
                         "Authorization": f"Bearer {api_key}",
-                        "X-Botly-Contract-Version": "canonical-v1",
+                        "X-Botly-Contract-Version": event.get("contractVersion", "canonical-v1"),
                         "Content-Type": "application/json",
                     },
                 )

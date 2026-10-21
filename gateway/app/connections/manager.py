@@ -95,7 +95,10 @@ class ConnectionManager:
         text: str,
         *,
         connection_type: ConnectionType | str | None = None,
+        quoted: dict | None = None,
     ) -> dict:
+        if quoted is not None:
+            return await self.get(connection_type).send_text(instance_name, number, text, quoted=quoted)
         return await self.get(connection_type).send_text(instance_name, number, text)
 
     async def send_media(

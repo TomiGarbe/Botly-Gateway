@@ -1,0 +1,32 @@
+{
+  "channel": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "type": "whatsapp",
+    "provider": "evolution"
+  },
+  "recipient": {
+    "externalId": "synthetic-team@g.us",
+    "type": "group"
+  },
+  "message": {
+    "kind": "text",
+    "content": "Synthetic group reply",
+    "attachments": []
+  },
+  "idempotencyKey": "synthetic-outbound",
+  "metadata": {},
+  "trace": {
+    "requestId": null,
+    "correlationId": null
+  },
+  "contractVersion": "canonical-v2",
+  "connectionRef": "synthetic-connection",
+  "bindingId": "synthetic-binding",
+  "replyTo": {
+    "providerMessageId": "synthetic-message",
+    "chatExternalId": "synthetic-team@g.us",
+    "authorExternalId": "author-a@lid",
+    "text": "Botly example",
+    "fromMe": false
+  }
+}

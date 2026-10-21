@@ -1,0 +1,36 @@
+{
+  "event": "messages.upsert",
+  "instance": "synthetic-instance",
+  "data": {
+    "key": {
+      "id": "synthetic-unknown-author",
+      "remoteJid": "synthetic-team@g.us",
+      "participant": null,
+      "fromMe": false
+    },
+    "pushName": "Synthetic author",
+    "messageTimestamp": 1790000000,
+    "message": {
+      "extendedTextMessage": {
+        "text": "Botly example",
+        "contextInfo": {
+          "mentionedJid": [
+            "bot@lid"
+          ],
+          "stanzaId": "synthetic-quote",
+          "participant": "bot@lid",
+          "quotedMessage": {
+            "extendedTextMessage": {
+              "text": "old text",
+              "contextInfo": {
+                "mentionedJid": [
+                  "quoted-only@lid"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

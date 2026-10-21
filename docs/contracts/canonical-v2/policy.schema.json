@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "Identity": {
+      "additionalProperties": false,
+      "properties": {
+        "externalId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Externalid"
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Displayname"
+        }
+      },
+      "required": [
+        "externalId",
+        "displayName"
+      ],
+      "title": "Identity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "connectionRef": {
+      "title": "Connectionref",
+      "type": "string"
+    },
+    "coreChannelId": {
+      "title": "Corechannelid",
+      "type": "string"
+    },
+    "bindingId": {
+      "title": "Bindingid",
+      "type": "string"
+    },
+    "contractVersion": {
+      "const": "canonical-v2",
+      "title": "Contractversion",
+      "type": "string"
+    },
+    "enabled": {
+      "default": false,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "evolutionApiProfile": {
+      "const": "evolution-v2-sendText",
+      "title": "Evolutionapiprofile",
+      "type": "string"
+    },
+    "authorizedGroups": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 1000,
+      "title": "Authorizedgroups",
+      "type": "array"
+    },
+    "botAccount": {
+      "$ref": "#/$defs/Identity"
+    },
+    "admission": {
+      "default": "explicit",
+      "enum": [
+        "explicit",
+        "account"
+      ],
+      "title": "Admission",
+      "type": "string"
+    },
+    "excludedGroups": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 1000,
+      "title": "Excludedgroups",
+      "type": "array"
+    }
+  },
+  "required": [
+    "connectionRef",
+    "coreChannelId",
+    "bindingId",
+    "contractVersion",
+    "evolutionApiProfile",
+    "authorizedGroups",
+    "botAccount"
+  ],
+  "title": "GroupPolicy",
+  "type": "object"
+}

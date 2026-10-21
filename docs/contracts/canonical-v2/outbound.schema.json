@@ -1,0 +1,332 @@
+{
+  "$defs": {
+    "CanonicalAttachment": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "document",
+            "sticker",
+            "reaction",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "providerMediaId": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Providermediaid"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "mimeType": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mimetype"
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filename"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "metadata": {
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CanonicalAttachment",
+      "type": "object"
+    },
+    "CanonicalOutboundChannel": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "whatsapp",
+            "instagram"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "evolution",
+            "meta"
+          ],
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "provider"
+      ],
+      "title": "CanonicalOutboundChannel",
+      "type": "object"
+    },
+    "CanonicalOutboundPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "document",
+            "sticker",
+            "reaction",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/$defs/CanonicalAttachment"
+          },
+          "title": "Attachments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CanonicalOutboundPayload",
+      "type": "object"
+    },
+    "CanonicalTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "correlationId": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Correlationid"
+        }
+      },
+      "title": "CanonicalTrace",
+      "type": "object"
+    },
+    "RecipientV2": {
+      "additionalProperties": false,
+      "properties": {
+        "externalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Externalid",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "direct",
+            "group"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "externalId",
+        "type"
+      ],
+      "title": "RecipientV2",
+      "type": "object"
+    },
+    "ReplyTo": {
+      "additionalProperties": false,
+      "properties": {
+        "providerMessageId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Providermessageid",
+          "type": "string"
+        },
+        "chatExternalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Chatexternalid",
+          "type": "string"
+        },
+        "authorExternalId": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Authorexternalid",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 32000,
+          "title": "Text",
+          "type": "string"
+        },
+        "fromMe": {
+          "default": false,
+          "title": "Fromme",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "providerMessageId",
+        "chatExternalId",
+        "authorExternalId",
+        "text"
+      ],
+      "title": "ReplyTo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "channel": {
+      "$ref": "#/$defs/CanonicalOutboundChannel"
+    },
+    "recipient": {
+      "$ref": "#/$defs/RecipientV2"
+    },
+    "message": {
+      "$ref": "#/$defs/CanonicalOutboundPayload"
+    },
+    "idempotencyKey": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Idempotencykey",
+      "type": "string"
+    },
+    "metadata": {
+      "title": "Metadata",
+      "type": "object"
+    },
+    "trace": {
+      "$ref": "#/$defs/CanonicalTrace"
+    },
+    "contractVersion": {
+      "const": "canonical-v2",
+      "title": "Contractversion",
+      "type": "string"
+    },
+    "connectionRef": {
+      "title": "Connectionref",
+      "type": "string"
+    },
+    "bindingId": {
+      "title": "Bindingid",
+      "type": "string"
+    },
+    "replyTo": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReplyTo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "channel",
+    "recipient",
+    "message",
+    "idempotencyKey",
+    "contractVersion",
+    "connectionRef",
+    "bindingId"
+  ],
+  "title": "CanonicalOutboundV2",
+  "type": "object"
+}

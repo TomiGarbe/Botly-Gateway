@@ -8,6 +8,7 @@ from app.adapters.evolution.client import EvolutionClient, get_evolution_client
 from app.adapters.evolution.errors import EvolutionError
 from app.adapters.evolution.transports import BAILEYS_TRANSPORT_PROFILE, EvolutionTransportProfile
 from app.core.logging import get_logger
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
 _DATA_URI_RE = re.compile(r"^data:[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*;base64,")
@@ -63,7 +64,22 @@ class EvolutionAdapter:
         return await self._client.request("GET", f"/instance/connectionState/{instance_name}", retries=1)
 
     async def list_instances(self) -> list:
-        return await self._client.request("GET", "/instance/fetchInstances", retries=1)
+        records = await self._client.request("GET", "/instance/fetchInstances", retries=1)
+        scope = get_settings().evolution_instance_scope.strip()
+        excluded = {name.strip() for name in get_settings().evolution_excluded_instances.split(",") if name.strip()}
+        if not scope and not excluded:
+            return records
+        if not isinstance(records, list):
+            raise ValueError("Invalid instance directory")
+        result = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            instance = item.get("instance") if isinstance(item.get("instance"), dict) else item
+            name = instance.get("name") or instance.get("instanceName")
+            if name not in excluded and (not scope or name == scope):
+                result.append(item)
+        return result
 
     async def reconnect_instance(self, instance_name: str) -> dict:
         logger.info("instance_restart_requested", instance=instance_name)
@@ -83,13 +99,21 @@ class EvolutionAdapter:
         logger.warning("instance_delete_requested", instance=instance_name)
         return await self._client.request("DELETE", f"/instance/delete/{instance_name}", retries=1)
 
-    async def send_text(self, instance_name: str, number: str, text: str) -> dict:
+    async def send_text(self, instance_name: str, number: str, text: str, *, quoted: dict | None = None) -> dict:
         logger.info("text_send_requested", instance=instance_name, recipient=number)
+        payload = {"number": number, "text": text}
+        if quoted is not None:
+            payload["quoted"] = quoted
         return await self._client.request(
             "POST",
             f"/message/sendText/{instance_name}",
-            json={"number": number, "text": text},
+            json=payload,
             retries=0,
+        )
+
+    async def group_directory(self, instance_name: str) -> list:
+        return await self._client.request(
+            "GET", f"/group/fetchAllGroups/{instance_name}?getParticipants=true", retries=1,
         )
 
     async def send_media(

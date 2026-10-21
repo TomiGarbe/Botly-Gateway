@@ -1,6 +1,8 @@
 """Provider-neutral canonical outbound delivery owned by Botly Gateway."""
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -106,9 +108,29 @@ class CanonicalOutboundService:
             correlation_id=message.trace.correlation_id,
         )
         connection = self.resolve_connection(message=message, authenticated_instance=authenticated_instance)
+        from app.models.canonical_v2 import CanonicalOutboundV2
+        is_v2 = isinstance(message, CanonicalOutboundV2)
+        is_group = is_v2 and message.recipient.type == "group"
+        if is_v2:
+            from app.services.group_transport import require_policy
+            record = self._registry.connection_record(connection.runtime_name)
+            try:
+                policy = require_policy(record, group_id=message.recipient.external_id if is_group else None)
+                if message.connectionRef != connection.connection_id or message.bindingId != policy.bindingId:
+                    raise ValueError("Binding mismatch")
+            except (ValueError, TypeError, AttributeError):
+                raise CanonicalOutboundError("Group transport binding or destination is not authorized.", status_code=403, code="group_not_authorized")
+        if is_v2 and not is_group and not (message.recipient.external_id.isascii() and message.recipient.external_id.isdecimal()):
+            raise CanonicalOutboundError("This Evolution API profile requires an explicit numeric direct destination; opaque IDs are never converted.", status_code=422, code="direct_destination_unsupported")
+        if is_group and message.replyTo is None:
+            raise CanonicalOutboundError("Group responses require the source message quote.", status_code=422, code="group_quote_required")
+        if is_group and (message.message.kind != "text" or message.message.attachments):
+            raise CanonicalOutboundError("Group outbound supports text only.", status_code=422, code="message_kind_unsupported")
+        if not is_group and connection.channel_type == "whatsapp" and "@g.us" in message.recipient.external_id.lower():
+            raise CanonicalOutboundError("Group destination requires explicit canonical-v2 group recipient.", status_code=422, code="group_contract_required")
         transport = (connection.provider, connection.channel_type)
         sender = self._sender_for(transport=transport, connection=connection, message=message)
-        recipient = _recipient_for_transport(transport, message.recipient.external_id)
+        recipient = message.recipient.external_id if is_v2 else _recipient_for_transport(transport, message.recipient.external_id)
         attachment = _validate_message_for_transport(transport, message)
         correlation_id = message.trace.correlation_id or message.trace.request_id
         logger.info(
@@ -130,6 +152,11 @@ class CanonicalOutboundService:
         )
 
         attempt_store = self._attempt_store or get_outbound_provider_attempt_store()
+        idempotency_scope = message.idempotency_key
+        if is_v2:
+            idempotency_scope = "v2:" + hashlib.sha256(json.dumps(
+                [connection.connection_id, message.bindingId, message.recipient.type, message.idempotency_key],
+                separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
         attempt, created = attempt_store.create_or_get_by_idempotency(
             instance=connection.runtime_name,
             provider=connection.provider,
@@ -145,7 +172,7 @@ class CanonicalOutboundService:
                 "fileName": attachment.filename if attachment else None,
                 "source": "canonical_attachment",
             } if attachment else None,
-            idempotency_key=message.idempotency_key,
+            idempotency_key=idempotency_scope,
             canonical_channel_id=str(message.channel.id),
             canonical_recipient_external_id=message.recipient.external_id,
         )
@@ -211,9 +238,19 @@ class CanonicalOutboundService:
         return sender
 
     async def _send_evolution(self, *, connection: ResolvedOutboundConnection, message: CanonicalOutboundMessage) -> dict[str, Any]:
-        number = _recipient_for_transport(_EVOLUTION_WHATSAPP, message.recipient.external_id)
+        from app.models.canonical_v2 import CanonicalOutboundV2
+        number = (message.recipient.external_id if isinstance(message, CanonicalOutboundV2)
+                  else _recipient_for_transport(_EVOLUTION_WHATSAPP, message.recipient.external_id))
         attachment = _validate_message_for_transport(_EVOLUTION_WHATSAPP, message)
         if message.message.kind == "text":
+            if isinstance(message, CanonicalOutboundV2) and message.replyTo:
+                quote = message.replyTo
+                return await self._connection_manager.send_text(
+                    connection.runtime_name, number, message.message.content or "",
+                    quoted={"key": {"remoteJid": quote.chatExternalId, "id": quote.providerMessageId,
+                                    "participant": quote.authorExternalId, "fromMe": quote.fromMe},
+                            "message": {"conversation": quote.text}},
+                )
             return await self._connection_manager.send_text(connection.runtime_name, number, message.message.content or "")
         assert attachment is not None
         return await self._connection_manager.send_media(

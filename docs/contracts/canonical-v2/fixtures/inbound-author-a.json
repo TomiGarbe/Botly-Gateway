@@ -1,0 +1,48 @@
+{
+  "contractVersion": "canonical-v2",
+  "eventId": "wa2_9f6b508a67dadbe7b60073e699a327076249c169ed9caad2862befb841d5d4be",
+  "eventType": "message",
+  "occurredAt": 1790000000000,
+  "transport": {
+    "provider": "evolution",
+    "channelType": "whatsapp",
+    "providerAccountRef": "synthetic-instance",
+    "connectionRef": "synthetic-connection",
+    "coreChannelId": "00000000-0000-4000-8000-000000000001",
+    "bindingId": "synthetic-binding"
+  },
+  "chat": {
+    "type": "group",
+    "externalId": "synthetic-team@g.us",
+    "displayName": null
+  },
+  "author": {
+    "externalId": "author-a@lid",
+    "displayName": "Synthetic author"
+  },
+  "authorPhoneNumber": null,
+  "botAccount": {
+    "externalId": "bot@lid",
+    "displayName": "Synthetic bot"
+  },
+  "message": {
+    "providerMessageId": "synthetic-author-a",
+    "kind": "text",
+    "text": "Botly example",
+    "fromMe": false,
+    "mentions": [
+      {
+        "externalId": "bot@lid",
+        "displayName": null
+      }
+    ],
+    "quoted": {
+      "providerMessageId": "synthetic-quote",
+      "author": {
+        "externalId": "bot@lid",
+        "displayName": null
+      },
+      "chatExternalId": null
+    }
+  }
+}

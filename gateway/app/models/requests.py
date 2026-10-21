@@ -158,7 +158,16 @@ class ConnectionWebhookRequest(BaseModel):
     custom_headers: dict[str, str] | None = None
 
 
-class ConnectionQuickMessageRequest(BaseModel):
+class DirectRecipientRequest(BaseModel):
+    @field_validator("number", "recipient", check_fields=False)
+    @classmethod
+    def reject_group_destination(cls, value):
+        if isinstance(value, str) and "@g.us" in value.lower():
+            raise ValueError("Group destinations require canonical-v2 group transport")
+        return value
+
+
+class ConnectionQuickMessageRequest(DirectRecipientRequest):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     # ``recipient`` is the provider-neutral UI field. ``number`` remains
@@ -188,12 +197,12 @@ class InstagramOutboundMessageRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4096)
 
 
-class SendTextRequest(BaseModel):
+class SendTextRequest(DirectRecipientRequest):
     number: str = Field(..., min_length=5)
     text: str = Field(..., min_length=1, max_length=4096)
 
 
-class SendMediaRequest(BaseModel):
+class SendMediaRequest(DirectRecipientRequest):
     number: str
     media_url: str
     mediatype: Literal["image", "video", "audio", "document", "pdf", "file"]
@@ -202,7 +211,7 @@ class SendMediaRequest(BaseModel):
     caption: str = ""
 
 
-class SendUploadedMediaRequest(BaseModel):
+class SendUploadedMediaRequest(DirectRecipientRequest):
     number: str
     file_id: str
     mediatype: Literal["image", "video", "audio", "document", "pdf", "file"]
@@ -212,7 +221,7 @@ class SendUploadedMediaRequest(BaseModel):
 UnifiedMessageType = Literal["text", "image", "video", "audio", "document", "file", "pdf"]
 
 
-class SendMessageRequest(BaseModel):
+class SendMessageRequest(DirectRecipientRequest):
     number: str = Field(..., min_length=5)
     type: UnifiedMessageType
     text: str | None = Field(default=None, max_length=4096)
@@ -237,7 +246,7 @@ class ButtonItem(BaseModel):
     id: str
 
 
-class SendButtonsRequest(BaseModel):
+class SendButtonsRequest(DirectRecipientRequest):
     number: str
     title: str
     description: str
@@ -256,7 +265,7 @@ class ListSection(BaseModel):
     rows: list[ListRow]
 
 
-class SendListRequest(BaseModel):
+class SendListRequest(DirectRecipientRequest):
     number: str
     title: str
     description: str

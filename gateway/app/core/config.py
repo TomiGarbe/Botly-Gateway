@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Evolution API
     evolution_url: str = "http://evolution:8080"
     evolution_api_key: str
+    # Optional isolation for a development Gateway sharing an Evolution engine.
+    evolution_instance_scope: str = ""
+    # Accounts owned by another Gateway must not be reclaimed during recovery.
+    evolution_excluded_instances: str = ""
     # Shared secret sent by Evolution as a configured per-instance webhook
     # header.  Keep it distinct from the API key used by Gateway -> Evolution.
     evolution_webhook_secret: str = ""
