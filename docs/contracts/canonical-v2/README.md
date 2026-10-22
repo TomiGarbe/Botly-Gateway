@@ -57,7 +57,7 @@ No new environment variables. Existing controls are used as follows:
 
 | Control | Purpose / default |
 |---|---|
-| `ENABLE_GROUP_MESSAGES` | General transport kill switch, remains `false`; insufficient by itself |
+| `ENABLE_GROUP_MESSAGES` | General transport kill switch, defaults `true`; set `false` to stop all group transport. Insufficient by itself: Core still has to register the account binding |
 | binding `groupTransport.contractVersion` | Must be exactly `canonical-v2`; absent means disabled |
 | binding `groupTransport.enabled` | Explicit compatibility enable, defaults `false` |
 | binding `groupTransport.authorizedGroups` | Complete JIDs explicitly authorized by Core; no wildcard |
