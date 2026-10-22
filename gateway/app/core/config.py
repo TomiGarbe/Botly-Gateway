@@ -254,3 +254,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def ephemeral_state_paths(settings: "Settings") -> list[str]:
+    """State files under /tmp vanish on restart; only caches may live there."""
+    return sorted(
+        name for name, value in settings.model_dump().items()
+        if name.endswith("_path") and str(value).startswith("/tmp/")
+    )

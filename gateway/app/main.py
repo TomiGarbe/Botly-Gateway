@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from app.core.config import get_settings
+from app.core.config import ephemeral_state_paths, get_settings
 from app.core.logging import setup_logging, get_logger
 from app.middleware.auth import AuthMiddleware
 from app.middleware.cors_diagnostics import CorsDiagnosticsMiddleware
@@ -78,6 +78,10 @@ async def _startup_recovery() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("gateway_starting", port=settings.gateway_port, debug=settings.debug)
+    ephemeral = ephemeral_state_paths(settings)
+    if ephemeral and settings.environment == "production":
+        # Losing credentials or sessions on restart is worse than not starting.
+        raise RuntimeError(f"Persistent state configured under /tmp: {', '.join(ephemeral)}")
     logger.info(
         "cors_config_loaded",
         allowed_origins=settings.cors_allowed_origins_list,
