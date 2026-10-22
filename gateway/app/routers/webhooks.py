@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -597,6 +598,16 @@ async def get_events(request: Request, instance: str | None = None, limit: int =
 @router.get("/pipeline-metrics")
 async def get_pipeline_metrics():
     return snapshot_pipeline_metrics()
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def get_prometheus_metrics():
+    from app.services.core_inbound_dispatcher import get_core_inbound_dispatcher
+    from app.services.prometheus import render_metrics
+
+    deliveries = get_core_inbound_dispatcher().stored_deliveries()
+    return PlainTextResponse(render_metrics(snapshot_pipeline_metrics(), deliveries),
+                             media_type="text/plain; version=0.0.4")
 
 
 @router.get("/dispatch-metrics")

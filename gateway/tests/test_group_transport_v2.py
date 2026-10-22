@@ -700,3 +700,15 @@ def test_group_overview_counts_deliveries_per_group_without_exposing_events():
     assert by_id['muted@g.us']['state'] == 'excluded'
     assert by_id['quiet@g.us']['lastEventAt'] is None
     assert 'secreto' not in json.dumps(result)
+
+
+def test_prometheus_metrics_expose_pipeline_counters_and_core_outbox_lag():
+    from app.services.prometheus import render_metrics
+    now = 1_790_000_100_000
+    text = render_metrics({'counters': {'ingest_total': 7, 'group_queued_total': 3}},
+                          [{'status': 'delivered', 'createdAt': now - 50_000}, {'status': 'pending', 'createdAt': now - 40_000},
+                           {'status': 'retry', 'createdAt': now - 90_000}, {'status': 'dead_letter', 'createdAt': now - 10}], now_ms=now)
+    assert 'botly_gateway_pipeline_events_total{counter="ingest_total"} 7' in text
+    assert 'botly_gateway_core_outbox_deliveries{status="dead_letter"} 1' in text
+    assert 'botly_gateway_core_outbox_deliveries{status="failed"} 0' in text
+    assert 'botly_gateway_core_outbox_oldest_pending_seconds 90.000' in text

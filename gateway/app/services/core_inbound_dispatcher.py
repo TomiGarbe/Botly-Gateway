@@ -299,6 +299,10 @@ class CoreInboundDispatcher:
             )
         return persisted
 
+    def stored_deliveries(self) -> list[dict[str, Any]]:
+        """Server-side only: includes canonical events. Never return this to a browser."""
+        return self._store.list()
+
     def deliveries_for_connection(self, connection_id: str, *, limit: int = 5000) -> list[dict[str, Any]]:
         """Server-side only: includes canonical events. Never return this to a browser."""
         return self._store.list_for_connection(connection_id, limit=limit)
