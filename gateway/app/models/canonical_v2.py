@@ -138,6 +138,13 @@ class AutomaticRequest(_CanonicalModel):
     connectionRef: StrictStr = Field(min_length=1, max_length=255)
 
 
+class HistoryPageRequest(_CanonicalModel):
+    coreChannelId: StrictStr
+    connectionRef: StrictStr = Field(min_length=1, max_length=255)
+    page: int = Field(ge=1, le=100000)
+    pageSize: int = Field(default=200, ge=1, le=500)
+
+
 def valid_group_id(value: str) -> bool:
     return bool(
         value

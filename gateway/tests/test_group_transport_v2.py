@@ -609,3 +609,47 @@ def test_production_recovery_excludes_accounts_owned_by_another_gateway(monkeypa
     monkeypatch.setattr(get_settings(), 'evolution_excluded_instances', ' dev, other-dev ')
     records = asyncio.run(EvolutionAdapter(Client()).list_instances())
     assert [item['name'] for item in records] == expected
+
+
+def test_history_page_projects_groups_like_live_and_passes_direct_payloads(harness):
+    from app.models.canonical_v2 import HistoryPageRequest
+    from app.services.history_export import history_page
+    registry, record, policy, store, dispatcher = harness
+    live = provider_payload()
+    direct = {'key': {'id': 'direct-1', 'remoteJid': '5491100000000@s.whatsapp.net', 'fromMe': False},
+              'pushName': 'Cliente', 'messageTimestamp': 1790000100, 'message': {'conversation': 'hola'}}
+    denied = deepcopy(live['data'])
+    denied['key'].update(id='denied-1', remoteJid='not-authorized@g.us')
+    newsletter = {'key': {'id': 'news-1', 'remoteJid': '123@newsletter'}, 'messageTimestamp': 1789999000, 'message': {}}
+    reaction = {'key': {'id': 'react-1', 'remoteJid': '5491100000000@s.whatsapp.net'}, 'messageType': 'reactionMessage', 'messageTimestamp': 1790000050, 'message': {'reactionMessage': {'text': 'ok'}}}
+    pages = []
+    async def find_messages(runtime, *, page, page_size):
+        pages.append((runtime, page, page_size))
+        return {'messages': {'total': 5, 'pages': 1, 'currentPage': page,
+                             'records': [direct, live['data'], denied, newsletter, reaction]}}
+    adapter = SimpleNamespace(find_messages=find_messages)
+    request = SimpleNamespace(state=SimpleNamespace(auth_method='instance_api_key', auth_instance='synthetic-instance'))
+    body = HistoryPageRequest(coreChannelId=policy.coreChannelId, connectionRef='conn-a', page=1, pageSize=50)
+    result = asyncio.run(history_page(body, request, registry=registry, adapter=adapter))
+    assert pages == [('synthetic-instance', 1, 50)]
+    assert (result['records'], result['pages'], result['oldestTimestamp']) == (5, 1, 1789999000)
+    assert [item['type'] for item in result['items']] == ['direct', 'group']
+    from app.routers.webhooks import _to_bot_payload
+    live_direct = {'event': 'messages.upsert', 'instance': 'synthetic-instance', 'data': direct}
+    volatile = {'id', 'timestamp', 'meta', 'trace', 'operational'}
+    exported = {k: v for k, v in result['items'][0]['payload'].items() if k not in volatile}
+    live_bot = {k: v for k, v in _to_bot_payload(normalize_webhook(live_direct)).items() if k not in volatile}
+    assert exported == {**live_bot, 'messageTimestamp': 1790000100}
+    assert exported['text'] == 'hola'
+    expected = groups.projection(live, normalize_webhook(live), record, policy)
+    assert result['items'][1]['event'] == expected
+    assert store.list() == []  # history never enters the live outbox
+
+    other = HistoryPageRequest(coreChannelId=str(uuid4()), connectionRef='conn-a', page=1)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(history_page(other, request, registry=registry, adapter=adapter))
+    assert error.value.status_code == 409
+    request.state.auth_instance = 'other-instance'
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(history_page(body, request, registry=registry, adapter=adapter))
+    assert error.value.status_code == 403

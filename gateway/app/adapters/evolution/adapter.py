@@ -120,6 +120,13 @@ class EvolutionAdapter:
             "GET", f"/group/fetchAllGroups/{instance_name}?getParticipants=true", retries=0 if read_timeout else 1, **kwargs,
         )
 
+    async def find_messages(self, instance_name: str, *, page: int, page_size: int) -> dict:
+        # Evolution ignores timestamp filters here; records come newest first.
+        return await self._client.request(
+            "POST", f"/chat/findMessages/{instance_name}",
+            json={"where": {}, "page": page, "offset": page_size}, retries=1,
+        )
+
     async def send_media(
         self,
         instance_name: str,

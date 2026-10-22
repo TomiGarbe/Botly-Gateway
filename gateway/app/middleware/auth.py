@@ -52,7 +52,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         instance_auth = authenticate_instance_token(provided_key)
         if instance_auth and (
             request.url.path.startswith("/messages/")
-            or request.url.path in {"/v1/outbound/messages", "/v2/outbound/messages", "/v2/group-transport/automatic"}
+            or request.url.path in {"/v1/outbound/messages", "/v2/outbound/messages", "/v2/group-transport/automatic", "/v2/history/messages"}
         ):
             request.state.auth_method = "instance_api_key"
             request.state.auth_instance = instance_auth["instance"]
