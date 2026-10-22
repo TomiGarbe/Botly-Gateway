@@ -168,7 +168,9 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "POST":
-            return httpx.Response(200, json={"access_token": "test-token", "expires_in": 3600, "scope": "instagram_business_basic,instagram_business_manage_messages"})
+            return httpx.Response(200, json={"access_token": "test-token", "scope": "instagram_business_basic,instagram_business_manage_messages"})
+        if request.url.path.endswith("/access_token"):
+            return httpx.Response(200, json={"access_token": "long-token", "token_type": "bearer", "expires_in": 5183944})
         return httpx.Response(200, json={"id": "111111", "user_id": "17841400000000000", "username": "botly", "account_type": "BUSINESS"})
 
     async def run():
@@ -177,7 +179,7 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
         token = await service.exchange_code("one-time-code")
         account = await service.discover_account(token.access_token)
         await client.aclose()
-        assert token.expires_at is not None
+        assert token.access_token == "long-token" and token.expires_at is not None
         assert token.granted_scopes == ("instagram_business_basic", "instagram_business_manage_messages")
         assert account.provider_account_id == "17841400000000000"
         assert account.username == "botly"
@@ -190,7 +192,10 @@ def test_token_exchange_and_account_discovery_are_server_side_and_preserve_opaqu
     assert b"fake-meta-app-secret" not in calls[0].content
     assert b"grant_type=authorization_code" in calls[0].content
     assert b"redirect_uri=https%3A%2F%2Fgateway-server.botly.com.ar%2Fconnections%2Fmeta%2Finstagram%2Fcallback" in calls[0].content
-    assert calls[1].headers["authorization"] == "Bearer test-token"
+    assert calls[1].url.params["grant_type"] == "ig_exchange_token"
+    assert calls[1].url.params["access_token"] == "test-token"
+    assert calls[1].url.params["client_secret"] == "fake-instagram-app-secret"
+    assert calls[2].headers["authorization"] == "Bearer long-token"
 
 
 def test_meta_webhook_subscription_is_read_back_before_onboarding_can_finish() -> None:

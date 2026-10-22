@@ -122,7 +122,12 @@ async def lifespan(app: FastAPI):
     _operation_worker.start()
     _connection_setup_cleanup_worker.start()
     _core_inbound_delivery_worker.start()
+    from app.services.instagram_token_refresh import instagram_token_refresh_loop
+    token_refresh_stop = asyncio.Event()
+    token_refresh = asyncio.create_task(instagram_token_refresh_loop(token_refresh_stop))
     yield
+    token_refresh_stop.set()
+    await token_refresh
     await _core_inbound_delivery_worker.stop()
     await _connection_setup_cleanup_worker.stop()
     await _operation_worker.stop()

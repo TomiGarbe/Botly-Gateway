@@ -345,6 +345,19 @@ class CredentialManager:
         )
         return self._provider_record_from_dict(record)
 
+    def list_provider_credentials(self, provider_id: str, channel_type: str) -> list[ProviderCredentialRecord]:
+        records = self._load().get("providerAccounts", {})
+        return [self._provider_record_from_dict(record) for record in records.values()
+                if isinstance(record, dict) and record.get("provider") == provider_id and record.get("channelType") == channel_type]
+
+    def mark_provider_credentials_expired(self, account: ProviderAccountReference) -> None:
+        payload = self._load()
+        record = payload.get("providerAccounts", {}).get(account.storage_key())
+        if isinstance(record, dict):
+            record["expiresAt"] = _now_iso()
+            record["updatedAt"] = _now_iso()
+            self._save(payload)
+
     def get_provider_credentials(self, account: ProviderAccountReference) -> ProviderCredentialRecord | None:
         record = self._load().get("providerAccounts", {}).get(account.storage_key())
         return self._provider_record_from_dict(record) if isinstance(record, dict) else None

@@ -200,9 +200,51 @@ class InstagramOAuthService:
         token = str(payload.get("access_token") or "").strip()
         if not token:
             raise InstagramOAuthError("Meta returned no access token", status_code=502)
-        expires_at = _expires_at(payload.get("expires_in"))
         granted = _scopes_from_response(payload) or self.requested_scopes()
-        return InstagramOAuthToken(access_token=token, expires_at=expires_at, granted_scopes=granted)
+        # The code exchange yields a 1-hour token with no expiry; trade it for
+        # the 60-day one so it can be refreshed before it lapses.
+        long_lived = await self._graph_token("/access_token", {
+            "grant_type": "ig_exchange_token", "client_secret": settings.instagram_app_secret, "access_token": token,
+        })
+        if long_lived is not None:
+            token = long_lived["access_token"]
+            payload = long_lived
+        return InstagramOAuthToken(access_token=token, expires_at=_expires_at(payload.get("expires_in")), granted_scopes=granted)
+
+    async def refresh_long_lived(self, access_token: str) -> InstagramOAuthToken | None:
+        """Extend a valid long-lived token by 60 days; None when Meta rejects it."""
+        refreshed = await self._graph_token("/refresh_access_token", {"grant_type": "ig_refresh_token", "access_token": access_token})
+        if refreshed is None:
+            return None
+        return InstagramOAuthToken(access_token=refreshed["access_token"], expires_at=_expires_at(refreshed.get("expires_in")), granted_scopes=())
+
+    async def token_rejected(self, access_token: str) -> bool:
+        """True only when Meta explicitly refuses the token (expired or revoked)."""
+        settings = self._settings_factory()
+        client, close = self._graph_client(settings)
+        try:
+            response = await client.get("/me", params={"fields": "id"}, headers={"Authorization": f"Bearer {access_token}"})
+        except httpx.HTTPError:
+            return False
+        finally:
+            if close:
+                await client.aclose()
+        return response.status_code in {400, 401, 403} and "OAuthException" in response.text
+
+    async def _graph_token(self, path: str, params: dict[str, str]) -> dict[str, Any] | None:
+        settings = self._settings_factory()
+        client, close = self._graph_client(settings)
+        try:
+            response = await client.get(path, params=params)
+            payload = response.json() if response.status_code < 400 else None
+        except (httpx.HTTPError, ValueError):
+            payload = None
+        finally:
+            if close:
+                await client.aclose()
+        if not isinstance(payload, dict) or not str(payload.get("access_token") or "").strip():
+            return None
+        return payload
 
     async def discover_account(self, access_token: str) -> InstagramAccount:
         settings = self._settings_factory()
