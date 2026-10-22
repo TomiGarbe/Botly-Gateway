@@ -125,6 +125,7 @@ class CoreInboundDeliveryStore:
                     existing_scope = self._provider_message_scope(existing.get("canonicalEvent") if isinstance(existing.get("canonicalEvent"), dict) else {})
                     if scope is not None and existing_scope == scope:
                         return deepcopy(existing), False
+                data["deliveries"] = self._without_expired(data["deliveries"], now)
                 data["deliveries"].append(delivery)
                 self._write_unlocked(data)
         except CoreInboundPersistenceError:
@@ -132,6 +133,14 @@ class CoreInboundDeliveryStore:
         except Exception as exc:
             raise CoreInboundPersistenceError("Canonical Core delivery could not be persisted") from exc
         return deepcopy(delivery), True
+
+    @staticmethod
+    def _without_expired(deliveries: list[dict[str, Any]], now: int) -> list[dict[str, Any]]:
+        """Drop confirmed deliveries past retention; failures stay for replay."""
+        days = max(1, int(getattr(get_settings(), "core_inbound_delivery_retention_days", 7) or 7))
+        cutoff = now - days * 86_400_000
+        return [item for item in deliveries
+                if not (item.get("status") == "delivered" and _as_int(item.get("deliveredAt")) < cutoff)]
 
     def replay_group(self, delivery_id: str, *, connection_id: str, core_channel_id: str, binding_id: str) -> dict[str, Any]:
         """Requeue the same persisted event; completed/in-flight deliveries stay put."""

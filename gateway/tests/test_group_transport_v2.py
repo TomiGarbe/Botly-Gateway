@@ -653,3 +653,24 @@ def test_history_page_projects_groups_like_live_and_passes_direct_payloads(harne
     with pytest.raises(HTTPException) as error:
         asyncio.run(history_page(body, request, registry=registry, adapter=adapter))
     assert error.value.status_code == 403
+
+
+def test_core_inbound_store_prunes_old_delivered_but_keeps_failures(tmp_path, monkeypatch):
+    from app.services import core_inbound_dispatcher as inbound
+    store = inbound.CoreInboundDeliveryStore(tmp_path / 'outbox.json')
+    day = 86_400_000
+    now = inbound._now()
+    old = [{'id': name, 'eventId': name, 'status': status, 'deliveredAt': delivered, 'createdAt': now - 30 * day,
+            'canonicalEvent': {}} for name, status, delivered in (
+        ('old-delivered', 'delivered', now - 8 * day), ('recent-delivered', 'delivered', now - day),
+        ('old-dead', 'dead_letter', None))]
+    store._write_unlocked({'deliveries': old})
+    monkeypatch.setattr(inbound.get_settings(), 'core_inbound_delivery_retention_days', 7)
+    live = provider_payload()
+    record = {'id': 'conn-a', 'legacy_name': 'synthetic-instance', 'core_channel': {}}
+    policy = GroupPolicy(connectionRef='conn-a', coreChannelId=str(uuid4()), bindingId='binding-a',
+                         contractVersion='canonical-v2', enabled=True, evolutionApiProfile='evolution-v2-sendText',
+                         authorizedGroups=['synthetic-team@g.us'], botAccount={'externalId': 'bot@lid', 'displayName': None})
+    event = groups.projection(live, normalize_webhook(live), record, policy)
+    store.enqueue(event=event, core_channel_id=policy.coreChannelId)
+    assert sorted(item['id'] for item in store.list() if not item['id'].startswith('core_inbound_')) == ['old-dead', 'recent-delivered']

@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     core_control_plane_timeout_seconds: int = 10
     core_inbound_deliveries_path: str = "/var/lib/botly/core/inbound_deliveries.json"
     core_inbound_delivery_max_attempts: int = 5
+    core_inbound_delivery_retention_days: int = 7
     core_inbound_delivery_backoff_base_seconds: int = 5
     core_inbound_delivery_poll_seconds: int = 2
     core_inbound_delivery_batch_size: int = 25
