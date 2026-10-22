@@ -6,6 +6,7 @@ import { LoadingState } from '@/shared/components/LoadingState'
 import { Toast } from '@/shared/components/Toast'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { ObservabilityDataSection, ObservabilityFields, ObservabilityFlow, ObservabilityStatusBadge, formatObservabilityTimestamp } from '@/features/observability/components/ObservabilityPresentation'
+import { describeDeliveryFailure } from '../lib/deliveryFailure'
 import { getWebhookDelivery, redeliverWebhookCurrentTarget, repeatWebhookTest, type RedeliverWebhookResult, type RepeatWebhookTestResult, type WebhookDelivery } from '../api/webhooksApi'
 
 export function WebhookDeliveryDetailPage() {
@@ -91,6 +92,7 @@ export function WebhookDeliveryDetailPage() {
     <button type="button" className="client-back-link" onClick={() => navigate(`/webhooks/${webhookId}/deliveries`)}><ArrowLeft size={16} /> Entregas</button>
     <div className="webhook-detail-heading"><div><ObservabilityStatusBadge status={delivery.semanticStatus} /><h2>{delivery.isTest ? 'Prueba de webhook' : delivery.eventType || 'Entrega'}</h2><p>{formatObservabilityTimestamp(delivery.timestamp)}</p></div>{delivery.success ? <CheckCircle2 className="delivery-heading-icon is-success" size={28} /> : <CircleAlert className="delivery-heading-icon is-error" size={28} />}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
+    {!delivery.success && !delivery.isTest ? (() => { const failure = describeDeliveryFailure(delivery.semanticStatus, delivery.statusCode); return <div className="webhook-operation-result is-error delivery-failure-summary" role="alert"><CircleAlert size={18} aria-hidden="true" /><div><strong>{failure.title}</strong><span>{failure.advice}</span>{delivery.error ? <span><code>{delivery.error}</code></span> : null}</div></div> })() : null}
     <Toast message={notice} onDismiss={() => setNotice(null)} />
 
     {delivery.isTest ? <section className="webhook-detail-section"><h3>Acción manual</h3><p>La prueba nueva usará la configuración actual del webhook. No modifica ni reemplaza esta entrega original.</p><button type="button" className="client-button-primary" disabled={isRepeating} onClick={() => { setRepeatIdempotencyKey((current) => current || crypto.randomUUID()); setIsRepeatConfirmOpen(true) }}><FlaskConical size={15} /> {isRepeating ? 'Enviando prueba…' : 'Repetir prueba'}</button>{repeatResult ? <div className={`webhook-operation-result ${repeatedSucceeded ? 'is-success' : 'is-error'}`}><div><strong>{repeatedSucceeded ? 'Prueba enviada correctamente' : 'La prueba falló'}</strong><span>{repeatResult.result?.statusCode ? `HTTP ${repeatResult.result.statusCode}` : 'Sin respuesta HTTP'}{repeatResult.result?.latencyMs !== null && repeatResult.result?.latencyMs !== undefined ? ` · ${Math.round(repeatResult.result.latencyMs)} ms` : ''}</span></div>{repeatResult.newDeliveryId ? <button type="button" className="client-button-secondary" onClick={() => navigate(`/webhooks/${webhookId}/deliveries/${repeatResult.newDeliveryId}`)}>Ver nueva entrega</button> : null}</div> : null}</section> : null}

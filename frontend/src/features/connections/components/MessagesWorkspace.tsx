@@ -6,6 +6,7 @@ import { SafeJsonViewer } from '@/features/observability/components/SafeJsonView
 import { EmptyState } from '@/shared/components/EmptyState'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { Toast } from '@/shared/components/Toast'
+import { useVisiblePolling } from '@/shared/lib/useVisiblePolling'
 import { Input, Select, Textarea } from '@/shared/components/FormControls'
 
 type DateRange = 'all' | 'today' | '24h' | '7d' | '30d'
@@ -58,7 +59,7 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
     try { const next = await listConnectionTimelineMessages(connectionId); setMessages(next); setSelectedMessageId((current) => current && next.some((message) => message.id === current) ? current : (messageId ? next.find((message) => message.messageId === messageId)?.id || null : null)) } catch { if (!quiet) setError('No pudimos actualizar los mensajes. Intentá nuevamente.') } finally { if (!quiet) setIsLoading(false) }
   }, [connectionId, messageId])
   useEffect(() => { void load() }, [load])
-  useEffect(() => { const interval = window.setInterval(() => { void load(true) }, 5000); return () => window.clearInterval(interval) }, [load])
+  useVisiblePolling(() => { void load(true) }, 5000)
   const availableStatuses = useMemo(() => [...new Set(messages.map((message) => message.status).filter((value): value is string => Boolean(value)))].sort(), [messages])
   // Contactos ordenados por actividad reciente, para el filtro.
   const availableContacts = useMemo(() => [...new Set([...messages].sort((left, right) => right.timestamp - left.timestamp).map(counterpart).filter((value): value is string => Boolean(value)))], [messages])

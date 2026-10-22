@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { EmptyState } from '@/shared/components/EmptyState'
 import { LoadingState } from '@/shared/components/LoadingState'
 import { listConnectionWebhookDeliveries, type WebhookDelivery, type WebhookDeliveryMetrics } from '../api/connectionOperationsApi'
+import { useVisiblePolling } from '@/shared/lib/useVisiblePolling'
 
 function formatTime(value: number): string {
   return new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
@@ -51,10 +52,7 @@ export function WebhookDeliveryLog({ connectionId }: { connectionId: string }) {
   }, [connectionId])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => {
-    const interval = window.setInterval(() => { void load(true) }, 5000)
-    return () => window.clearInterval(interval)
-  }, [load])
+  useVisiblePolling(() => { void load(true) }, 5000)
 
   return <section className="connection-section webhook-delivery-log">
     <div className="connection-section-heading">
