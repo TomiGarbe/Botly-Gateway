@@ -143,6 +143,7 @@ class HistoryPageRequest(_CanonicalModel):
     connectionRef: StrictStr = Field(min_length=1, max_length=255)
     page: int = Field(ge=1, le=100000)
     pageSize: int = Field(default=200, ge=1, le=500)
+    cursor: StrictStr | None = Field(default=None, max_length=1024)
 
 
 def valid_group_id(value: str) -> bool:

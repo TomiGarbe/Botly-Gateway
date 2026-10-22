@@ -42,17 +42,20 @@ def history_item(record, runtime, value):
     return None  # newsletters, status broadcasts
 
 
-async def history_page(body, request, *, registry=None, adapter=None):
+async def history_page(body, request, *, registry=None, adapter=None, instagram_page=None):
     registry = registry or get_connection_registry()
     method = getattr(request.state, "auth_method", None)
     if method not in {"gateway_api_key", "instance_api_key"}:
         raise HTTPException(403, "Connection service authentication required")
     record = registry.connection_record_by_id(body.connectionRef) or registry.connection_record(body.connectionRef)
-    if not record or (record.get("provider_id"), record.get("channel_id")) != ("evolution", "whatsapp"):
-        raise HTTPException(409, "Expected an Evolution WhatsApp connection")
+    kind = (record or {}).get("provider_id"), (record or {}).get("channel_id")
+    if kind not in {("evolution", "whatsapp"), ("meta", "instagram")}:
+        raise HTTPException(409, "History is available for Evolution WhatsApp and Instagram connections")
     runtime = record["legacy_name"]
     if method == "instance_api_key" and getattr(request.state, "auth_instance", None) != runtime:
         raise HTTPException(403, "Connection credential mismatch")
+    if kind == ("meta", "instagram"):
+        return await _instagram_page(body, record, instagram_page=instagram_page)
     binding = record.get("core_channel") or {}
     if binding and binding.get("channelId") != body.coreChannelId:
         raise HTTPException(409, "Connection is bound to another Core channel")
@@ -85,3 +88,17 @@ async def history_page(body, request, *, registry=None, adapter=None):
         "oldestTimestamp": min(timestamps) if timestamps else None,
         "items": items,
     }
+
+
+async def _instagram_page(body, record, *, instagram_page=None):
+    from app.services.connections import get_connection_service
+    from app.services.instagram_history import instagram_history_page
+
+    binding = get_connection_service().instagram_core_channel_binding(record["id"]) or {}
+    if binding.get("channelId") != body.coreChannelId:
+        raise HTTPException(409, "Connection is bound to another Core channel")
+    try:
+        return await (instagram_page or instagram_history_page)(record, body.cursor)
+    except Exception:
+        logger.warning("instagram_history_unavailable", connection_id=record["id"])
+        raise HTTPException(503, "Instagram history is unavailable") from None
