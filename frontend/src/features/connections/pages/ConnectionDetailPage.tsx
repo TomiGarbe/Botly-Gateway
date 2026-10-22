@@ -10,6 +10,7 @@ import { Field, Input } from '@/shared/components/FormControls'
 import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
 import { deleteConnection, disconnectInstagram, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
+import { ConnectionGroups } from '../components/ConnectionGroups'
 import { ConnectionWebhooks } from '../components/ConnectionWebhooks'
 import { OperationsDiagnostics } from '../components/OperationsDiagnostics'
 import { ConnectionOverview } from '../components/ConnectionOverview'
@@ -19,8 +20,8 @@ import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '
 import { loadFacebookSdk, loginWithFacebook, waitForSession } from '../lib/metaEmbeddedSignup'
 import { EvolutionQrRelink } from '../components/EvolutionQrRelink'
 
-type WorkspaceTab = 'general' | 'security' | 'messages' | 'webhooks'
-const tabs: Array<{ id: WorkspaceTab; label: string }> = [{ id: 'general', label: 'General' }, { id: 'security', label: 'Seguridad' }, { id: 'messages', label: 'Mensajes' }, { id: 'webhooks', label: 'Webhooks' }]
+type WorkspaceTab = 'general' | 'security' | 'messages' | 'groups' | 'webhooks'
+const tabs: Array<{ id: WorkspaceTab; label: string }> = [{ id: 'general', label: 'General' }, { id: 'security', label: 'Seguridad' }, { id: 'messages', label: 'Mensajes' }, { id: 'groups', label: 'Grupos' }, { id: 'webhooks', label: 'Webhooks' }]
 
 function workspaceState(connection: Connection, status: ConnectionStatusSummary | null): { label: string; tone: StatusTone } {
   if (status?.connected || connection.status.health === 'healthy') return { label: 'Operativa', tone: 'healthy' }
@@ -160,7 +161,7 @@ export function ConnectionDetailPage() {
 
   return <section className="connection-detail workspace-detail">
     <header className="workspace-header"><button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button><div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div></header>
-    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
+    <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.filter((tab) => tab.id !== 'groups' || (connection.provider.id === 'evolution' && connection.channel.id === 'whatsapp')).map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} /><Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
     <div className="workspace-tab-content">
       {activeTab === 'webhooks' ? <ConnectionWebhooks connection={connection} /> : null}
@@ -174,6 +175,7 @@ export function ConnectionDetailPage() {
       </> : null}
       {activeTab === 'security' ? <><ConnectionSecurity connection={connection} onAuthorize={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? authorizeInstagram : undefined} /><section className="connection-section workspace-security"><div className="connection-section-heading"><div><h3>API Key</h3><p>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</p></div></div><dl className="connection-information-list"><div><dt>Estado</dt><dd>{apiKey?.enabled && apiKey.hasApiKey ? 'Activa' : 'Sin API Key activa'}</dd></div><div><dt>API Key</dt><dd className="connection-key-value">{displayedKey || 'No hay una API Key disponible'}</dd></div></dl>{apiKey?.hasApiKey && !apiKey.canRevealApiKey ? <p className="connection-endpoint-note">Esta clave fue creada antes de habilitar la visualización. Regenerala una vez para poder mostrarla y copiarla luego.</p> : null}<div className="connection-inline-actions">{apiKey?.canRevealApiKey ? <button type="button" className="client-button-secondary" onClick={() => void toggleKeyVisibility()}>{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}{showKey ? 'Ocultar' : 'Mostrar'}</button> : null}<button type="button" className="client-button-secondary" onClick={() => void copyKey()} disabled={!apiKey?.canRevealApiKey && !apiKey?.apiKey}><Clipboard size={15} aria-hidden="true" /> Copiar</button><button type="button" className="client-button-secondary" onClick={() => setIsRegenerateDialogOpen(true)}>Regenerar</button></div></section></> : null}
       {activeTab === 'messages' ? <MessagesWorkspace connectionId={connection.id} messageId={messageId} /> : null}
+      {activeTab === 'groups' ? <ConnectionGroups connectionId={connection.id} /> : null}
     </div>
     <Toast message={oauthToast?.message || null} tone={oauthToast?.tone} onDismiss={() => setOauthToast(null)} />
     {isQrRelinkOpen ? <EvolutionQrRelink connectionId={connection.id} onClose={() => setIsQrRelinkOpen(false)} onLinked={handleQrLinked} /> : null}

@@ -414,6 +414,22 @@ async def list_instagram_inbound_deliveries(connection_id: str, request: Request
     return {"items": get_core_inbound_dispatcher().list_connection_deliveries(connection_id, limit=limit)}
 
 
+@router.get("/{connection_id}/groups")
+async def list_connection_groups(connection_id: str, request: Request):
+    """Read-only WhatsApp group transport view; capture decisions belong to Core."""
+    from app.services.connection_registry import get_connection_registry
+    from app.services.group_automatic import _directories
+    from app.services.group_overview import group_overview
+
+    connection = await _service.get_connection(connection_id)
+    require_reviewer_connection_access(request, connection)
+    record = get_connection_registry().connection_record_by_id(connection_id)
+    if not record or (record.get("provider_id"), record.get("channel_id")) != ("evolution", "whatsapp"):
+        raise HTTPException(status_code=404, detail="La conexión no admite grupos de WhatsApp.")
+    deliveries = get_core_inbound_dispatcher().deliveries_for_connection(connection_id)
+    return group_overview(record, deliveries, directory_loaded=record["legacy_name"] in _directories)
+
+
 @router.get("/{connection_id}/messages")
 async def list_connection_messages(connection_id: str, request: Request, limit: int = Query(default=200, ge=1, le=500)):
     """Provider-neutral timeline used by the shared connection workspace."""

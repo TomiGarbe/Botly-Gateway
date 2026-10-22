@@ -674,3 +674,29 @@ def test_core_inbound_store_prunes_old_delivered_but_keeps_failures(tmp_path, mo
     event = groups.projection(live, normalize_webhook(live), record, policy)
     store.enqueue(event=event, core_channel_id=policy.coreChannelId)
     assert sorted(item['id'] for item in store.list() if not item['id'].startswith('core_inbound_')) == ['old-dead', 'recent-delivered']
+
+
+def test_group_overview_counts_deliveries_per_group_without_exposing_events():
+    from app.services.group_overview import group_overview
+    record = {'core_channel': {
+        'channelId': 'core-1', 'accountIdentities': ['bot@s.whatsapp.net', 'bot@lid'],
+        'groupTransport': {'enabled': True, 'admission': 'account', 'excludedGroups': ['muted@g.us'], 'authorizedGroups': []},
+        'groupDirectory': [{'externalId': 'team@g.us', 'displayName': 'Equipo'}, {'externalId': 'muted@g.us', 'displayName': 'Silenciado'},
+                           {'externalId': 'quiet@g.us', 'displayName': 'Sin mensajes'}],
+        'participantPhones': {'team@g.us': {'a@lid': '5491100000001', 'b@lid': '5491100000002'}}}}
+    def delivery(group, status, at, error=None):
+        return {'status': status, 'createdAt': at, 'lastError': error,
+                'canonicalEvent': {'chat': {'type': 'group', 'externalId': group}, 'message': {'text': 'secreto'}}}
+    deliveries = [delivery('team@g.us', 'delivered', 1000), delivery('team@g.us', 'dead_letter', 2000, 'core_unavailable'),
+                  delivery('new@g.us', 'delivered', 1500)]
+    result = group_overview(record, deliveries, directory_loaded=True)
+    assert (result['enabled'], result['admission'], result['botIdentities']) == (True, 'account', ['bot@s.whatsapp.net', 'bot@lid'])
+    by_id = {item['externalId']: item for item in result['groups']}
+    assert [item['externalId'] for item in result['groups']][:2] == ['team@g.us', 'new@g.us']
+    team = by_id['team@g.us']
+    assert {key: team[key] for key in ('state', 'participants', 'delivered', 'failed', 'lastEventAt', 'lastEventStatus', 'lastError')} == {
+        'state': 'captured', 'participants': 2, 'delivered': 1, 'failed': 1,
+        'lastEventAt': 2000, 'lastEventStatus': 'dead_letter', 'lastError': 'core_unavailable'}
+    assert by_id['muted@g.us']['state'] == 'excluded'
+    assert by_id['quiet@g.us']['lastEventAt'] is None
+    assert 'secreto' not in json.dumps(result)

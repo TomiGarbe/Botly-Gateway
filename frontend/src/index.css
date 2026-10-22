@@ -409,6 +409,14 @@
   .connection-webhook-test-panel > label > span { @apply block text-sm text-zinc-400; }
   .connection-webhook-test-panel select, .connection-webhook-test-panel textarea { @apply box-border w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100; }
   .connection-webhook-test-panel textarea { @apply min-h-56 resize-y font-mono text-xs leading-5; }
+  .connection-groups-list { @apply mt-4 grid list-none gap-2 p-0; }
+  .connection-group-row { @apply grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3; }
+  .connection-group-main { @apply min-w-0; }
+  .connection-group-main strong { @apply block truncate text-sm font-medium text-zinc-200; }
+  .connection-group-main span { @apply mt-1 block text-xs text-zinc-500; }
+  .connection-group-row .delivery-meta { @apply col-span-2; }
+  .connection-group-row .delivery-meta .is-error { @apply bg-red-950/60 text-red-300; }
+  .connection-group-error { @apply col-span-2 m-0 text-xs text-red-300; }
   .webhook-activity { @apply mt-10; }
   .webhook-activity-toolbar { @apply mt-5 flex flex-col gap-2 sm:flex-row; }
   .webhook-activity-search { @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-zinc-500 focus-within:border-zinc-500; }
