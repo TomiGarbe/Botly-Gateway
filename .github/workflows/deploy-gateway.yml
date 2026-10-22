@@ -23,6 +23,20 @@ jobs:
     name: Tests del Gateway
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: ci-only-postgres
+          POSTGRES_DB: gateway_test
+        ports:
+          - 15433:5432
+        options: >-
+          --health-cmd "pg_isready -U gateway"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,6 +63,7 @@ jobs:
           DEBUG: "false"
           GATEWAY_API_KEY: ci-only-gateway-key
           EVOLUTION_API_KEY: ci-only-evolution-key
+          GATEWAY_TEST_DATABASE_URL: postgresql://gateway:ci-only-postgres@127.0.0.1:15433/gateway_test
         # -u/-vv keep the active test visible in Actions.  The faulthandler
         # snapshot makes a platform-specific deadlock diagnosable instead of
         # leaving the production deploy queued indefinitely.

@@ -261,7 +261,10 @@ class CoreInboundDispatcher:
         settings_factory: Callable[[], Any] = get_settings,
         client_factory: Callable[[float], httpx.AsyncClient] | None = None,
     ) -> None:
-        self._store = store or CoreInboundDeliveryStore()
+        if store is None:
+            from app.services.core_inbound_pg_store import build_core_inbound_store
+            store = build_core_inbound_store()
+        self._store = store
         self._connections = connections or get_connection_service()
         self._credentials = credentials or get_core_channel_credential_store()
         self._settings_factory = settings_factory
