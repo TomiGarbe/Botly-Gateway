@@ -1,6 +1,7 @@
 """Account discovery reuses the connection's existing Core webhook authorization."""
 
 import asyncio
+import time
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -8,13 +9,21 @@ from fastapi import HTTPException
 
 from app.adapters.evolution import get_evolution_adapter
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.models.canonical_v2 import AutomaticRegistration, GroupPolicy, valid_group_id
 from app.services.connection_registry import get_connection_registry
 from app.services.core_channel_credentials import get_core_channel_credential_store
 from app.services.instance_webhooks import build_auth_headers, list_instance_webhooks
 from app.services.group_participants import participant_directory
 
+logger = get_logger(__name__)
+
 _locks: dict[str, asyncio.Lock] = {}
+# Provider directory per account runtime: (monotonic fetched_at, raw groups).
+_directories: dict[str, tuple[float, list]] = {}
+_refreshes: dict[str, asyncio.Task] = {}
+# Small accounts answer within this budget; large ones finish in the background.
+DIRECTORY_WAIT_SECONDS = 5.0
 
 
 def connected_identity(records, runtime):
@@ -76,6 +85,33 @@ def group_directory(value):
     return list(result.values())
 
 
+async def _fetch_directory(adapter, runtime):
+    try:
+        raw = await adapter.group_directory(runtime, read_timeout=get_settings().group_directory_timeout_seconds)
+        group_directory(raw)
+        participant_directory(raw)
+        _directories[runtime] = (time.monotonic(), raw)
+        logger.info("group_directory_refreshed", runtime=runtime, groups=len(raw))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # keep the last confirmed directory
+        logger.warning("group_directory_refresh_failed", runtime=runtime, error=type(exc).__name__)
+
+
+async def cached_directory(adapter, runtime):
+    """Never block registration on fetchAllGroups: it takes minutes on large accounts."""
+    loop = asyncio.get_running_loop()
+    cached = _directories.get(runtime)
+    if cached is None or time.monotonic() - cached[0] > get_settings().group_directory_refresh_seconds:
+        task = _refreshes.get(runtime)
+        if task is None or task.done() or task.get_loop() is not loop:
+            task = _refreshes[runtime] = loop.create_task(_fetch_directory(adapter, runtime))
+        if cached is None:
+            await asyncio.wait({task}, timeout=DIRECTORY_WAIT_SECONDS)
+            cached = _directories.get(runtime)
+    return cached[1] if cached else None
+
+
 async def automatic_binding(body, request, *, registry=None, adapter=None, client_factory=httpx.AsyncClient, credentials=None):
     registry = registry or get_connection_registry()
     method = getattr(request.state, "auth_method", None)
@@ -111,10 +147,19 @@ async def automatic_binding(body, request, *, registry=None, adapter=None, clien
         adapter = adapter or get_evolution_adapter()
         try:
             identities = connected_identity(await adapter.list_instances(), runtime)
-            raw_groups = await adapter.group_directory(runtime)
-            groups = group_directory(raw_groups)
-            identities = linked_account_identities(identities, raw_groups)
-            participants = participant_directory(raw_groups)
+            raw_groups = await cached_directory(adapter, runtime)
+            if raw_groups is None:
+                # Directory still loading: keep the last confirmed one. Core discovers
+                # groups from their first message under account admission.
+                groups = prior.get("groupDirectory") or []
+                participants = prior.get("participantPhones") or {}
+                known = prior.get("accountIdentities") or []
+                if identities and identities[0] in known:
+                    identities = list(dict.fromkeys(identities + known))
+            else:
+                groups = group_directory(raw_groups)
+                identities = linked_account_identities(identities, raw_groups)
+                participants = participant_directory(raw_groups)
             registration = AutomaticRegistration(connectionRef=connection, coreChannelId=body.coreChannelId,
                 gatewayClientId=record["client_id"], providerAccountRef=runtime,
                 botExternalIds=identities, groups=groups)
@@ -139,7 +184,7 @@ async def automatic_binding(body, request, *, registry=None, adapter=None, clien
                                      channel_api_key=authorization[7:].strip())
             binding = {"channelId": body.coreChannelId, "bindingId": policy.bindingId,
                 "credentialRef": reference, "inboundUrl": hook["url"], "groupTransport": policy.model_dump(),
-                "groupDirectory": groups, "participantPhones": participants}
+                "groupDirectory": groups, "participantPhones": participants, "accountIdentities": identities}
             if registry.update_connection_record(connection, {"core_channel": binding}) is None:
                 raise ValueError("connection_deleted")
         except (asyncio.CancelledError, HTTPException):

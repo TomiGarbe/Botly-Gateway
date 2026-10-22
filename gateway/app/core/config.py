@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     bot_webhook_max_parallel: int = 20
     bot_webhook_max_queue: int = 200
     enable_group_messages: bool = True
+    # fetchAllGroups can take minutes on accounts with hundreds of groups.
+    group_directory_timeout_seconds: int = 420
+    group_directory_refresh_seconds: int = 900
 
     dedupe_ttl_seconds: int = 180
     dedupe_max_items: int = 20000

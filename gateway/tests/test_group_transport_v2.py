@@ -446,9 +446,10 @@ def test_automatic_binding_uses_only_existing_account_webhook_and_service_creden
     calls = []
     async def instances():
         return [{'name': 'synthetic-instance', 'ownerJid': 'bot@s.whatsapp.net', 'ownerLid': 'bot@lid'}]
-    async def directory(runtime):
-        assert runtime == 'synthetic-instance'
+    async def directory(runtime, **kwargs):
+        assert runtime == 'synthetic-instance' and kwargs['read_timeout'] > 25
         return [{'id': 'automatic@g.us', 'subject': 'Equipo automático'}]
+    automatic._directories.clear()
     def receive(request):
         calls.append(json.loads(request.content))
         assert str(request.url) == 'https://dev.invalid/api/v1/webhook/group-transport'
@@ -477,6 +478,50 @@ def test_automatic_binding_uses_only_existing_account_webhook_and_service_creden
     with pytest.raises(HTTPException) as error:
         asyncio.run(automatic.automatic_binding(body, request, **kwargs))
     assert error.value.status_code == 409 and len(calls) == 1
+
+
+def test_slow_group_directory_registers_account_without_waiting(harness, monkeypatch, tmp_path):
+    from app.services import group_automatic as automatic
+    from app.models.canonical_v2 import AutomaticRequest
+    from app.services.core_channel_credentials import CoreChannelCredentialStore
+    registry, record, policy, store, dispatcher = harness
+    record.pop('core_channel')
+    registry.save_connection_record(record['legacy_name'], record)
+    hook = {'enabled': True, 'url': 'https://dev.invalid/api/v1/webhook/inbound'}
+    monkeypatch.setattr(automatic, 'list_instance_webhooks', lambda *a, **kw: [hook])
+    monkeypatch.setattr(automatic, 'build_auth_headers', lambda h: {'Authorization': 'Bearer synthetic-channel-credential'})
+    automatic._directories.clear()
+    calls, fetches = [], []
+    async def instances():
+        return [{'name': 'synthetic-instance', 'ownerJid': 'bot@s.whatsapp.net'}]
+    async def directory(runtime, **kwargs):
+        fetches.append(runtime)
+        await asyncio.sleep(0.3)
+        return [{'id': 'slow@g.us', 'subject': 'Grupo grande',
+                 'participants': [{'id': 'bot@lid', 'phoneNumber': 'bot@s.whatsapp.net'}]}]
+    def receive(request):
+        calls.append(json.loads(request.content))
+        result = policy.model_dump()
+        result.update(admission='account', authorizedGroups=[])
+        return httpx.Response(200, json={'policy': result, 'revision': len(calls)})
+    kwargs = dict(registry=registry, adapter=SimpleNamespace(list_instances=instances, group_directory=directory),
+                  client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(receive)),
+                  credentials=CoreChannelCredentialStore(tmp_path / 'slow-credentials.json'))
+    body = AutomaticRequest(coreChannelId=policy.coreChannelId, connectionRef=policy.connectionRef)
+    request = SimpleNamespace(state=SimpleNamespace(auth_method='instance_api_key', auth_instance='synthetic-instance'))
+    monkeypatch.setattr(automatic, 'DIRECTORY_WAIT_SECONDS', 0.01)
+
+    async def scenario():
+        first = await automatic.automatic_binding(body, request, **kwargs)
+        assert first['groups'] == 0 and calls[0]['groups'] == [] and calls[0]['botExternalIds'] == ['bot@s.whatsapp.net']
+        assert registry.connection_record_by_id('conn-a')['core_channel']['accountIdentities'] == ['bot@s.whatsapp.net']
+        await automatic.automatic_binding(body, request, **kwargs)
+        assert fetches == ['synthetic-instance']  # single-flight while the slow fetch runs
+        await asyncio.sleep(0.4)
+        second = await automatic.automatic_binding(body, request, **kwargs)
+        assert second['groups'] == 1 and calls[-1]['botExternalIds'] == ['bot@s.whatsapp.net', 'bot@lid']
+        assert registry.connection_record_by_id('conn-a')['core_channel']['groupDirectory'][0]['displayName'] == 'Grupo grande'
+    asyncio.run(scenario())
 
 
 def test_development_instance_scope_excludes_other_callbacks(monkeypatch):

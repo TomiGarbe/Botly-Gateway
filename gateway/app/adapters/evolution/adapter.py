@@ -4,6 +4,8 @@ import base64
 import re
 from typing import Any
 
+import httpx
+
 from app.adapters.evolution.client import EvolutionClient, get_evolution_client
 from app.adapters.evolution.errors import EvolutionError
 from app.adapters.evolution.transports import BAILEYS_TRANSPORT_PROFILE, EvolutionTransportProfile
@@ -111,9 +113,11 @@ class EvolutionAdapter:
             retries=0,
         )
 
-    async def group_directory(self, instance_name: str) -> list:
+    async def group_directory(self, instance_name: str, *, read_timeout: float | None = None) -> list:
+        # Large accounts (hundreds of groups) take minutes; callers pass a longer read timeout.
+        kwargs = {"timeout": httpx.Timeout(connect=5.0, read=read_timeout, write=15.0, pool=5.0)} if read_timeout else {}
         return await self._client.request(
-            "GET", f"/group/fetchAllGroups/{instance_name}?getParticipants=true", retries=1,
+            "GET", f"/group/fetchAllGroups/{instance_name}?getParticipants=true", retries=0 if read_timeout else 1, **kwargs,
         )
 
     async def send_media(
