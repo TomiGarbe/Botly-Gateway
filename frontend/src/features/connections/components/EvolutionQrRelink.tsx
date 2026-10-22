@@ -1,6 +1,6 @@
 import { CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getConnectionStatusSummary } from '../api/connectionOperationsApi'
+import { describeProviderSession, getConnectionStatusSummary } from '../api/connectionOperationsApi'
 import { getConnectionQr } from '../api/connectionsApi'
 import { qrSource } from '../lib/metaEmbeddedSignup'
 
@@ -14,6 +14,7 @@ export function EvolutionQrRelink({ connectionId, onClose, onLinked }: { connect
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLinked, setIsLinked] = useState(false)
+  const [session, setSession] = useState<string | null>(null)
   const onLinkedRef = useRef(onLinked)
   onLinkedRef.current = onLinked
 
@@ -38,7 +39,7 @@ export function EvolutionQrRelink({ connectionId, onClose, onLinked }: { connect
   useEffect(() => {
     if (isLinked) return undefined
     const interval = window.setInterval(() => {
-      void getConnectionStatusSummary(connectionId).then((status) => { if (status.connected) setIsLinked(true) }).catch(() => undefined)
+      void getConnectionStatusSummary(connectionId).then((status) => { if (status.connected) setIsLinked(true); else setSession(describeProviderSession(status.providerSession)) }).catch(() => undefined)
     }, STATUS_POLL_MS)
     return () => window.clearInterval(interval)
   }, [connectionId, isLinked])
@@ -57,6 +58,7 @@ export function EvolutionQrRelink({ connectionId, onClose, onLinked }: { connect
       {isLinked ? <div className="qr-relink-state is-success" role="status"><CheckCircle2 size={22} aria-hidden="true" /><strong>Sesión vinculada</strong><span>La conexión volvió a estar operativa.</span></div> : <>
         <div className="qr-relink-frame">{qr ? <img src={qr} alt="Código QR para vincular WhatsApp" /> : <LoaderCircle className="animate-spin" size={28} aria-label="Generando código QR" />}</div>
         {error ? <p className="client-form-error" role="alert">{error}</p> : <p className="qr-relink-hint">El código se renueva solo. Esta ventana se cierra cuando el teléfono confirma la vinculación.</p>}
+        {session ? <p className="qr-relink-hint" aria-live="polite">Estado del proveedor: {session}</p> : null}
         <button type="button" className="client-button-secondary" onClick={() => void loadQr()} disabled={isLoading}><RefreshCw size={15} className={isLoading ? 'animate-spin' : undefined} aria-hidden="true" /> Generar otro código</button>
       </>}
     </aside>

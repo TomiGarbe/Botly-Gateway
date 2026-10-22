@@ -95,6 +95,11 @@ def process_incoming_webhook(payload: dict[str, Any], request_id: str) -> dict[s
     trace: dict[str, Any] = {"ingest": {"status": "ok", "at": started_at}}
     _inc("ingest_total")
     logger.info("[INBOUND][RECEIVED] webhook payload received", request_id=request_id, instance=instance, source_event=payload.get("event"))
+    try:
+        from app.services.provider_session import record_connection_update
+        record_connection_update(payload)
+    except Exception as exc:  # observability must never block the pipeline
+        logger.warning("provider_session_record_failed", instance=instance, error=str(exc))
 
     try:
         normalized = normalize_webhook(payload)

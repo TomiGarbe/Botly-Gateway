@@ -42,8 +42,16 @@ export interface ConnectionActivity {
   technical: Record<string, string>
 }
 
+export interface ProviderSession {
+  state: 'open' | 'connecting' | 'close'
+  statusReason: number | string | null
+  at: string
+}
+
 export interface ConnectionStatusSummary {
   connected: boolean
+  state?: string | null
+  providerSession?: ProviderSession | null
   lastActivityAt: string | null
   lastHeartbeatAt: string | null
 }
@@ -307,6 +315,26 @@ export async function regenerateConnectionApiKey(connectionId: string): Promise<
   return toApiKey(await gatewayRequest<ApiConnectionApiKey>(`/connections/${encodeURIComponent(connectionId)}/api-key/regenerate`, { method: 'POST' }))
 }
 
+export async function disconnectConnection(connectionId: string): Promise<{ mode: 'logout' | 'reset' }> {
+  return gatewayRequest<{ mode: 'logout' | 'reset' }>(`/connections/${encodeURIComponent(connectionId)}/disconnect`, { method: 'POST' })
+}
+
+/** Plain-language reading of Evolution's last connection.update. */
+export function describeProviderSession(session: ProviderSession | null | undefined): string | null {
+  if (!session) return null
+  const reason = session.statusReason
+  if (session.state === 'open') return 'Sesión vinculada y operativa.'
+  if (reason === 'manual_disconnect') return 'La sesión se desvinculó desde el panel. Escaneá un QR nuevo para volver a conectarla.'
+  if (reason === 401) return 'WhatsApp cerró la sesión (dispositivo eliminado desde el teléfono o sesión inválida). Desconectá y vinculá de nuevo.'
+  if (reason === 403) return 'WhatsApp rechazó la sesión de este número. Revisá que la cuenta no esté restringida.'
+  if (reason === 408) return 'El QR venció sin escanearse. Generá uno nuevo y escanealo dentro de los 20 segundos.'
+  if (reason === 428 || reason === 503) return 'Se perdió la conexión con WhatsApp; el proveedor reintenta solo.'
+  if (reason === 440) return 'La sesión se abrió en otro lugar y WhatsApp cerró esta. Desconectá y vinculá de nuevo.'
+  if (reason === 515) return 'WhatsApp pidió reiniciar la sesión tras vincular; debería quedar operativa en segundos.'
+  if (session.state === 'connecting') return 'Esperando que se escanee el QR.'
+  return reason ? `La sesión se cerró (código ${reason}).` : 'La sesión está cerrada.'
+}
+
 export async function reconnectConnection(connectionId: string): Promise<void> {
   await gatewayRequest(`/connections/${encodeURIComponent(connectionId)}/reconnect`, { method: 'POST' })
 }
@@ -324,9 +352,11 @@ export async function listConnectionActivity(connectionId: string): Promise<Conn
 }
 
 export async function getConnectionStatusSummary(connectionId: string): Promise<ConnectionStatusSummary> {
-  const payload = await gatewayRequest<{ connected: boolean; last_activity_at: string | null; last_heartbeat_at: string | null }>(`/connections/${encodeURIComponent(connectionId)}/status`)
+  const payload = await gatewayRequest<{ connected: boolean; state?: string | null; provider_session?: ProviderSession | null; last_activity_at: string | null; last_heartbeat_at: string | null }>(`/connections/${encodeURIComponent(connectionId)}/status`)
   return {
     connected: payload.connected,
+    state: payload.state ?? null,
+    providerSession: payload.provider_session ?? null,
     lastActivityAt: payload.last_activity_at,
     lastHeartbeatAt: payload.last_heartbeat_at,
   }

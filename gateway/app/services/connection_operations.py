@@ -292,6 +292,53 @@ class ConnectionOperationsService:
         save_pipeline_event(stage="connection_reconnect", status="started", instance=runtime_name, event="CONNECTION_RECONNECT")
         return {"operation": "reconnect", "provider": "evolution", "status": "requested"}
 
+    async def disconnect(self, connection_id: str) -> dict[str, str]:
+        key = self._begin_mutating_operation(connection_id, "disconnect")
+        try:
+            return await self._disconnect(connection_id)
+        finally:
+            self._finish_mutating_operation(key)
+
+    async def _disconnect(self, connection_id: str) -> dict[str, str]:
+        """Unlink the WhatsApp device so the same connection can be linked again by QR.
+
+        A healthy session logs out and keeps the provider's stored history. A
+        broken one (closed by the phone, stuck connecting) cannot log out and
+        keeps stale auth state that makes QR linking fail, so the instance is
+        recreated under the same name: Gateway keys, Core webhooks and the
+        Botly channel URL stay valid.
+        """
+        from app.adapters.evolution.errors import EvolutionError
+        from app.services import group_automatic
+
+        record = self._record(connection_id)
+        if str(record.get("provider_id") or "") != "evolution":
+            raise ConnectionOperationUnavailableError("Only Evolution WhatsApp connections can be unlinked")
+        runtime_name = self._runtime_name(connection_id)
+        records = await self._connection_manager.list_instances()
+        if not any(str(item.get("name") or item.get("instanceName") or "") == runtime_name for item in records if isinstance(item, dict)):
+            raise ConnectionOperationUnavailableError("Connection runtime is not available")
+        mode = "logout"
+        try:
+            await self._connection_manager.disconnect(runtime_name, connection_type="baileys")
+        except EvolutionError:
+            mode = "reset"
+            try:
+                await self._connection_manager.delete(runtime_name, connection_type="baileys")
+            except EvolutionError as exc:
+                if exc.status_code != 404:
+                    raise
+            await self._connection_manager.create(runtime_name, qrcode=True, connection_type="baileys")
+            await ensure_evolution_webhook(self._connection_manager, runtime_name, force_configure=True)
+        group_automatic._directories.pop(runtime_name, None)
+        self._registry.update_connection_record(connection_id, {
+            "status_state": "disconnected", "status_health": "unknown",
+            "provider_session": {"state": "close", "statusReason": "manual_disconnect", "at": _now()},
+            "updated_at": _now(),
+        })
+        save_pipeline_event(stage="connection_disconnect", status=mode, instance=runtime_name, event="CONNECTION_DISCONNECT")
+        return {"operation": "disconnect", "provider": "evolution", "status": "disconnected", "mode": mode}
+
     async def status(self, connection_id: str) -> dict[str, Any]:
         record = self._record(connection_id)
         runtime_name = self._runtime_name(connection_id)
@@ -314,6 +361,8 @@ class ConnectionOperationsService:
         connected = raw_state in {"open", "connected"}
         return {
             "connected": connected,
+            "state": raw_state or None,
+            "provider_session": record.get("provider_session"),
             "last_activity_at": record.get("last_activity_at"),
             "last_heartbeat_at": heartbeat_at if runtime is not None else record.get("last_heartbeat_at"),
         }

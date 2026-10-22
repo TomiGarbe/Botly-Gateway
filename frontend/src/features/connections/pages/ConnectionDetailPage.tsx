@@ -7,7 +7,7 @@ import { LoadingState } from '@/shared/components/LoadingState'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { Toast } from '@/shared/components/Toast'
 import { Field, Input } from '@/shared/components/FormControls'
-import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
+import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, disconnectConnection, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
 import { deleteConnection, disconnectInstagram, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { ConnectionGroups } from '../components/ConnectionGroups'
@@ -63,6 +63,8 @@ export function ConnectionDetailPage() {
   const [showKey, setShowKey] = useState(false); const [isDeleting, setIsDeleting] = useState(false); const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false); const [isRegenerateDialogOpen, setIsRegenerateDialogOpen] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false); const [isProviderDisconnectOpen, setIsProviderDisconnectOpen] = useState(false)
   const [isQrRelinkOpen, setIsQrRelinkOpen] = useState(false)
+  const [isUnlinkOpen, setIsUnlinkOpen] = useState(false)
+  const [isUnlinking, setIsUnlinking] = useState(false)
   const [metaSignupConfig, setMetaSignupConfig] = useState<MetaSignupConfig | null>(null); const [isReauthorizing, setIsReauthorizing] = useState(false)
   const [oauthToast, setOauthToast] = useState<{ tone: 'success' | 'error' | 'warning'; message: string } | null>(null)
 
@@ -141,6 +143,7 @@ export function ConnectionDetailPage() {
     void refreshWorkspace()
     window.setTimeout(() => setIsQrRelinkOpen(false), 1500)
   }
+  async function unlinkWhatsapp() { if (!connection) return; setIsUnlinking(true); try { await disconnectConnection(connection.id); setIsUnlinkOpen(false); setIsQrRelinkOpen(true); void refreshWorkspace() } catch (reason) { setIsUnlinkOpen(false); setError(reason instanceof Error ? reason.message : 'No se pudo desconectar la sesión.') } finally { setIsUnlinking(false) } }
   async function disconnectProvider() { if (!connection || connection.channel.id !== 'instagram' || connection.provider.id !== 'meta') return; setIsDisconnecting(true); try { setConnection(await disconnectInstagram(connection.id)); setNotice('La cuenta fue desconectada.') } catch { setError('No se pudo desconectar la cuenta.') } finally { setIsDisconnecting(false) } }
 
   if (isLoading) return <LoadingState label="Cargando conexión…" />
@@ -169,7 +172,7 @@ export function ConnectionDetailPage() {
         {isEditingName ? <form className="connection-name-form" onSubmit={saveName}><Field label="Nombre" required><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} required autoFocus /></Field><div><button type="button" className="client-button-secondary" onClick={() => { setName(connection.name); setIsEditingName(false) }}>Cancelar</button><button type="submit" className="client-button-primary" disabled={isSaving}>{isSaving ? 'Guardando…' : 'Guardar'}</button></div></form> : null}
         <section className="connection-section workspace-general-info"><div className="connection-section-heading"><h3>Información general</h3><button type="button" className="client-button-secondary" onClick={() => setIsEditingName((value) => !value)}><Pencil size={15} aria-hidden="true" /> Editar nombre</button></div><dl className="connection-information-list"><div><dt>Cliente</dt><dd>{connection.client?.name || 'No disponible'}</dd></div><div><dt>Canal</dt><dd>{connection.channel.displayName}</dd></div><div><dt>Provider</dt><dd>{connection.provider.displayName}</dd></div><div><dt>Estado</dt><dd><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge></dd></div><div><dt>Última actividad</dt><dd>{dateTime(statusSummary?.lastActivityAt || connection.lastActivityAt)}</dd></div></dl></section>
         <section className="connection-section connection-integration-section"><div className="connection-section-heading"><div><h3>Integración con tu bot</h3><p>Usá esta URL para que tu bot solicite el envío de mensajes por esta conexión.</p></div></div><div className="connection-endpoint"><span>API de envío</span><code>{integrationEndpoints?.messageApiUrl || 'No disponible'}</code>{integrationEndpoints ? <button type="button" className="client-button-secondary" onClick={() => void copyIntegrationUrl(integrationEndpoints.messageApiUrl)}><Clipboard size={15} aria-hidden="true" /> Copiar</button> : null}</div><p className="connection-endpoint-note">Método POST · requiere autenticación del Gateway · esta URL no incluye claves.</p></section>
-        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} onRelinkQr={isEvolution ? () => setIsQrRelinkOpen(true) : undefined} />
+        <OperationsDiagnostics connectionId={connection.id} providerId={connection.provider.id} onReconnect={reconnect} onRefreshConnection={refreshWorkspace} onManageWebhooks={() => navigate(`/connections/${connection.id}/webhooks`)} onRelinkQr={isEvolution ? () => setIsQrRelinkOpen(true) : undefined} onUnlink={isEvolution ? () => setIsUnlinkOpen(true) : undefined} />
         <ConnectionOverview connection={connection} onRefresh={() => void refreshWorkspace()} {...authorization} onDisconnect={connection.channel.id === 'instagram' && connection.provider.id === 'meta' ? () => setIsProviderDisconnectOpen(true) : undefined} />
         <section className="connection-section"><h3>Administración</h3><div className="connection-inline-actions"><button type="button" className="client-button-danger" onClick={() => setIsDeleteDialogOpen(true)} disabled={isDeleting}><Trash2 size={15} aria-hidden="true" /> Eliminar conexión</button></div></section>
       </> : null}
@@ -181,6 +184,7 @@ export function ConnectionDetailPage() {
     {isQrRelinkOpen ? <EvolutionQrRelink connectionId={connection.id} onClose={() => setIsQrRelinkOpen(false)} onLinked={handleQrLinked} /> : null}
     <ConfirmDialog isOpen={isDeleteDialogOpen} title="Eliminar conexión" description="Esta acción eliminará la conexión y su acceso al Workspace." confirmLabel="Eliminar conexión" isSubmitting={isDeleting} onCancel={() => setIsDeleteDialogOpen(false)} onConfirm={() => void removeConnection()} />
     <ConfirmDialog isOpen={isRegenerateDialogOpen} title="Regenerar API Key" description="La API Key actual dejará de ser válida. Asegurate de copiar la nueva clave al finalizar." confirmLabel="Regenerar API Key" tone="default" onCancel={() => setIsRegenerateDialogOpen(false)} onConfirm={() => { setIsRegenerateDialogOpen(false); void regenerateKey() }} />
+    <ConfirmDialog isOpen={isUnlinkOpen} title="Desconectar WhatsApp" description="Se desvincula este dispositivo de WhatsApp y el canal deja de recibir y enviar mensajes hasta que escanees un QR nuevo. Si la sesión estaba rota, la instancia se recrea con el mismo nombre: la configuración y el canal de Botly se conservan, pero el historial guardado en el proveedor se pierde (lo ya importado a Botly queda)." confirmLabel="Desconectar y mostrar QR" submittingLabel="Desconectando…" isSubmitting={isUnlinking} onCancel={() => { if (!isUnlinking) setIsUnlinkOpen(false) }} onConfirm={() => void unlinkWhatsapp()} />
     <ConfirmDialog isOpen={isProviderDisconnectOpen} title="Desconectar cuenta" description="La cuenta dejara de recibir y enviar mensajes hasta que la conectes nuevamente." confirmLabel="Desconectar" isSubmitting={isDisconnecting} onCancel={() => { if (!isDisconnecting) setIsProviderDisconnectOpen(false) }} onConfirm={() => { setIsProviderDisconnectOpen(false); void disconnectProvider() }} />
   </section>
 }

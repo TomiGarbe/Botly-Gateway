@@ -43,9 +43,10 @@ interface Props {
   onRefreshConnection: () => Promise<void>
   onManageWebhooks: () => void
   onRelinkQr?: () => void
+  onUnlink?: () => void
 }
 
-export function OperationsDiagnostics({ connectionId, providerId, onReconnect, onRefreshConnection, onManageWebhooks, onRelinkQr }: Props) {
+export function OperationsDiagnostics({ connectionId, providerId, onReconnect, onRefreshConnection, onManageWebhooks, onRelinkQr, onUnlink }: Props) {
   const [data, setData] = useState<ConnectionDiagnostics | null>(null)
   const [refreshing, setRefreshing] = useState(true)
   const [running, setRunning] = useState<string | null>(null)
@@ -151,6 +152,7 @@ export function OperationsDiagnostics({ connectionId, providerId, onReconnect, o
         {canReconnect ? operationButton('reconnect', 'Reconectar', RotateCw, () => void reconnect(), 'action') : null}
         {/* Reiniciar no alcanza si la sesión se cerró desde el teléfono: hay que volver a escanear. */}
         {!isMeta && onRelinkQr && runtimeCheck && runtimeCheck.status !== 'healthy' ? <button type="button" className="operation-button operation-button-diagnostic" onClick={onRelinkQr}><QrCode size={16} aria-hidden="true" /><span>Vincular con QR</span></button> : null}
+        {!isMeta && onUnlink ? <button type="button" className="operation-button operation-button-diagnostic" onClick={onUnlink}><Unplug size={16} aria-hidden="true" /><span>Desconectar y volver a vincular</span></button> : null}
       </div>
       <button type="button" className="connection-text-action" onClick={onManageWebhooks}>Administrar webhooks</button>
     </section>

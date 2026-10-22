@@ -26,3 +26,14 @@ describe('listConnectionWebhookActivity', () => {
     expect(gatewayRequest).toHaveBeenCalledWith('/connections/connection-1/webhook/activity?limit=100')
   })
 })
+
+describe('describeProviderSession', () => {
+  it('explains why a WhatsApp session is not linked', async () => {
+    const { describeProviderSession } = await import('./connectionOperationsApi')
+    expect(describeProviderSession(null)).toBeNull()
+    expect(describeProviderSession({ state: 'close', statusReason: 401, at: '' })).toMatch(/cerró la sesión/)
+    expect(describeProviderSession({ state: 'close', statusReason: 408, at: '' })).toMatch(/QR venció/)
+    expect(describeProviderSession({ state: 'close', statusReason: 'manual_disconnect', at: '' })).toMatch(/desde el panel/)
+    expect(describeProviderSession({ state: 'connecting', statusReason: null, at: '' })).toBe('Esperando que se escanee el QR.')
+  })
+})

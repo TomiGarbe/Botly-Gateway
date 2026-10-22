@@ -720,6 +720,22 @@ async def regenerate_connection_api_key(connection_id: str):
         raise HTTPException(status_code=404, detail="Connection not found")
 
 
+@router.post("/{connection_id}/disconnect")
+async def disconnect_connection(connection_id: str):
+    from app.adapters.evolution.errors import EvolutionError
+
+    try:
+        result = await _operations.disconnect(connection_id)
+        return {"ok": True, **result}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    except ConnectionOperationUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except EvolutionError as exc:
+        logger.error("connection_disconnect_failed", connection_id=connection_id, error=str(exc))
+        raise HTTPException(status_code=502, detail="El proveedor no pudo desvincular la sesión. Intentá nuevamente.")
+
+
 @router.post("/{connection_id}/reconnect")
 async def reconnect_connection(connection_id: str):
     try:
