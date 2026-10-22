@@ -127,7 +127,7 @@ export function loginWithFacebook(configId: string): Promise<string> {
 }
 
 export function qrSource(payload: { qrcode?: { base64?: string; code?: string }; base64?: string }): string | null {
-  const value = payload.qrcode?.base64 || payload.base64 || payload.qrcode?.code
+  const value = payload.qrcode?.base64 || payload.base64  // `code` is the raw QR text, not an image
   if (!value) return null
   return value.startsWith('data:') ? value : `data:image/png;base64,${value}`
 }

@@ -69,3 +69,12 @@ def test_connection_updates_are_recorded_only_when_they_change(registry):
     session = registry.connection_record_by_id("conn-a")["provider_session"]
     assert (session["state"], session["statusReason"]) == ("close", 401)
     assert record_connection_update({"event": "qrcode.updated", "instance": "runtime-a", "data": {}}, registry=registry) is False
+
+
+def test_instances_owned_by_another_gateway_cannot_be_unlinked(registry, monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "evolution_excluded_instances", "runtime-a")
+    manager = FakeManager()
+    with pytest.raises(ops.ConnectionOperationUnavailableError, match="otro Gateway"):
+        asyncio.run(ops.ConnectionOperationsService(manager, registry).disconnect("conn-a"))
+    assert manager.calls == []

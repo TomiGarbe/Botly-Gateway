@@ -146,3 +146,25 @@ def test_settings_channels_api_reads_and_updates_persisted_state(monkeypatch, tm
     enabled = client.patch("/settings/channels", json={"channels": {"instagram": {"enabled": True}}})
     assert enabled.status_code == 200
     assert enabled.json()["channels"]["instagram"]["enabled"] is True
+
+
+def test_evolution_qr_reports_open_sessions_and_foreign_instances(tmp_path, monkeypatch) -> None:
+    from app.core.config import get_settings
+    from app.services.connections import ConnectionManagedElsewhereError
+
+    settings = GatewaySettingsService(tmp_path / "gateway_settings.json")
+    registry = ConnectionRegistry(tmp_path / "connection_registry.json")
+    client = ClientService(registry).create_client("Global Tech")
+    runtime = _EvolutionRuntime()
+    service = ConnectionService(runtime, registry, settings)
+    pending = service.create_connection(client_id=client.id, channel="whatsapp", name="Ventas", provider="evolution")
+    asyncio.run(service.start_evolution_connection(pending.id))
+
+    async def already_open(name, *, connection_type=None):
+        return {"instance": {"instanceName": name, "state": "open"}}
+    monkeypatch.setattr(runtime, "connect", already_open)
+    assert asyncio.run(service.evolution_qr(pending.id)) == {"connected": True}
+
+    monkeypatch.setattr(get_settings(), "evolution_excluded_instances", pending.technical["legacy_instance_name"])
+    with pytest.raises(ConnectionManagedElsewhereError):
+        asyncio.run(service.evolution_qr(pending.id))

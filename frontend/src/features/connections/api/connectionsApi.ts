@@ -85,8 +85,10 @@ export async function createConnection(input: CreateConnectionInput): Promise<Co
   return toConnection(payload)
 }
 
-export async function getConnectionQr(connectionId: string): Promise<{ qrcode?: { base64?: string; code?: string } }> {
-  return gatewayRequest<{ qrcode?: { base64?: string; code?: string } }>(`/connections/${encodeURIComponent(connectionId)}/qr`)
+export type ConnectionQrPayload = { qrcode?: { base64?: string; code?: string }; base64?: string; connected?: boolean }
+
+export async function getConnectionQr(connectionId: string): Promise<ConnectionQrPayload> {
+  return gatewayRequest<ConnectionQrPayload>(`/connections/${encodeURIComponent(connectionId)}/qr`)
 }
 
 export async function updateConnectionName(connectionId: string, name: string): Promise<Connection> {

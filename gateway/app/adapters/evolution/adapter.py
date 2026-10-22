@@ -65,6 +65,14 @@ class EvolutionAdapter:
     async def get_instance_status(self, instance_name: str) -> dict:
         return await self._client.request("GET", f"/instance/connectionState/{instance_name}", retries=1)
 
+    @staticmethod
+    def managed_elsewhere(instance_name: str) -> bool:
+        """Instances owned by another Gateway sharing this Evolution engine."""
+        settings = get_settings()
+        scope = settings.evolution_instance_scope.strip()
+        excluded = {name.strip() for name in settings.evolution_excluded_instances.split(",") if name.strip()}
+        return instance_name in excluded or bool(scope and instance_name != scope)
+
     async def list_instances(self) -> list:
         records = await self._client.request("GET", "/instance/fetchInstances", retries=1)
         scope = get_settings().evolution_instance_scope.strip()

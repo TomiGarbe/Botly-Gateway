@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.requests import CoreChannelBindingRequest, ConnectionQuickMessageRequest, ConnectionWebhookRequest, CreateConnectionRequest, InstagramOutboundMessageRequest, UpdateConnectionRequest
 from app.services.connections import (
+    ConnectionManagedElsewhereError,
     ChannelDisabledError,
     ConnectionClientNotFoundError,
     ConnectionNotFoundError,
@@ -599,6 +600,8 @@ async def get_connection_qr(connection_id: str):
         return await _service.evolution_qr(connection_id)
     except ConnectionNotFoundError:
         raise HTTPException(status_code=404, detail="Connection not found")
+    except ConnectionManagedElsewhereError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except UnsupportedConnectionProviderError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (ProviderNotImplementedError, ProviderDisabledError) as exc:

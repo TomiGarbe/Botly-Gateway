@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+from app.adapters.evolution.adapter import EvolutionAdapter
 from app.connections import ConnectionManager, get_connection_manager
 from app.core.config import get_settings
 from app.providers.whatsapp_official import get_official_whatsapp_provider
@@ -315,6 +316,8 @@ class ConnectionOperationsService:
         if str(record.get("provider_id") or "") != "evolution":
             raise ConnectionOperationUnavailableError("Only Evolution WhatsApp connections can be unlinked")
         runtime_name = self._runtime_name(connection_id)
+        if EvolutionAdapter.managed_elsewhere(runtime_name):
+            raise ConnectionOperationUnavailableError("Esta conexión la administra otro Gateway; desconectala desde ese panel.")
         records = await self._connection_manager.list_instances()
         if not any(str(item.get("name") or item.get("instanceName") or "") == runtime_name for item in records if isinstance(item, dict)):
             raise ConnectionOperationUnavailableError("Connection runtime is not available")
@@ -362,6 +365,7 @@ class ConnectionOperationsService:
         return {
             "connected": connected,
             "state": raw_state or None,
+            "managed_elsewhere": EvolutionAdapter.managed_elsewhere(runtime_name),
             "provider_session": record.get("provider_session"),
             "last_activity_at": record.get("last_activity_at"),
             "last_heartbeat_at": heartbeat_at if runtime is not None else record.get("last_heartbeat_at"),

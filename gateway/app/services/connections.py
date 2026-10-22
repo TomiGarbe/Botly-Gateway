@@ -57,6 +57,10 @@ class UnsupportedConnectionChannelError(ValueError):
     pass
 
 
+class ConnectionManagedElsewhereError(ValueError):
+    pass
+
+
 class UnsupportedConnectionProviderError(ValueError):
     pass
 
@@ -542,7 +546,16 @@ class ConnectionService:
         if str(record.get("provider_id") or "") != "evolution":
             raise UnsupportedConnectionProviderError("This connection does not use Evolution")
         self._gateway_settings.require_provider_available("evolution")
-        return await self._connection_manager.connect(self._runtime_name(record), connection_type="baileys")
+        from app.adapters.evolution.adapter import EvolutionAdapter
+
+        runtime = self._runtime_name(record)
+        if EvolutionAdapter.managed_elsewhere(runtime):
+            raise ConnectionManagedElsewhereError("Esta conexión la administra otro Gateway; vinculala desde ese panel.")
+        result = await self._connection_manager.connect(runtime, connection_type="baileys")
+        state = ((result or {}).get("instance") or {}).get("state") if isinstance(result, dict) else None
+        if state == "open":
+            return {"connected": True}  # an open session has no QR to show
+        return result
 
     async def update_connection(self, connection_id: str, *, name: str | None = None) -> Connection:
         record = self._registry.connection_record_by_id(connection_id)
