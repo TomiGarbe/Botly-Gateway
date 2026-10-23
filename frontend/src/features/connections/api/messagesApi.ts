@@ -13,6 +13,7 @@ export interface TimelineMessage {
   status: string | null
   sender: string | null
   recipient: string | null
+  contactName?: string | null
   media: { id?: string; kind?: string; mimeType?: string; fileName?: string; caption?: string; url?: string } | null
   provider: string | null
   providerMessageId: string | null

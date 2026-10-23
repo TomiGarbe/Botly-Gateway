@@ -1039,9 +1039,11 @@
   .connections-filter button.is-active span { @apply bg-zinc-700 text-zinc-200; }
   .connections-empty-filter { @apply mt-6 text-sm text-zinc-500; }
   .workspace-problem { @apply mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-red-900/70 bg-red-950/20 p-4; }
-  .workspace-problem-info { @apply border-zinc-800 bg-zinc-900/40; }
+  .workspace-problem.is-info { @apply border-zinc-800 bg-zinc-900/40; }
+  .workspace-problem.is-warning { @apply border-amber-900/70 bg-amber-950/20; }
+  .workspace-problem.is-warning > svg { @apply text-amber-300; }
   .workspace-problem > svg { @apply shrink-0 text-red-300; }
-  .workspace-problem-info > svg { @apply text-zinc-400; }
+  .workspace-problem.is-info > svg { @apply text-zinc-400; }
   .workspace-problem div { @apply min-w-0 flex-1; }
   .workspace-problem strong { @apply block text-sm font-medium text-zinc-100; }
   .workspace-problem p { @apply mb-0 mt-1 text-sm text-zinc-400; }
@@ -1078,4 +1080,70 @@
 @media (max-width: 640px) {
   .connection-card-footer > span + span::before { content: none; }
   .connection-card-footer { @apply gap-x-3 gap-y-1; }
+}
+
+/* Mensajes: lista de conversaciones + chat; el detalle técnico es un panel lateral. */
+@layer components {
+  .chat-layout.workspace-message-layout { @apply grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]; }
+  .chat-conversations { @apply flex min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/60; }
+  .chat-conversations-search { @apply m-2 flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 text-zinc-500 focus-within:border-zinc-600; }
+  .chat-conversations-search input { @apply min-h-9 w-full border-0 bg-transparent p-0 text-sm text-zinc-100 shadow-none outline-none ring-0 placeholder:text-zinc-600; }
+  .chat-conversations ul { @apply m-0 h-[min(43rem,66dvh)] list-none overflow-y-auto overscroll-contain p-1 pt-0; }
+  .chat-conversations li > button { @apply flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-zinc-900; }
+  .chat-conversations li > button.is-active { @apply bg-zinc-800/80; }
+  .chat-avatar { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-sm font-medium text-zinc-300; }
+  .chat-avatar.is-all { @apply bg-blue-950/70 text-blue-300; }
+  .chat-conversation-copy { @apply min-w-0 flex-1; }
+  .chat-conversation-copy strong { @apply block truncate text-sm font-medium text-zinc-100; }
+  .chat-conversation-copy small { @apply block truncate text-xs text-zinc-500; }
+  .chat-conversation-copy .chat-conversation-number { @apply text-zinc-400; }
+  .chat-conversation-top { @apply flex items-baseline gap-2; }
+  .chat-conversation-top strong { @apply flex-1; }
+  .chat-conversation-top time { @apply shrink-0 text-[11px] tabular-nums text-zinc-500; }
+  .chat-conversation-failed { @apply flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-900/80 px-1.5 text-[11px] font-medium text-red-100; }
+  .chat-conversations-empty { @apply px-3 py-6 text-center text-sm text-zinc-500; }
+  .chat-header { @apply flex min-h-14 items-center gap-2 border-b border-zinc-800 px-4 py-2.5; }
+  .chat-header strong { @apply block truncate text-sm font-medium text-zinc-100; }
+  .chat-header small { @apply block truncate text-xs text-zinc-500; }
+  .chat-header > div { @apply min-w-0; }
+  .chat-back { @apply -ml-2 hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100; }
+  .chat-layout .chat-thread { @apply h-[min(36rem,58dvh)]; }
+}
+
+@media (min-width: 1024px) {
+  .chat-layout > .workspace-message-detail { @apply hidden; }
+  .chat-layout.has-selection > .workspace-message-detail { @apply fixed bottom-0 right-0 top-0 z-50 block w-[min(30rem,100vw)] overflow-y-auto rounded-none border-y-0 border-r-0 bg-zinc-950 shadow-2xl shadow-black; animation: ui-drawer-in 200ms ease-out; }
+  .chat-layout.has-selection > .detail-sheet-backdrop { @apply fixed inset-0 z-40 block bg-black/50; animation: ui-fade-in 150ms ease-out; }
+  .chat-layout .detail-sheet-close { @apply inline-flex; }
+  .chat-layout .workspace-message-detail-heading { @apply pr-12; }
+}
+@keyframes ui-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+@media (max-width: 1023px) {
+  .chat-layout.is-pane-list > .chat-panel, .chat-layout.is-pane-chat > .chat-conversations { @apply hidden; }
+  .chat-back { @apply inline-flex; }
+  .chat-conversations ul { @apply h-auto max-h-[65dvh]; }
+}
+
+@layer components {
+  .chat-conversations-search input { @apply !border-0 !bg-transparent !px-0 !shadow-none !ring-0; }
+}
+
+@layer components {
+  .connections-view button { @apply px-2.5; }
+  .connections-view button span.sr-only { @apply bg-transparent p-0; }
+  .connections-client-group { @apply mt-7; }
+  .connections-client-group h3 { @apply m-0 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm font-medium text-zinc-200; }
+  .connections-client-group h3 button { @apply text-zinc-100 hover:underline; }
+  .connections-client-group h3 span { @apply text-xs font-normal text-zinc-500; }
+  .connections-client-group .connections-page-grid { @apply mt-3; }
+}
+@media (max-width: 640px) {
+  .connections-filter.connections-view { @apply w-auto; }
+}
+@media (max-width: 640px) {
+  .connections-toolbar > .connections-filter:not(.connections-view) { @apply w-auto flex-1; }
+}
+@media (max-width: 640px) {
+  .connections-filter.connections-view { @apply hidden; }
 }

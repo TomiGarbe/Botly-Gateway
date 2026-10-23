@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowDownLeft, ArrowUpRight, Check, CheckCheck, CircleAlert, FileText, Image, MessageCircle, Mic, RefreshCw, Search, SendHorizontal, SlidersHorizontal, UserRound, Video, X } from 'lucide-react'
+import { ArrowDown, ArrowDownLeft, ArrowLeft, Users, ArrowUpRight, Check, CheckCheck, CircleAlert, FileText, Image, MessageCircle, Mic, RefreshCw, Search, SendHorizontal, SlidersHorizontal, UserRound, Video, X } from 'lucide-react'
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { TimelineMessage } from '../api/messagesApi'
 import { listConnectionTimelineMessages, sendConnectionText } from '../api/messagesApi'
@@ -19,6 +19,28 @@ function statusLabel(status: string | null): string | null { if (!status) return
 function rangeStart(range: DateRange): number | null { const now = Date.now(); if (range === 'today') { const today = new Date(); today.setHours(0, 0, 0, 0); return today.getTime() }; if (range === '24h') return now - 86400000; if (range === '7d') return now - 604800000; if (range === '30d') return now - 2592000000; return null }
 /** Del lado del Gateway, la contraparte de un entrante es quien lo envía y la de un saliente quien lo recibe. */
 function counterpart(message: TimelineMessage): string | null { return message.direction === 'inbound' ? message.sender : message.recipient }
+/** "5491122334455@s.whatsapp.net" → "+5491122334455"; groups and other IDs keep a readable form. */
+export function contactLabel(value: string | null): string {
+  if (!value) return 'Desconocido'
+  const [local, domain = ''] = value.split('@')
+  if (domain === 'g.us') return 'Grupo'
+  return /^\d{8,15}$/.test(local) ? `+${local}` : local
+}
+export interface Conversation { contact: string; name: string | null; last: TimelineMessage; count: number; failed: number }
+/** One row per counterpart, most recent first; the name is the latest pushName the contact sent. */
+export function buildConversations(messages: TimelineMessage[]): Conversation[] {
+  const byContact = new Map<string, Conversation>()
+  for (const message of [...messages].sort((left, right) => right.timestamp - left.timestamp)) {
+    const contact = counterpart(message)
+    if (!contact) continue
+    const current = byContact.get(contact) || { contact, name: null, last: message, count: 0, failed: 0 }
+    current.count += 1
+    if (message.status?.toLowerCase() === 'failed') current.failed += 1
+    if (!current.name && message.contactName) current.name = message.contactName
+    byContact.set(contact, current)
+  }
+  return [...byContact.values()]
+}
 function dayKey(value: number): string { const date = new Date(value); return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` }
 function dayLabel(value: number): string {
   const date = new Date(value); const today = new Date(); const yesterday = new Date(); yesterday.setDate(today.getDate() - 1)
@@ -52,6 +74,7 @@ function IdentifierList({ message }: { message: TimelineMessage }) {
 export function MessagesWorkspace({ connectionId, messageId }: { connectionId: string; messageId?: string | null }) {
   const [messages, setMessages] = useState<TimelineMessage[]>([]); const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
   const [search, setSearch] = useState(''); const [filtersOpen, setFiltersOpen] = useState(false); const [direction, setDirection] = useState<'all' | TimelineMessage['direction']>('all'); const [status, setStatus] = useState('all'); const [kind, setKind] = useState('all'); const [dateRange, setDateRange] = useState<DateRange>('all'); const [contact, setContact] = useState('all')
+  const [pane, setPane] = useState<'list' | 'chat'>('list'); const [conversationQuery, setConversationQuery] = useState('')
   const [recipient, setRecipient] = useState(''); const [text, setText] = useState(''); const [isLoading, setIsLoading] = useState(true); const [isSending, setIsSending] = useState(false); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null)
   const threadRef = useRef<HTMLDivElement>(null); const stickToBottom = useRef(true); const [hasNewBelow, setHasNewBelow] = useState(false)
   const load = useCallback(async (quiet = false) => {
@@ -61,8 +84,13 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
   useEffect(() => { void load() }, [load])
   useVisiblePolling(() => { void load(true) }, 5000)
   const availableStatuses = useMemo(() => [...new Set(messages.map((message) => message.status).filter((value): value is string => Boolean(value)))].sort(), [messages])
-  // Contactos ordenados por actividad reciente, para el filtro.
-  const availableContacts = useMemo(() => [...new Set([...messages].sort((left, right) => right.timestamp - left.timestamp).map(counterpart).filter((value): value is string => Boolean(value)))], [messages])
+  const conversations = useMemo(() => buildConversations(messages), [messages])
+  const names = useMemo(() => new Map(conversations.map((item) => [item.contact, item.name])), [conversations])
+  const visibleConversations = useMemo(() => {
+    const query = normalized(conversationQuery)
+    return query ? conversations.filter((item) => [item.name, contactLabel(item.contact), item.last.text].some((value) => normalized(value).includes(query))) : conversations
+  }, [conversationQuery, conversations])
+  const nameOf = (value: string | null) => (value && names.get(value)) || contactLabel(value)
   const availableKinds = useMemo(() => [...new Set(messages.map((message) => message.kind).filter(Boolean))].sort(), [messages])
   const visibleMessages = useMemo(() => {
     const query = normalized(search); const start = rangeStart(dateRange)
@@ -77,7 +105,7 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
     }).sort((left, right) => left.timestamp - right.timestamp)
   }, [contact, dateRange, direction, kind, messageId, messages, search, status])
   const selectedMessage = visibleMessages.find((message) => message.id === selectedMessageId) || null
-  const activeFilterCount = [direction !== 'all', status !== 'all', kind !== 'all', dateRange !== 'all', contact !== 'all'].filter(Boolean).length
+  const activeFilterCount = [direction !== 'all', status !== 'all', kind !== 'all', dateRange !== 'all'].filter(Boolean).length
   const lastMessageId = visibleMessages[visibleMessages.length - 1]?.id
 
   // Por defecto se responde a la última persona que escribió; el operador puede cambiarlo.
@@ -97,8 +125,9 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
   function handleScroll() { const thread = threadRef.current; if (!thread) return; stickToBottom.current = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80; if (stickToBottom.current) setHasNewBelow(false) }
 
   function selectMessage(message: TimelineMessage) { setSelectedMessageId(message.id); const contact = counterpart(message); if (contact) setRecipient(contact) }
-  function clearFilters() { setSearch(''); setDirection('all'); setStatus('all'); setKind('all'); setDateRange('all'); setContact('all') }
+  function clearFilters() { setSearch(''); setDirection('all'); setStatus('all'); setKind('all'); setDateRange('all') }
   function focusContact(value: string | null) { setContact(value || 'all'); if (value) setRecipient(value); setSelectedMessageId(null); stickToBottom.current = true }
+  function openConversation(value: string | null) { focusContact(value); setPane('chat') }
   async function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault(); const target = recipient.trim()
     if (!target) return setError('Ingresá el identificador del destinatario.')
@@ -115,9 +144,26 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
   return <section className="connection-section workspace-messages">
     <div className="connection-section-heading"><div><h3>Mensajes</h3><p>Conversación de esta conexión. Tocá un mensaje para ver su evidencia técnica.</p></div><div className="connection-inline-actions workspace-message-actions"><button type="button" className="client-button-secondary" onClick={() => void load()} disabled={isLoading}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} /><Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
-    <div className="workspace-message-controls"><div className="workspace-message-toolbar"><label className="workspace-message-search"><Search size={17} aria-hidden="true" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar mensaje, ID o correlación…" aria-label="Buscar mensajes" /></label><button type="button" className={`client-button-secondary workspace-message-filter-toggle ${filtersOpen ? 'is-active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={15} aria-hidden="true" /> Filtros{activeFilterCount ? ` · ${activeFilterCount}` : ''}</button></div>{contact !== 'all' ? <div className="workspace-message-active-filters"><span>Conversación con</span><button type="button" onClick={() => focusContact(null)} aria-label={`Quitar filtro de contacto ${contact}`}><UserRound size={12} aria-hidden="true" /> {contact} <X size={12} aria-hidden="true" /></button></div> : null}{filtersOpen ? <section className="workspace-message-filter-panel" aria-label="Filtros de mensajes"><div className="workspace-message-filter-fields"><label><span>Contacto</span><Select value={contact} onChange={(event) => focusContact(event.target.value === 'all' ? null : event.target.value)}><option value="all">Todos</option>{availableContacts.map((value) => <option key={value} value={value}>{value}</option>)}</Select></label><label><span>Dirección</span><Select value={direction} onChange={(event) => setDirection(event.target.value as typeof direction)}><option value="all">Todas</option><option value="inbound">Entrantes</option><option value="outbound">Salientes</option></Select></label><label><span>Estado</span><Select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option>{availableStatuses.map((value) => <option key={value} value={value}>{statusLabel(value) || value}</option>)}</Select></label><label><span>Tipo</span><Select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">Todos</option>{availableKinds.map((value) => <option key={value} value={value}>{value}</option>)}</Select></label><label><span>Fecha</span><Select value={dateRange} onChange={(event) => setDateRange(event.target.value as DateRange)}><option value="all">Todas</option><option value="today">Hoy</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option></Select></label></div><button type="button" className="workspace-message-clear-filters" onClick={clearFilters}>Limpiar filtros</button></section> : null}</div>
-    <div className={`workspace-message-layout chat-layout${selectedMessage ? ' has-selection' : ''}`}>
+    <div className="workspace-message-controls"><div className="workspace-message-toolbar"><label className="workspace-message-search"><Search size={17} aria-hidden="true" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar mensaje, ID o correlación…" aria-label="Buscar mensajes" /></label><button type="button" className={`client-button-secondary workspace-message-filter-toggle ${filtersOpen ? 'is-active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={15} aria-hidden="true" /> Filtros{activeFilterCount ? ` · ${activeFilterCount}` : ''}</button></div>{filtersOpen ? <section className="workspace-message-filter-panel" aria-label="Filtros de mensajes"><div className="workspace-message-filter-fields"><label><span>Dirección</span><Select value={direction} onChange={(event) => setDirection(event.target.value as typeof direction)}><option value="all">Todas</option><option value="inbound">Entrantes</option><option value="outbound">Salientes</option></Select></label><label><span>Estado</span><Select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option>{availableStatuses.map((value) => <option key={value} value={value}>{statusLabel(value) || value}</option>)}</Select></label><label><span>Tipo</span><Select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">Todos</option>{availableKinds.map((value) => <option key={value} value={value}>{value}</option>)}</Select></label><label><span>Fecha</span><Select value={dateRange} onChange={(event) => setDateRange(event.target.value as DateRange)}><option value="all">Todas</option><option value="today">Hoy</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option></Select></label></div><button type="button" className="workspace-message-clear-filters" onClick={clearFilters}>Limpiar filtros</button></section> : null}</div>
+    <div className={`workspace-message-layout chat-layout is-pane-${pane}${selectedMessage ? ' has-selection' : ''}`}>
+      <nav className="chat-conversations" aria-label="Conversaciones">
+        <label className="chat-conversations-search"><Search size={15} aria-hidden="true" /><input type="search" value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder="Buscar contacto" aria-label="Buscar conversaciones" /></label>
+        <ul>
+          <li><button type="button" className={contact === 'all' ? 'is-active' : ''} onClick={() => openConversation(null)}><span className="chat-avatar is-all" aria-hidden="true"><Users size={15} /></span><span className="chat-conversation-copy"><strong>Todas las conversaciones</strong><small>{messages.length} mensajes · {conversations.length} contactos</small></span></button></li>
+          {visibleConversations.map((item) => <li key={item.contact}><button type="button" className={contact === item.contact ? 'is-active' : ''} onClick={() => openConversation(item.contact)}>
+            <span className="chat-avatar" aria-hidden="true">{(item.name || contactLabel(item.contact)).replace('+', '').slice(0, 1).toUpperCase()}</span>
+            <span className="chat-conversation-copy">
+              <span className="chat-conversation-top"><strong>{item.name || contactLabel(item.contact)}</strong><time dateTime={new Date(item.last.timestamp).toISOString()}>{dayKey(item.last.timestamp) === dayKey(Date.now()) ? time(item.last.timestamp) : new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'short' }).format(new Date(item.last.timestamp))}</time></span>
+              {item.name ? <small className="chat-conversation-number">{contactLabel(item.contact)}</small> : null}
+              <small>{item.last.direction === 'outbound' ? 'Vos: ' : ''}{contentPreview(item.last)}</small>
+            </span>
+            {item.failed ? <span className="chat-conversation-failed" aria-label={`${item.failed} sin enviar`}>{item.failed}</span> : null}
+          </button></li>)}
+          {visibleConversations.length === 0 && !isLoading ? <li className="chat-conversations-empty">{conversations.length ? 'Ningún contacto coincide.' : 'Todavía no hay conversaciones.'}</li> : null}
+        </ul>
+      </nav>
       <section className="chat-panel" aria-label="Conversación">
+        <header className="chat-header"><button type="button" className="chat-back" onClick={() => setPane('list')} aria-label="Volver a las conversaciones"><ArrowLeft size={18} aria-hidden="true" /></button>{contact === 'all' ? <div><strong>Todas las conversaciones</strong><small>{visibleMessages.length} mensajes</small></div> : <div><strong>{nameOf(contact)}</strong><small>{names.get(contact) ? contactLabel(contact) : `${visibleMessages.length} mensajes`}</small></div>}</header>
         <div ref={threadRef} className="chat-thread" onScroll={handleScroll} aria-live="polite">
           {isLoading ? <LoadingState label="Cargando mensajes…" lines={4} /> : null}
           {!isLoading && visibleMessages.length === 0 ? <EmptyState icon={MessageCircle} title="No encontramos mensajes." description={activeFilterCount || search ? 'Probá ajustar o limpiar los filtros.' : 'Enviá un mensaje de prueba para verificar esta conexión.'} /> : null}
@@ -128,7 +174,7 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
             return <div key={message.id} className="chat-item">
               {showDay ? <div className="chat-day"><span>{dayLabel(message.timestamp)}</span></div> : null}
               <button type="button" className={`chat-bubble is-${message.direction}${isFailed ? ' is-failed' : ''}${selectedMessage?.id === message.id ? ' is-selected' : ''}`} onClick={() => selectMessage(message)} aria-pressed={selectedMessage?.id === message.id}>
-                {showContact && messageContact ? <span className="chat-contact">{message.direction === 'outbound' ? `Para ${messageContact}` : messageContact}</span> : null}
+                {showContact && messageContact ? <span className="chat-contact">{message.direction === 'outbound' ? `Para ${nameOf(messageContact)}` : nameOf(messageContact)}</span> : null}
                 {message.media ? <span className="chat-media">{typeIcon(message.kind)}<span>{message.media.fileName || `Archivo ${message.kind}`}</span></span> : null}
                 {message.text || !message.media ? <span className="chat-text">{message.text || contentPreview(message)}</span> : null}
                 <span className="chat-meta"><time dateTime={new Date(message.timestamp).toISOString()}>{time(message.timestamp)}</time>{message.direction === 'outbound' ? <BubbleStatus status={message.status} /> : null}</span>
@@ -147,7 +193,7 @@ export function MessagesWorkspace({ connectionId, messageId }: { connectionId: s
         </form>
       </section>
       {selectedMessage ? <div className="detail-sheet-backdrop" aria-hidden="true" onClick={() => setSelectedMessageId(null)} /> : null}
-      <section className="workspace-message-detail" aria-label="Detalle de mensaje">{!selectedMessage ? <EmptyState icon={MessageCircle} title="Seleccioná un mensaje" description="Vas a ver su contenido, estado, identificadores y payload estructurado." /> : <><button type="button" className="detail-sheet-close" onClick={() => setSelectedMessageId(null)} aria-label="Cerrar detalle"><X size={18} aria-hidden="true" /></button><div className="workspace-message-detail-heading"><div><span className={`workspace-message-direction workspace-message-direction-${selectedMessage.direction}`}>{selectedMessage.direction === 'inbound' ? <ArrowDownLeft size={16} aria-hidden="true" /> : <ArrowUpRight size={16} aria-hidden="true" />}{selectedMessage.direction === 'inbound' ? 'Entrante' : 'Saliente'}</span><h4>{selectedMessage.kind}</h4><time dateTime={new Date(selectedMessage.timestamp).toISOString()}>{dateTime(selectedMessage.timestamp)}</time></div><MessageStatus status={selectedMessage.status} /></div>{counterpart(selectedMessage) ? <button type="button" className="client-button-secondary chat-focus-contact" onClick={() => focusContact(contact === 'all' ? counterpart(selectedMessage) : null)}><UserRound size={15} aria-hidden="true" /> {contact === 'all' ? `Ver solo la conversación con ${counterpart(selectedMessage)}` : 'Ver mensajes de todos los contactos'}</button> : null}<section className="workspace-message-detail-section"><h4>Contenido</h4>{selectedMessage.media ? <div className="workspace-media-summary">{typeIcon(selectedMessage.kind)}<span>{selectedMessage.media.fileName || `Archivo ${selectedMessage.kind}`}</span></div> : null}<p>{contentPreview(selectedMessage)}</p></section><section className="workspace-message-detail-section"><h4>Datos del mensaje</h4><dl className="workspace-message-identifiers"><div><dt>Dirección</dt><dd>{selectedMessage.direction === 'inbound' ? 'Entrante' : 'Saliente'}</dd></div><div><dt>Tipo</dt><dd>{selectedMessage.kind}</dd></div>{selectedMessage.sender ? <div><dt>Remitente</dt><dd>{selectedMessage.sender}</dd></div> : null}{selectedMessage.recipient ? <div><dt>Destinatario</dt><dd>{selectedMessage.recipient}</dd></div> : null}</dl></section><IdentifierList message={selectedMessage} /><section className="workspace-message-detail-section"><h4>Payload</h4><SafeJsonViewer value={selectedMessage.payload} emptyLabel="No hay payload disponible para este mensaje." /></section></>}</section>
+      <section className="workspace-message-detail" aria-label="Detalle de mensaje">{!selectedMessage ? <EmptyState icon={MessageCircle} title="Seleccioná un mensaje" description="Vas a ver su contenido, estado, identificadores y payload estructurado." /> : <><button type="button" className="detail-sheet-close" onClick={() => setSelectedMessageId(null)} aria-label="Cerrar detalle"><X size={18} aria-hidden="true" /></button><div className="workspace-message-detail-heading"><div><span className={`workspace-message-direction workspace-message-direction-${selectedMessage.direction}`}>{selectedMessage.direction === 'inbound' ? <ArrowDownLeft size={16} aria-hidden="true" /> : <ArrowUpRight size={16} aria-hidden="true" />}{selectedMessage.direction === 'inbound' ? 'Entrante' : 'Saliente'}</span><h4>{selectedMessage.kind}</h4><time dateTime={new Date(selectedMessage.timestamp).toISOString()}>{dateTime(selectedMessage.timestamp)}</time></div><MessageStatus status={selectedMessage.status} /></div>{counterpart(selectedMessage) ? <button type="button" className="client-button-secondary chat-focus-contact" onClick={() => focusContact(contact === 'all' ? counterpart(selectedMessage) : null)}><UserRound size={15} aria-hidden="true" /> {contact === 'all' ? `Ver solo la conversación con ${nameOf(counterpart(selectedMessage))}` : 'Ver mensajes de todos los contactos'}</button> : null}<section className="workspace-message-detail-section"><h4>Contenido</h4>{selectedMessage.media ? <div className="workspace-media-summary">{typeIcon(selectedMessage.kind)}<span>{selectedMessage.media.fileName || `Archivo ${selectedMessage.kind}`}</span></div> : null}<p>{contentPreview(selectedMessage)}</p></section><section className="workspace-message-detail-section"><h4>Datos del mensaje</h4><dl className="workspace-message-identifiers"><div><dt>Dirección</dt><dd>{selectedMessage.direction === 'inbound' ? 'Entrante' : 'Saliente'}</dd></div><div><dt>Tipo</dt><dd>{selectedMessage.kind}</dd></div>{selectedMessage.contactName ? <div><dt>Contacto</dt><dd>{selectedMessage.contactName}</dd></div> : null}{selectedMessage.sender ? <div><dt>Remitente</dt><dd>{selectedMessage.sender}</dd></div> : null}{selectedMessage.recipient ? <div><dt>Destinatario</dt><dd>{selectedMessage.recipient}</dd></div> : null}</dl></section><IdentifierList message={selectedMessage} /><section className="workspace-message-detail-section"><h4>Payload</h4><SafeJsonViewer value={selectedMessage.payload} emptyLabel="No hay payload disponible para este mensaje." /></section></>}</section>
     </div>
   </section>
 }

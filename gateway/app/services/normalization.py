@@ -1325,16 +1325,19 @@ def list_logical_messages(instance: str, limit: int = 200) -> list[dict[str, Any
         status_event = status_by_message.get(message_id or "")
         raw_kind = _timeline_value(event.get("messageType"), event.get("subtype"), message.get("kind")) or "text"
         content = event.get("content") if isinstance(event.get("content"), dict) else {}
+        direction = "inbound" if str(event.get("direction") or "").lower() == "inbound" else "outbound"
         items.append({
             "id": message_id or str(event.get("id") or ""),
             "messageId": message_id,
             "timestamp": _timeline_timestamp(event),
-            "direction": "inbound" if str(event.get("direction") or "").lower() == "inbound" else "outbound",
+            "direction": direction,
             "kind": raw_kind,
             "text": _timeline_value(event.get("text"), content.get("text"), message.get("text"), (media or {}).get("caption")) or "",
             "status": (status_event or event).get("status") or None,
             "sender": _timeline_value(event.get("sender"), message.get("from")),
             "recipient": _timeline_value(event.get("recipient")),
+            # On outbound messages pushName is the business itself, not the contact.
+            "contactName": _timeline_value(message.get("pushName")) if direction == "inbound" else None,
             "media": media,
             "provider": _timeline_value(delivery.get("provider"), (raw or {}).get("provider"), event.get("provider")),
             "providerMessageId": _timeline_value(delivery.get("providerMessageId"), (raw or {}).get("providerMessageId")),

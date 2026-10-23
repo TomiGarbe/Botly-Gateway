@@ -229,3 +229,19 @@ def test_correlated_status_is_visible_beside_one_outbound_attempt(monkeypatch, t
     page = ProviderDeliveryQueryService().list(instance="runtime-a", limit=20, offset=0)
     assert {(item["direction"], item["deliveryState"]) for item in page["items"]} == {("outbound", "delivered"), ("status", "delivered")}
     assert len([item for item in page["items"] if item["direction"] == "outbound"]) == 1
+
+
+def test_timeline_names_the_contact_only_on_inbound_messages(monkeypatch) -> None:
+    monkeypatch.setattr(normalization, "_persist_business_events", lambda: True)
+    _reset_timeline()
+    for message_id, from_me, push_name in (("in-1", False, "Ana"), ("out-1", True, "Chanti")):
+        event = normalization.normalize_webhook({
+            "event": "MESSAGES_UPSERT", "instance": "runtime-names", "provider": "evolution",
+            "data": {"key": {"id": message_id, "remoteJid": "5491100000000@s.whatsapp.net", "fromMe": from_me},
+                     "pushName": push_name, "message": {"conversation": "hola"}},
+        })
+        normalization.save_event(event)
+
+    names = {item["messageId"]: item["contactName"] for item in normalization.list_logical_messages("runtime-names")}
+
+    assert names == {"in-1": "Ana", "out-1": None}  # outbound pushName is the business itself

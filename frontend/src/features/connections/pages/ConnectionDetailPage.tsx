@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Clipboard, Info, Link2, Eye, EyeOff, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Clipboard, Info, KeyRound, Link2, Eye, EyeOff, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { Connection } from '@/domain/connection'
@@ -31,6 +31,24 @@ function workspaceState(connection: Connection, status: ConnectionStatusSummary 
   if (connection.status.state === 'connecting') return { label: 'Configurando', tone: 'configuring' }
   if (connection.status.health === 'unhealthy' || connection.status.state === 'disconnected') return { label: 'Problema crítico', tone: 'critical' }
   return { label: 'Atención requerida', tone: 'attention' }
+}
+type Problem = { tone: 'critical' | 'warning' | 'info'; title: string; detail: string; action?: { label: string; icon: 'relink' | 'authorize'; run: () => void } }
+/** What is wrong with the connection right now and the one action that fixes it. */
+export function connectionProblem(connection: Connection, status: ConnectionStatusSummary | null, actions: { relink?: () => void; authorize?: () => void }): Problem | null {
+  if (actions.relink && status && !status.connected) {
+    if (status.managedElsewhere) return { tone: 'info', title: 'Administrada por otro Gateway', detail: 'Esta instancia pertenece a otro entorno (por ejemplo, dev). Vinculala o desvinculala desde ese Gateway.' }
+    if (status.state === 'connecting' && !status.providerSession) return null
+    return { tone: 'critical', title: 'WhatsApp sin sesión', detail: describeProviderSession(status.providerSession) || 'El número no está vinculado: no recibe ni envía mensajes hasta escanear un QR nuevo.', action: { label: 'Volver a vincular', icon: 'relink', run: actions.relink } }
+  }
+  const readiness = connection.readiness
+  if (actions.authorize && readiness) {
+    const authorize = (label: string) => ({ label, icon: 'authorize' as const, run: actions.authorize! })
+    if (readiness.state === 'expired' || readiness.state === 'credential_missing') return { tone: 'critical', title: 'Instagram sin autorización', detail: 'El acceso a la cuenta venció: no se reciben ni envían mensajes hasta reautorizarla.', action: authorize('Reautorizar') }
+    if (readiness.state === 'oauth_pending') return { tone: 'warning', title: 'Falta autorizar la cuenta', detail: 'Conectá la cuenta de Instagram para empezar a recibir mensajes.', action: authorize('Autorizar') }
+    if (readiness.state === 'missing_scopes') return { tone: 'warning', title: 'Faltan permisos de Instagram', detail: `La autorización no incluye: ${(readiness.missingScopes || []).join(', ')}. Reautorizá aceptando todos los permisos.`, action: authorize('Reautorizar') }
+    if (readiness.tokenExpiry === 'expiring') return { tone: 'warning', title: 'Autorización por vencer', detail: 'El acceso a Instagram vence en menos de 7 días y no se pudo renovar solo.', action: authorize('Reautorizar') }
+  }
+  return null
 }
 const oauthNotice: Record<string, { tone: 'success' | 'error' | 'warning'; message: string }> = {
   success: { tone: 'success', message: 'Instagram quedó autorizado nuevamente.' },
@@ -154,10 +172,11 @@ export function ConnectionDetailPage() {
   const headerState = workspaceState(connection, statusSummary)
   const messageId = new URLSearchParams(location.search).get('message_id')
   const isEvolution = connection.provider.id === 'evolution'
-  const sessionProblem = !isEvolution || !statusSummary || statusSummary.connected ? null
-    : statusSummary.managedElsewhere ? { info: true, title: 'Administrada por otro Gateway', detail: 'Esta instancia pertenece a otro entorno (por ejemplo, dev). Vinculala o desvinculala desde ese Gateway.' }
-    : statusSummary.state === 'connecting' && !statusSummary.providerSession ? null
-    : { info: false, title: 'WhatsApp sin sesión', detail: describeProviderSession(statusSummary.providerSession) || 'El número no está vinculado: no recibe ni envía mensajes hasta escanear un QR nuevo.' }
+  const isInstagram = connection.channel.id === 'instagram' && connection.provider.id === 'meta'
+  const problem = connectionProblem(connection, statusSummary, {
+    relink: isEvolution ? () => setIsUnlinkOpen(true) : undefined,
+    authorize: isInstagram ? authorizeInstagram : undefined,
+  })
   const isConnected = Boolean(statusSummary?.connected) || connection.status.state === 'connected'
   // Cada proveedor se recupera distinto: Instagram re-hace OAuth, WhatsApp Cloud repite Embedded Signup y Evolution re-escanea el QR.
   const authorization = connection.channel.id === 'instagram' && connection.provider.id === 'meta'
@@ -170,7 +189,7 @@ export function ConnectionDetailPage() {
 
   return <section className="connection-detail workspace-detail">
     <header className="workspace-header"><button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button><div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{[connection.client?.name || 'Cliente', connection.displayName !== connection.name ? connection.displayName : null, connectionAddress(connection.address), `${connection.channel.displayName} · ${connection.provider.displayName}`].filter(Boolean).join(' · ')}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div></header>
-    {sessionProblem ? <div className={`workspace-problem${sessionProblem.info ? ' workspace-problem-info' : ''}`} role={sessionProblem.info ? 'status' : 'alert'}>{sessionProblem.info ? <Info size={20} aria-hidden="true" /> : <AlertTriangle size={20} aria-hidden="true" />}<div><strong>{sessionProblem.title}</strong><p>{sessionProblem.detail}</p></div>{sessionProblem.info ? null : <button type="button" className="client-button-primary" onClick={() => setIsUnlinkOpen(true)}><Link2 size={15} aria-hidden="true" /> Volver a vincular</button>}</div> : null}
+    {problem ? <div className={`workspace-problem is-${problem.tone}`} role={problem.tone === 'info' ? 'status' : 'alert'}>{problem.tone === 'info' ? <Info size={20} aria-hidden="true" /> : <AlertTriangle size={20} aria-hidden="true" />}<div><strong>{problem.title}</strong><p>{problem.detail}</p></div>{problem.action ? <button type="button" className="client-button-primary" onClick={problem.action.run}>{problem.action.icon === 'relink' ? <Link2 size={15} aria-hidden="true" /> : <KeyRound size={15} aria-hidden="true" />} {problem.action.label}</button> : null}</div> : null}
     <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.filter((tab) => tab.id !== 'groups' || (connection.provider.id === 'evolution' && connection.channel.id === 'whatsapp')).map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} /><Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
     <div className="workspace-tab-content">
