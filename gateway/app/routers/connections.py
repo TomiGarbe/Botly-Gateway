@@ -753,7 +753,12 @@ async def reconnect_connection(connection_id: str):
 @router.get("/{connection_id}/status")
 async def get_connection_status(connection_id: str, request: Request):
     try:
-        require_reviewer_connection_access(request, await _service.get_connection(connection_id))
+        connection = await _service.get_connection(connection_id)
+        require_reviewer_connection_access(request, connection)
+        if connection.provider.id == "evolution":
+            # The QR panel polls this until linked: it must reflect the WhatsApp
+            # session, not whether the Gateway process is reachable.
+            return await _operations.status(connection_id)
         availability = await _diagnostics.verify_availability(connection_id)
         summary = availability["diagnostics"]["summary"]
         return {

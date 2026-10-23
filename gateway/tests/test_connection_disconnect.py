@@ -78,3 +78,22 @@ def test_instances_owned_by_another_gateway_cannot_be_unlinked(registry, monkeyp
     with pytest.raises(ops.ConnectionOperationUnavailableError, match="otro Gateway"):
         asyncio.run(ops.ConnectionOperationsService(manager, registry).disconnect("conn-a"))
     assert manager.calls == []
+
+
+def test_status_route_reports_the_whatsapp_session_for_evolution(monkeypatch):
+    from types import SimpleNamespace
+    from app.routers import connections as router
+
+    connection = SimpleNamespace(provider=SimpleNamespace(id="evolution"), client_id="client-a")
+    async def get_connection(connection_id):
+        return connection
+    async def session_status(connection_id):
+        return {"connected": False, "state": "connecting", "managed_elsewhere": False, "provider_session": None}
+    async def availability(connection_id):
+        raise AssertionError("gateway reachability must not decide whether WhatsApp is linked")
+    monkeypatch.setattr(router._service, "get_connection", get_connection)
+    monkeypatch.setattr(router._operations, "status", session_status)
+    monkeypatch.setattr(router._diagnostics, "verify_availability", availability)
+    request = SimpleNamespace(state=SimpleNamespace(user=None))
+    result = asyncio.run(router.get_connection_status("conn-a", request))
+    assert result["connected"] is False and result["state"] == "connecting"
