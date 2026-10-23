@@ -52,6 +52,7 @@ export interface ConnectionStatusSummary {
   connected: boolean
   state?: string | null
   providerSession?: ProviderSession | null
+  managedElsewhere?: boolean
   lastActivityAt: string | null
   lastHeartbeatAt: string | null
 }
@@ -352,11 +353,12 @@ export async function listConnectionActivity(connectionId: string): Promise<Conn
 }
 
 export async function getConnectionStatusSummary(connectionId: string): Promise<ConnectionStatusSummary> {
-  const payload = await gatewayRequest<{ connected: boolean; state?: string | null; provider_session?: ProviderSession | null; last_activity_at: string | null; last_heartbeat_at: string | null }>(`/connections/${encodeURIComponent(connectionId)}/status`)
+  const payload = await gatewayRequest<{ connected: boolean; state?: string | null; provider_session?: ProviderSession | null; managed_elsewhere?: boolean; last_activity_at: string | null; last_heartbeat_at: string | null }>(`/connections/${encodeURIComponent(connectionId)}/status`)
   return {
     connected: payload.connected,
     state: payload.state ?? null,
     providerSession: payload.provider_session ?? null,
+    managedElsewhere: Boolean(payload.managed_elsewhere),
     lastActivityAt: payload.last_activity_at,
     lastHeartbeatAt: payload.last_heartbeat_at,
   }

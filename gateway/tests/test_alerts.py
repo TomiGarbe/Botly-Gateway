@@ -129,7 +129,7 @@ def test_alerts_router_exposes_alert_lifecycle_and_deletion(monkeypatch, tmp_pat
 
 class _Signals:
     async def evolution_states(self):
-        return {"evo-down": "connecting", "evo-ok": "open"}
+        return {"evo-down": "connecting", "evo-ok": "open", "evo-gone": "close"}
 
     def instagram_token_state(self, connection_id):
         return {"ig-expired": "expired", "ig-expiring": "expiring"}.get(connection_id, "active")
@@ -144,7 +144,8 @@ def test_live_signals_raise_session_token_and_delivery_alerts(tmp_path) -> None:
     connections = _Connections()
     evo = lambda cid, state="connected": replace(_connection(cid, state=state), provider=Provider(id="evolution", display_name="Evolution"))
     ig = lambda cid: replace(_connection(cid), channel=Channel(id="instagram", display_name="Instagram"))
-    connections.items = [evo("evo-down", "connecting"), evo("evo-ok"), evo("evo-elsewhere", "connecting"),
+    gone = replace(evo("evo-gone", "disconnected"), status=ConnectionStatus(state="disconnected", lifecycle=None, health="unhealthy"))
+    connections.items = [evo("evo-down", "connecting"), evo("evo-ok"), gone, evo("evo-elsewhere", "connecting"),
                          ig("ig-expired"), ig("ig-expiring"), _connection("stalled"), _connection("dropped")]
     service = AlertService(connections=connections, operations=_Operations(), store=AlertStore(tmp_path / "alerts.json"),  # type: ignore[arg-type]
                            events_reader=lambda **_: [], now=lambda: NOW, signals=_Signals())
@@ -154,6 +155,7 @@ def test_live_signals_raise_session_token_and_delivery_alerts(tmp_path) -> None:
     alerts = {item for item in alerts if item[1] != "Heartbeat vencido"}
     assert alerts == {
         ("evo-down", "WhatsApp sin sesión", "critical"),
+        ("evo-gone", "WhatsApp sin sesión", "critical"),  # replaces "Conexión desconectada" and "Proveedor degradado"
         ("ig-expired", "Instagram sin autorización", "critical"),
         ("ig-expiring", "Autorización de Instagram por vencer", "warning"),
         ("stalled", "Mensajes sin llegar a Botly", "critical"),

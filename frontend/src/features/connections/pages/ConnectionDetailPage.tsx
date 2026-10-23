@@ -1,4 +1,4 @@
-import { ArrowLeft, Clipboard, Eye, EyeOff, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Clipboard, Info, Link2, Eye, EyeOff, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { Connection } from '@/domain/connection'
@@ -7,7 +7,7 @@ import { LoadingState } from '@/shared/components/LoadingState'
 import { ConfirmDialog } from '@/shared/components/ConfirmDialog'
 import { Toast } from '@/shared/components/Toast'
 import { Field, Input } from '@/shared/components/FormControls'
-import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, disconnectConnection, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
+import { ConnectionApiKey, ConnectionIntegrationEndpoints, ConnectionStatusSummary, describeProviderSession, disconnectConnection, getConnectionApiKey, getConnectionIntegrationEndpoints, getConnectionStatusSummary, reconnectConnection, regenerateConnectionApiKey } from '../api/connectionOperationsApi'
 import { deleteConnection, disconnectInstagram, getConnection, updateConnectionName } from '../api/connectionsApi'
 import { MessagesWorkspace } from '../components/MessagesWorkspace'
 import { ConnectionGroups } from '../components/ConnectionGroups'
@@ -20,6 +20,7 @@ import { environment } from '@/app/config/environment'
 import { completeMetaSignup, getMetaSignupConfig, type MetaSignupConfig } from '../api/metaSignupApi'
 import { loadFacebookSdk, loginWithFacebook, waitForSession } from '../lib/metaEmbeddedSignup'
 import { EvolutionQrRelink } from '../components/EvolutionQrRelink'
+import { connectionAddress } from '../components/ConnectionCard'
 
 type WorkspaceTab = 'general' | 'security' | 'messages' | 'groups' | 'webhooks'
 const tabs: Array<{ id: WorkspaceTab; label: string }> = [{ id: 'general', label: 'General' }, { id: 'security', label: 'Seguridad' }, { id: 'messages', label: 'Mensajes' }, { id: 'groups', label: 'Grupos' }, { id: 'webhooks', label: 'Webhooks' }]
@@ -153,6 +154,10 @@ export function ConnectionDetailPage() {
   const headerState = workspaceState(connection, statusSummary)
   const messageId = new URLSearchParams(location.search).get('message_id')
   const isEvolution = connection.provider.id === 'evolution'
+  const sessionProblem = !isEvolution || !statusSummary || statusSummary.connected ? null
+    : statusSummary.managedElsewhere ? { info: true, title: 'Administrada por otro Gateway', detail: 'Esta instancia pertenece a otro entorno (por ejemplo, dev). Vinculala o desvinculala desde ese Gateway.' }
+    : statusSummary.state === 'connecting' && !statusSummary.providerSession ? null
+    : { info: false, title: 'WhatsApp sin sesión', detail: describeProviderSession(statusSummary.providerSession) || 'El número no está vinculado: no recibe ni envía mensajes hasta escanear un QR nuevo.' }
   const isConnected = Boolean(statusSummary?.connected) || connection.status.state === 'connected'
   // Cada proveedor se recupera distinto: Instagram re-hace OAuth, WhatsApp Cloud repite Embedded Signup y Evolution re-escanea el QR.
   const authorization = connection.channel.id === 'instagram' && connection.provider.id === 'meta'
@@ -164,7 +169,8 @@ export function ConnectionDetailPage() {
         : {}
 
   return <section className="connection-detail workspace-detail">
-    <header className="workspace-header"><button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button><div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{connection.client?.name || 'Cliente'} · {connection.channel.displayName} · {connection.provider.displayName}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div></header>
+    <header className="workspace-header"><button type="button" className="client-back-link" onClick={() => navigate(`/clients/${connection.clientId}`)}><ArrowLeft size={16} aria-hidden="true" /> {connection.client?.name || 'Cliente'}</button><div className="workspace-header-main"><div><StatusBadge tone={headerState.tone}>{headerState.label}</StatusBadge><h2>{connection.name}</h2><p>{[connection.client?.name || 'Cliente', connection.displayName !== connection.name ? connection.displayName : null, connectionAddress(connection.address), `${connection.channel.displayName} · ${connection.provider.displayName}`].filter(Boolean).join(' · ')}</p></div><div className="workspace-header-actions"><button type="button" className="client-button-secondary" onClick={() => void refreshWorkspace()}><RefreshCw size={15} aria-hidden="true" /> Actualizar</button></div></div></header>
+    {sessionProblem ? <div className={`workspace-problem${sessionProblem.info ? ' workspace-problem-info' : ''}`} role={sessionProblem.info ? 'status' : 'alert'}>{sessionProblem.info ? <Info size={20} aria-hidden="true" /> : <AlertTriangle size={20} aria-hidden="true" />}<div><strong>{sessionProblem.title}</strong><p>{sessionProblem.detail}</p></div>{sessionProblem.info ? null : <button type="button" className="client-button-primary" onClick={() => setIsUnlinkOpen(true)}><Link2 size={15} aria-hidden="true" /> Volver a vincular</button>}</div> : null}
     <div className="workspace-tabs" role="tablist" aria-label="Secciones del Workspace">{tabs.filter((tab) => tab.id !== 'groups' || (connection.provider.id === 'evolution' && connection.channel.id === 'whatsapp')).map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'is-active' : ''} onClick={() => navigate(tab.id === 'webhooks' ? `/connections/${connection.id}/webhooks` : `/connections/${connection.id}${tab.id === 'general' ? '' : `?tab=${tab.id}`}`)}>{tab.label}</button>)}</div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} /><Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
     <div className="workspace-tab-content">

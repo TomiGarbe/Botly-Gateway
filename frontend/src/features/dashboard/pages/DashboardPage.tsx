@@ -19,10 +19,10 @@ function attentionLabel(severity: 'warning' | 'critical'): string { return sever
 function attentionTone(severity: 'warning' | 'critical'): StatusTone { return severity === 'critical' ? 'critical' : 'attention' }
 
 const metricDefinitions = [
-  { key: 'clients', label: 'Clientes', icon: Users },
-  { key: 'connections', label: 'Conexiones', icon: Link2 },
-  { key: 'connected', label: 'Conectadas', icon: Activity },
-  { key: 'activeAlerts', label: 'Alertas activas', icon: AlertTriangle },
+  { key: 'clients', label: 'Clientes', icon: Users, to: '/clients' },
+  { key: 'connections', label: 'Conexiones', icon: Link2, to: '/connections' },
+  { key: 'connected', label: 'Conectadas', icon: Activity, to: '/connections' },
+  { key: 'activeAlerts', label: 'Alertas activas', icon: AlertTriangle, to: '/alerts' },
 ] as const
 
 export function DashboardPage() {
@@ -43,10 +43,10 @@ export function DashboardPage() {
 
   return <section className="dashboard-page">
     <div className="dashboard-heading"><div><p>Resumen</p><h2>Estado del Gateway</h2></div><div className="dashboard-overall" role="status">{overallIcon(dashboard.overall.state)}<StatusBadge tone={overallTone(dashboard.overall.state)}>{overallLabel(dashboard.overall.state)}</StatusBadge></div></div>
-    <div className="dashboard-metrics" aria-label="Resumen del Gateway">{metricDefinitions.map(({ key, label, icon: Icon }) => <article key={key} className="dashboard-metric"><Icon size={17} aria-hidden="true" /><span>{label}</span><strong>{dashboard.metrics[key]}</strong></article>)}</div>
+    <div className="dashboard-metrics" aria-label="Resumen del Gateway">{metricDefinitions.map(({ key, label, icon: Icon, to }) => <button key={key} type="button" className="dashboard-metric" onClick={() => navigate(to)}><Icon size={17} aria-hidden="true" /><span>{label}</span><strong>{dashboard.metrics[key]}</strong></button>)}</div>
     <section className="dashboard-section" aria-labelledby="attention-title">
       <div className="dashboard-section-heading"><div><h3 id="attention-title">Conexiones que requieren atención</h3><p>Solo se muestran conexiones con un problema real.</p></div></div>
-      {dashboard.attention.length === 0 ? <EmptyState icon={CheckCircle2} tone="success" title="Todas las conexiones funcionan correctamente." description="No hay conexiones que requieran atención en este momento." /> : <ul className="dashboard-attention-list">{dashboard.attention.map((item) => <li key={item.connection.id}><StatusBadge tone={attentionTone(item.severity)}>{attentionLabel(item.severity)}</StatusBadge><div className="dashboard-attention-copy"><span>Cliente</span><strong>{item.client.name}</strong><span>Conexión</span><b>{item.connection.name}</b><p>{item.status}</p></div><button type="button" className="client-button-secondary" onClick={() => navigate(`/connections/${item.connection.id}`)}>Abrir Workspace</button></li>)}</ul>}
+      {dashboard.attention.length === 0 ? <EmptyState icon={CheckCircle2} tone="success" title="Todas las conexiones funcionan correctamente." description="No hay conexiones que requieran atención en este momento." /> : <ul className="dashboard-attention-list">{dashboard.attention.map((item) => <li key={item.connection.id}><StatusBadge tone={attentionTone(item.severity)}>{attentionLabel(item.severity)}</StatusBadge><div className="dashboard-attention-copy"><span>Cliente</span><strong>{item.client.name}</strong><span>Conexión</span><b>{item.connection.name}</b><p>{item.status}</p></div><button type="button" className="client-button-secondary" onClick={() => navigate(`/connections/${item.connection.id}`)}>Abrir conexión</button></li>)}</ul>}
     </section>
   </section>
 }

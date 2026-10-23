@@ -1,4 +1,4 @@
-import { AlertTriangle, BellRing, CheckCircle2, CircleX, Info, LoaderCircle, Trash2, UserRound, Waypoints } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleX, Info, LoaderCircle, Trash2, UserRound, Waypoints } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { EmptyState } from '@/shared/components/EmptyState'
@@ -75,14 +75,16 @@ export function AlertsPage() {
   if (isLoading) return <LoadingState label="Cargando alertas…" />
   if (error && alerts.length === 0) return <div className="clients-state clients-state-error" role="alert"><p>{error}</p><button type="button" onClick={() => void loadAlerts()}>Reintentar</button></div>
 
-  const resolvedCount = alerts.filter((alert) => alert.status === 'resolved').length
+  const active = alerts.filter((alert) => alert.status !== 'resolved')
+  const resolved = alerts.filter((alert) => alert.status === 'resolved').sort((left, right) => (right.resolvedAt || '').localeCompare(left.resolvedAt || ''))
+  const resolvedCount = resolved.length
 
   return <section className="alerts-page">
-    <div className="alerts-heading"><div><p>Alertas</p><h2>Incidentes que requieren atención</h2></div>{resolvedCount > 0 ? <button type="button" className="client-button-danger" onClick={() => setIsDeleteResolvedDialogOpen(true)}><Trash2 size={15} aria-hidden="true" /> Eliminar resueltas</button> : null}</div>
+    <div className="alerts-heading"><div><p>Alertas</p><h2>Incidentes que requieren atención</h2></div></div>
     <Toast message={error} tone="error" onDismiss={() => setError(null)} />
     <Toast message={notice} tone="success" onDismiss={() => setNotice(null)} />
-    {alerts.length === 0 ? <EmptyState icon={CheckCircle2} tone="success" title="Todo funciona correctamente." description="No hay incidentes operativos pendientes." /> : <div className="alerts-list">
-      {alerts.map((alert) => <article key={alert.id} className={`alert-card is-${alert.severity}${alert.status === 'resolved' ? ' is-resolved' : ''}`}>
+    {active.length === 0 ? <div className="alerts-list"><EmptyState icon={CheckCircle2} tone="success" title="Todo funciona correctamente." description="No hay incidentes operativos pendientes." /></div> : <div className="alerts-list">
+      {active.map((alert) => <article key={alert.id} className={`alert-card is-${alert.severity}`}>
         <span className={`alert-card-icon is-${alert.severity}`}>{severityIcon(alert.severity)}</span>
         <div className="alert-card-content">
           <div className="alert-card-title"><h3>{alert.title}</h3><span className={`alert-severity is-${alert.severity}`}>{severityLabel(alert.severity)}</span></div>
@@ -94,14 +96,23 @@ export function AlertsPage() {
             <StatusBadge tone={statusTone(alert.status)}>{statusLabel(alert.status)}</StatusBadge>
           </div>
           <div className="alert-card-actions">
-            <button type="button" className="client-button-primary" onClick={() => navigate(alert.workspaceUrl)}><BellRing size={15} aria-hidden="true" /> Abrir Workspace</button>
+            <button type="button" className="client-button-primary" onClick={() => navigate(alert.workspaceUrl)}>Abrir conexión <ArrowRight size={15} aria-hidden="true" /></button>
             {alert.status === 'new' ? <button type="button" className="client-button-secondary" disabled={updatingId === alert.id} onClick={() => void updateAlert(alert, 'acknowledge')}>{updatingId === alert.id ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : null} Reconocer</button> : null}
-            {alert.status !== 'resolved' ? <button type="button" className="client-button-secondary" disabled={updatingId === alert.id} onClick={() => void updateAlert(alert, 'resolve')}>Resolver</button> : null}
+            <button type="button" className="client-button-secondary" disabled={updatingId === alert.id} onClick={() => void updateAlert(alert, 'resolve')}>Resolver</button>
             <button type="button" className="client-button-danger" disabled={updatingId === alert.id || isDeletingAlert} onClick={() => setAlertToDelete(alert)}><Trash2 size={15} aria-hidden="true" /> Eliminar</button>
           </div>
         </div>
       </article>)}
     </div>}
+    {resolvedCount > 0 ? <details className="alerts-history">
+      <summary><ChevronDown size={16} aria-hidden="true" /> Resueltas <span>{resolvedCount}</span></summary>
+      <ul>{resolved.map((alert) => <li key={alert.id}>
+        <CheckCircle2 size={15} aria-hidden="true" />
+        <div><strong>{alert.title}</strong><span>{alert.connection.name} · {alert.client.name} · {dateTime(alert.resolvedAt || alert.createdAt)}</span></div>
+        <button type="button" className="alerts-history-delete" aria-label={`Eliminar alerta ${alert.title}`} disabled={isDeletingAlert} onClick={() => setAlertToDelete(alert)}><Trash2 size={14} aria-hidden="true" /></button>
+      </li>)}</ul>
+      <button type="button" className="client-button-danger" onClick={() => setIsDeleteResolvedDialogOpen(true)}><Trash2 size={15} aria-hidden="true" /> Eliminar resueltas</button>
+    </details> : null}
     <ConfirmDialog isOpen={alertToDelete !== null} title="Eliminar alerta" description="La alerta dejará de mostrarse en el historial hasta que el incidente se haya normalizado y vuelva a ocurrir." confirmLabel="Eliminar alerta" isSubmitting={isDeletingAlert} onCancel={() => { if (!isDeletingAlert) setAlertToDelete(null) }} onConfirm={() => void removeAlert()} />
     <ConfirmDialog isOpen={isDeleteResolvedDialogOpen} title="Eliminar alertas resueltas" description={`Se eliminarán ${resolvedCount} ${resolvedCount === 1 ? 'alerta resuelta' : 'alertas resueltas'} del historial.`} confirmLabel="Eliminar resueltas" isSubmitting={isDeletingResolved} onCancel={() => { if (!isDeletingResolved) setIsDeleteResolvedDialogOpen(false) }} onConfirm={() => void removeResolvedAlerts()} />
   </section>

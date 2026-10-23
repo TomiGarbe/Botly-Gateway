@@ -1019,3 +1019,63 @@
   .confirm-dialog-actions { @apply grid grid-cols-2; }
   .activity-panel { @apply max-w-none; }
 }
+
+@layer components {
+  .connection-card { @apply min-h-0 gap-4; }
+  .connection-card-head { @apply flex items-start gap-3; }
+  .connection-card-icon { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-800/80 text-zinc-300; }
+  .connection-card-title { @apply min-w-0 flex-1; }
+  .connection-card-title h3 { @apply truncate; }
+  .connection-card .connection-card-title p { @apply mb-0 mt-1 truncate text-sm text-zinc-400; }
+  .connection-card-footer { @apply mt-0; }
+  .connection-card-footer > span + span::before { content: '·'; @apply mr-3 text-zinc-700; }
+  .connections-toolbar { @apply mt-7 flex flex-wrap items-center gap-3; }
+  .connections-toolbar .workspace-message-search { @apply min-w-[16rem]; }
+  .connections-toolbar + .connections-page-grid { @apply mt-4; }
+  .connections-filter { @apply inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-1; }
+  .connections-filter button { @apply inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-sm text-zinc-400 transition-colors hover:text-zinc-100; }
+  .connections-filter button span { @apply rounded-full bg-zinc-800 px-1.5 text-xs tabular-nums text-zinc-400; }
+  .connections-filter button.is-active { @apply bg-zinc-800 text-zinc-100; }
+  .connections-filter button.is-active span { @apply bg-zinc-700 text-zinc-200; }
+  .connections-empty-filter { @apply mt-6 text-sm text-zinc-500; }
+  .workspace-problem { @apply mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-red-900/70 bg-red-950/20 p-4; }
+  .workspace-problem-info { @apply border-zinc-800 bg-zinc-900/40; }
+  .workspace-problem > svg { @apply shrink-0 text-red-300; }
+  .workspace-problem-info > svg { @apply text-zinc-400; }
+  .workspace-problem div { @apply min-w-0 flex-1; }
+  .workspace-problem strong { @apply block text-sm font-medium text-zinc-100; }
+  .workspace-problem p { @apply mb-0 mt-1 text-sm text-zinc-400; }
+  @media (max-width: 640px) {
+    .connections-toolbar .workspace-message-search { @apply min-w-0 basis-full; }
+    .connections-filter { @apply flex w-full; }
+    .connections-filter button { @apply flex-1 justify-center px-2; }
+    .workspace-problem button { @apply w-full justify-center; }
+  }
+}
+
+@layer components {
+  .connections-toolbar .workspace-message-search input { @apply !border-0 !bg-transparent !px-0 !shadow-none !ring-0; }
+  .alerts-history { @apply mt-8 rounded-xl border border-zinc-800 bg-zinc-900/20; }
+  .alerts-history summary { @apply flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-zinc-300; }
+  .alerts-history summary::-webkit-details-marker { display: none; }
+  .alerts-history summary svg { @apply -rotate-90 text-zinc-500 transition-transform; }
+  .alerts-history[open] summary svg { @apply rotate-0; }
+  .alerts-history summary span { @apply rounded-full bg-zinc-800 px-1.5 text-xs tabular-nums text-zinc-400; }
+  .alerts-history ul { @apply m-0 list-none border-t border-zinc-800 p-0; }
+  .alerts-history li { @apply flex items-center gap-3 border-b border-zinc-800/70 px-4 py-2.5; }
+  .alerts-history li > svg { @apply shrink-0 text-emerald-400/80; }
+  .alerts-history li div { @apply min-w-0 flex-1; }
+  .alerts-history li strong { @apply block truncate text-sm font-normal text-zinc-300; }
+  .alerts-history li span { @apply block truncate text-xs text-zinc-500; }
+  .alerts-history-delete { @apply rounded-md p-2 text-zinc-500 hover:bg-zinc-800 hover:text-red-300 disabled:opacity-50; }
+  .alerts-history > .client-button-danger { @apply m-4; }
+}
+
+@layer components {
+  button.dashboard-metric { @apply w-full text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40; }
+}
+
+@media (max-width: 640px) {
+  .connection-card-footer > span + span::before { content: none; }
+  .connection-card-footer { @apply gap-x-3 gap-y-1; }
+}

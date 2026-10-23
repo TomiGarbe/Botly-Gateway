@@ -101,3 +101,24 @@ def test_dashboard_router_exposes_one_snapshot(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["metrics"]["connections"] == 2
+
+
+def test_dashboard_counts_active_alerts_and_names_their_cause() -> None:
+    from types import SimpleNamespace
+
+    alert = lambda cid, title, severity, status="new": SimpleNamespace(connection=SimpleNamespace(id=cid), title=title, severity=severity, status=status)
+
+    class _Alerts:
+        async def list_alerts(self):
+            return [alert("connection-2", "Proveedor degradado", "warning"), alert("connection-2", "WhatsApp sin sesión", "critical"),
+                    alert("connection-1", "Mensajes descartados", "warning"), alert("connection-1", "Heartbeat vencido", "warning", "resolved")]
+
+    service = _service()
+    service._alerts = _Alerts()
+    snapshot = asyncio.run(service.snapshot()).public_dict()
+
+    assert snapshot["metrics"]["active_alerts"] == 3
+    assert [(item["connection"]["id"], item["severity"], item["status"]) for item in snapshot["attention"]] == [
+        ("connection-2", "critical", "WhatsApp sin sesión"),
+        ("connection-1", "warning", "Mensajes descartados"),
+    ]

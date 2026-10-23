@@ -32,12 +32,14 @@ class DashboardService:
         operations: ConnectionOperationsService | None = None,
         events_reader: Callable[..., list[dict[str, Any]]] | None = None,
         now: Callable[[], datetime] | None = None,
+        alerts: Any | None = None,
     ) -> None:
         self._connections = connections or get_connection_service()
         self._clients = clients or get_client_service()
         self._operations = operations or get_connection_operations_service()
         self._events_reader = events_reader or list_events
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._alerts = alerts
 
     async def snapshot(self) -> DashboardSnapshot:
         connections = await self._connections.list_connections()
@@ -47,7 +49,8 @@ class DashboardService:
             self._connections.connection_runtime_name(connection.id): connection
             for connection in connections
         }
-        attention = self._attention(connections)
+        active_alerts = await self._active_alerts()
+        attention = self._attention(connections, active_alerts)
         activity = self._activity(runtime_names, client_references, connections, clients)
 
         critical = any(item.severity == "critical" for item in attention)
@@ -61,7 +64,7 @@ class DashboardService:
                 clients=len(client_references),
                 connections=len(connections),
                 connected=sum(connection.status.state == "connected" for connection in connections),
-                active_alerts=len(attention),
+                active_alerts=len(active_alerts) if self._alerts is not None else len(attention),
             ),
             recent_activity=tuple(activity),
             attention=tuple(attention),
@@ -76,13 +79,29 @@ class DashboardService:
         client = connection.client
         return DashboardReference(id=connection.client_id, name=client.name if client else "Cliente")
 
-    def _attention(self, connections: list[Connection]) -> list[DashboardAttention]:
+    async def _active_alerts(self) -> list[Any]:
+        if self._alerts is None:
+            return []
+        try:
+            return [alert for alert in await self._alerts.list_alerts() if alert.status != "resolved"]
+        except Exception:
+            return []
+
+    def _attention(self, connections: list[Connection], alerts: list[Any] = ()) -> list[DashboardAttention]:
+        # The alert title names the cause ("WhatsApp sin sesión"); the status is only a fallback.
+        causes: dict[str, Any] = {}
+        for alert in sorted(alerts, key=lambda alert: alert.severity != "critical"):
+            causes.setdefault(alert.connection.id, alert)
         items: list[DashboardAttention] = []
         for connection in connections:
             problem = self._connection_problem(connection)
-            if problem is None:
+            cause = causes.get(connection.id)
+            if problem is None and cause is None:
                 continue
-            severity, status = problem
+            severity, status = problem or ("warning", cause.title)
+            if cause is not None:
+                severity = "critical" if cause.severity == "critical" else severity
+                status = cause.title
             items.append(
                 DashboardAttention(
                     severity=severity,
@@ -259,4 +278,6 @@ class DashboardService:
 
 
 def get_dashboard_service() -> DashboardService:
-    return DashboardService()
+    from app.services.alerts import get_alert_service
+
+    return DashboardService(alerts=get_alert_service())

@@ -20,6 +20,8 @@ _LOCK = threading.Lock()
 _HEARTBEAT_MAX_AGE = timedelta(minutes=15)
 _RECONNECT_WINDOW = timedelta(hours=24)
 _RECONNECT_THRESHOLD = 3
+_SPECIFIC_CAUSES = {"whatsapp_session_down", "instagram_token_expired"}
+_GENERIC_CAUSES = {"connection_disconnected", "provider_degraded", "authentication_error", "heartbeat_expired"}
 _ALERTS_KEY = "connection_alerts_v2"
 _DISMISSED_FINGERPRINTS_KEY = "dismissed_alert_fingerprints_v1"
 
@@ -185,10 +187,17 @@ class AlertService:
         connections = await self._connections.list_connections()
         runtime_names = {self._connections.connection_runtime_name(connection.id): connection for connection in connections}
         candidates = self._candidates(connections, runtime_names)
-        candidates += await self._signal_candidates(connections)
+        candidates = self._without_superseded(candidates + await self._signal_candidates(connections))
         records = self._store.sync(candidates)
         alerts = [self._to_alert(item) for item in records]
         return sorted(alerts, key=lambda item: (item.status == "resolved", item.created_at), reverse=False)
+
+    @staticmethod
+    def _without_superseded(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """One incident per cause: a specific live diagnosis replaces the generic status alerts."""
+        specific = {c["connection"]["id"] for c in candidates if c["fingerprint"].split(":", 1)[0] in _SPECIFIC_CAUSES}
+        return [c for c in candidates
+                if not (c["connection"]["id"] in specific and c["fingerprint"].split(":", 1)[0] in _GENERIC_CAUSES)]
 
     async def acknowledge(self, alert_id: str) -> Alert | None:
         await self.list_alerts()
@@ -220,7 +229,7 @@ class AlertService:
         lifecycle = (connection.status.lifecycle or "").lower()
         candidates: list[dict[str, Any]] = []
         if connection.status.state == "disconnected":
-            candidates.append(self._candidate("connection_disconnected", "critical", "Conexión desconectada", "La conexión dejó de estar disponible. Abrí el Workspace para reconectarla.", connection))
+            candidates.append(self._candidate("connection_disconnected", "critical", "Conexión desconectada", "La conexión dejó de estar disponible. Abrí la conexión para reconectarla.", connection))
         if "auth" in lifecycle or "token" in lifecycle:
             candidates.append(self._candidate("authentication_error", "critical", "Error de autenticación", "La autorización de esta conexión necesita renovarse.", connection))
         if connection.status.state in {"pending", "connecting"} and connection.provider.id != "evolution":
@@ -258,7 +267,7 @@ class AlertService:
                     candidates.append(self._candidate(
                         "whatsapp_session_down", "critical", "WhatsApp sin sesión",
                         "WhatsApp cerró o no completó la vinculación de este número: no recibe ni envía mensajes. "
-                        "Usá «Desconectar y volver a vincular» y escaneá el QR.", connection))
+                        "Abrí la conexión, tocá «Volver a vincular» y escaneá el QR.", connection))
             if (connection.provider.id, connection.channel.id) == ("meta", "instagram"):
                 token = self._signals.instagram_token_state(connection.id)
                 if token in {"expired", "missing"}:
