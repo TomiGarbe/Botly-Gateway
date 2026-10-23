@@ -513,7 +513,7 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
         # This is intentionally opt-in because it can contain customer content.
         logger.info("[META_TRACE][RAW_PAYLOAD]", request_id=request_id, payload=payload)
 
-    received = {"messages": 0, "statuses": 0, "changes": 0, "errors": 0, "unmapped": 0}
+    received = {"messages": 0, "statuses": 0, "changes": 0, "errors": 0, "unmapped": 0, "echoes": 0, "history": 0}
     for entry in payload.get("entry") or []:
         if not isinstance(entry, dict):
             continue
@@ -640,6 +640,31 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                         error=str(exc),
                     )
                     raise
+            for echo in value.get("message_echoes") or []:
+                # smb_message_echoes: what the business sent from the WhatsApp Business app.
+                if not isinstance(echo, dict):
+                    continue
+                received["echoes"] += 1
+                from app.services.cloud_coexistence import cloud_message_data
+                await _process_cloud_event(
+                    instance=instance,
+                    event={"event": "MESSAGES_UPSERT", "instance": instance, "data": cloud_message_data(echo, from_me=True), "metaCloud": payload},
+                    trace_started_at=started_at,
+                    trace_request_id=request_id,
+                    trace_phone_number_id=phone_id,
+                    trace_waba_id=waba_id,
+                    trace_message=echo,
+                )
+            for chunk in value.get("history") or []:
+                if not isinstance(chunk, dict):
+                    continue
+                from app.services.cloud_coexistence import record_history_chunk
+                business_number = "".join(ch for ch in str((value.get("metadata") or {}).get("display_phone_number") or "") if ch.isdigit())
+                received["history"] += record_history_chunk(instance, chunk, business_number)
+            if change.get("field") == "smb_app_state_sync":
+                # Contact names only; the history import already carries the conversations.
+                save_pipeline_event(stage="meta_contacts_sync", status="received", instance=instance,
+                                    details={"contacts": len(value.get("state_sync") or [])})
             for item in value.get("statuses") or []:
                 if not isinstance(item, dict):
                     continue

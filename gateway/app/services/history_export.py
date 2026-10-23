@@ -42,20 +42,22 @@ def history_item(record, runtime, value):
     return None  # newsletters, status broadcasts
 
 
-async def history_page(body, request, *, registry=None, adapter=None, instagram_page=None):
+async def history_page(body, request, *, registry=None, adapter=None, instagram_page=None, cloud_store=None):
     registry = registry or get_connection_registry()
     method = getattr(request.state, "auth_method", None)
     if method not in {"gateway_api_key", "instance_api_key"}:
         raise HTTPException(403, "Connection service authentication required")
     record = registry.connection_record_by_id(body.connectionRef) or registry.connection_record(body.connectionRef)
     kind = (record or {}).get("provider_id"), (record or {}).get("channel_id")
-    if kind not in {("evolution", "whatsapp"), ("meta", "instagram")}:
-        raise HTTPException(409, "History is available for Evolution WhatsApp and Instagram connections")
+    if kind not in {("evolution", "whatsapp"), ("meta", "instagram"), ("meta", "whatsapp")}:
+        raise HTTPException(409, "History is available for WhatsApp and Instagram connections")
     runtime = record["legacy_name"]
     if method == "instance_api_key" and getattr(request.state, "auth_instance", None) != runtime:
         raise HTTPException(403, "Connection credential mismatch")
     if kind == ("meta", "instagram"):
         return await _instagram_page(body, record, instagram_page=instagram_page)
+    if kind == ("meta", "whatsapp"):
+        return _cloud_page(body, record, runtime, store=cloud_store)
     binding = record.get("core_channel") or {}
     if binding and binding.get("channelId") != body.coreChannelId:
         raise HTTPException(409, "Connection is bound to another Core channel")
@@ -102,3 +104,14 @@ async def _instagram_page(body, record, *, instagram_page=None):
     except Exception:
         logger.warning("instagram_history_unavailable", connection_id=record["id"])
         raise HTTPException(503, "Instagram history is unavailable") from None
+
+
+def _cloud_page(body, record, runtime, *, store=None):
+    """Coexistence history received from Meta, served like Evolution's stored messages."""
+    from app.services.cloud_coexistence import get_cloud_history_store
+
+    records, total = (store or get_cloud_history_store()).page(runtime, body.page, body.pageSize)
+    items = [item for item in (history_item(record, runtime, value) for value in records) if item]
+    timestamps = [int(value.get("messageTimestamp") or 0) for value in records]
+    return {"page": body.page, "pages": -(-total // body.pageSize) if total else 0, "total": total,
+            "records": len(records), "oldestTimestamp": min(timestamps) if timestamps else None, "items": items}

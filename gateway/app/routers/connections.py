@@ -739,6 +739,31 @@ async def disconnect_connection(connection_id: str):
         raise HTTPException(status_code=502, detail="El proveedor no pudo desvincular la sesión. Intentá nuevamente.")
 
 
+@router.get("/{connection_id}/whatsapp/coexistence")
+async def get_whatsapp_coexistence(connection_id: str, request: Request):
+    from app.services.connection_registry import get_connection_registry
+
+    connection = await _service.get_connection(connection_id)
+    require_reviewer_connection_access(request, connection)
+    record = get_connection_registry().connection_record_by_id(connection_id) or {}
+    return {"coexistence": record.get("coexistence") or {}}
+
+
+@router.post("/{connection_id}/whatsapp/coexistence/sync")
+async def request_whatsapp_coexistence_sync(connection_id: str, request: Request):
+    """Ask Meta once for the WhatsApp Business app contacts and up to 180 days of chats."""
+    from app.services.cloud_coexistence import request_coexistence_sync
+
+    connection = await _service.get_connection(connection_id)
+    require_reviewer_connection_access(request, connection)
+    if (connection.provider.id, connection.channel.id) != ("meta", "whatsapp"):
+        raise HTTPException(status_code=409, detail="La sincronización de la app de WhatsApp Business es solo para WhatsApp oficial.")
+    try:
+        return await request_coexistence_sync(_service.connection_runtime_name(connection_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.post("/{connection_id}/reconnect")
 async def reconnect_connection(connection_id: str):
     try:

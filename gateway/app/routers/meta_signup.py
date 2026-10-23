@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.logging import get_logger
@@ -22,6 +24,15 @@ router = APIRouter(prefix="/meta/signup", tags=["meta-signup"])
 @router.get("/config", response_model=MetaSignupConfigResponse)
 async def get_signup_config(request: Request):
     return get_meta_onboarding_orchestrator().public_config()
+
+
+async def _request_coexistence_sync(instance_name: str) -> None:
+    from app.services.cloud_coexistence import request_coexistence_sync
+
+    try:
+        await request_coexistence_sync(instance_name)
+    except Exception as exc:  # the panel offers a manual retry inside the 24h window
+        logger.warning("cloud_coexistence_sync_failed", instance=instance_name, error=type(exc).__name__)
 
 
 @router.post("/complete", status_code=status.HTTP_201_CREATED)
@@ -86,6 +97,9 @@ async def complete_signup(body: MetaSignupCompleteRequest, request: Request):
 
     result = completion.instance
     instance_auth.ensure_instance_key(instance_name, instance_id=instance_name)
+    if "WHATSAPP_BUSINESS_APP_ONBOARDING" in str(body.session_info or "").upper():
+        # Coexistence: Meta only accepts the history request within 24h of onboarding.
+        asyncio.create_task(_request_coexistence_sync(instance_name))
     audit_event(
         "embedded_signup_completed",
         instance=instance_name,

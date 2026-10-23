@@ -202,5 +202,33 @@ def test_meta_webhook_accepts_signed_message_status_and_error(monkeypatch, tmp_p
     response = TestClient(app).post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": signature})
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "messages": 1, "statuses": 1, "changes": 1, "errors": 1, "unmapped": 0}
+    assert response.json() == {"status": "ok", "messages": 1, "statuses": 1, "changes": 1, "errors": 1, "unmapped": 0, "echoes": 0, "history": 0}
     assert TestClient(app).post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": "sha256=bad"}).status_code == 401
+
+
+def test_meta_webhook_forwards_app_echoes_and_stores_coexistence_history(monkeypatch, tmp_path) -> None:
+    from app.services import cloud_coexistence
+
+    settings = _settings()
+    monkeypatch.setattr(meta_webhook, "get_settings", lambda: settings)
+    processed = AsyncMock(return_value="queued")
+    monkeypatch.setattr(meta_webhook, "_process_cloud_event", processed)
+    monkeypatch.setattr(credential_manager, "get_settings", lambda: SimpleNamespace(
+        official_credentials_path=str(tmp_path / "credentials.json"), official_credentials_encryption_key="test-encryption-key"))
+    credential_manager.get_credential_manager().upsert_official_credentials(
+        instance_name="cloud_test", access_token="access-token", phone_number_id="phone_123", business_account_id="waba_123", source="test")
+    chunks = []
+    monkeypatch.setattr(cloud_coexistence, "record_history_chunk", lambda instance, item, number: chunks.append((instance, number)) or 2)
+    payload = {"object": "whatsapp_business_account", "entry": [{"changes": [
+        {"field": "smb_message_echoes", "value": {"metadata": {"phone_number_id": "phone_123", "display_phone_number": "+54 9 11 0000-0000"},
+         "message_echoes": [{"from": "5491100000000", "to": "5491122223333", "id": "wamid.echo", "timestamp": "1", "type": "text", "text": {"body": "ok"}}]}},
+        {"field": "history", "value": {"metadata": {"phone_number_id": "phone_123", "display_phone_number": "+54 9 11 0000-0000"},
+         "history": [{"metadata": {"phase": 0, "chunk_order": 1, "progress": 10}, "threads": []}]}},
+    ]}]}
+    body = json.dumps(payload).encode("utf-8")
+    signature = "sha256=" + hmac.new(b"app-secret", body, hashlib.sha256).hexdigest()
+    response = TestClient(app).post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": signature})
+    assert response.status_code == 200 and response.json()["echoes"] == 1 and response.json()["history"] == 2
+    event = processed.await_args.kwargs["event"]
+    assert event["data"]["key"] == {"id": "wamid.echo", "remoteJid": "5491122223333@s.whatsapp.net", "fromMe": True}
+    assert chunks == [("cloud_test", "5491100000000")]
