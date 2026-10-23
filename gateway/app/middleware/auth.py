@@ -1,5 +1,6 @@
 import hmac
 import inspect
+import re
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from app.services.authorization import reviewer_endpoint_allowed
 
 _PUBLIC_PATHS = {"/health", "/webhooks/evolution", "/webhooks/meta", "/auth/config", "/auth/google", "/auth/login", "/connections/meta/instagram/callback"}
 _COOKIE = "botly_gateway_session"
+_OWN_MEDIA_PATH = re.compile(r"^/instances/([^/]+)/media/[^/]+$")
 
 
 def _gateway_api_key(request: Request) -> str:
@@ -50,9 +52,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Gateway key: only the legacy unified endpoint and the versioned
         # canonical outbound endpoint accept them.
         instance_auth = authenticate_instance_token(provided_key)
+        media = _OWN_MEDIA_PATH.match(request.url.path)
         if instance_auth and (
             request.url.path.startswith("/messages/")
             or request.url.path in {"/v1/outbound/messages", "/v2/outbound/messages", "/v2/group-transport/automatic", "/v2/history/messages"}
+            # Core downloads inbound media with the channel key: only that instance's media.
+            or (media is not None and media.group(1) == instance_auth["instance"])
         ):
             request.state.auth_method = "instance_api_key"
             request.state.auth_instance = instance_auth["instance"]

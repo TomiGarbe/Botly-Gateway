@@ -65,3 +65,17 @@ def test_instance_token_cannot_access_another_instance() -> None:
         assert exc.status_code == 403
     else:
         raise AssertionError("Expected instance scope validation to reject the request")
+
+
+def test_instance_token_downloads_only_its_own_media(monkeypatch) -> None:
+    monkeypatch.setattr(auth_middleware, "get_settings", lambda: SimpleNamespace(gateway_api_key="global-token"))
+    monkeypatch.setattr(auth_middleware, "authenticate_instance_token",
+                        lambda token: {"instance": "connection_a"} if token == "instance-token" else None)
+    monkeypatch.setattr(auth_middleware, "get_auth_service", lambda: SimpleNamespace(current_user=lambda cookie: None))
+    middleware = AuthMiddleware(app=lambda *_: None)
+    own = asyncio.run(middleware.dispatch(_request("/instances/connection_a/media/media-1", "instance-token"), lambda _r: Response(status_code=204)))
+    assert own.status_code == 204
+    other = asyncio.run(middleware.dispatch(_request("/instances/connection_b/media/media-1", "instance-token"), lambda _r: Response(status_code=204)))
+    assert other.status_code == 401
+    listing = asyncio.run(middleware.dispatch(_request("/instances/connection_a/webhooks", "instance-token"), lambda _r: Response(status_code=204)))
+    assert listing.status_code == 401
