@@ -125,3 +125,34 @@ def test_alerts_router_exposes_alert_lifecycle_and_deletion(monkeypatch, tmp_pat
     another_alert_id = http.get("/alerts").json()["items"][0]["id"]
     assert http.delete(f"/alerts/{another_alert_id}").status_code == 204
     assert http.delete(f"/alerts/{another_alert_id}").status_code == 404
+
+
+class _Signals:
+    async def evolution_states(self):
+        return {"evo-down": "connecting", "evo-ok": "open"}
+
+    def instagram_token_state(self, connection_id):
+        return {"ig-expired": "expired", "ig-expiring": "expiring"}.get(connection_id, "active")
+
+    def core_delivery_stats(self, connection_id):
+        return {"stalled": {"pending_age_seconds": 900, "failed_24h": 0},
+                "dropped": {"pending_age_seconds": 0, "failed_24h": 3}}.get(connection_id, {"pending_age_seconds": 0, "failed_24h": 0})
+
+
+def test_live_signals_raise_session_token_and_delivery_alerts(tmp_path) -> None:
+    from dataclasses import replace
+    connections = _Connections()
+    evo = lambda cid, state="connected": replace(_connection(cid, state=state), provider=Provider(id="evolution", display_name="Evolution"))
+    ig = lambda cid: replace(_connection(cid), channel=Channel(id="instagram", display_name="Instagram"))
+    connections.items = [evo("evo-down", "connecting"), evo("evo-ok"), evo("evo-elsewhere", "connecting"),
+                         ig("ig-expired"), ig("ig-expiring"), _connection("stalled"), _connection("dropped")]
+    service = AlertService(connections=connections, operations=_Operations(), store=AlertStore(tmp_path / "alerts.json"),  # type: ignore[arg-type]
+                           events_reader=lambda **_: [], now=lambda: NOW, signals=_Signals())
+    alerts = {(alert.connection.id, alert.title, alert.severity) for alert in asyncio.run(service.list_alerts())}
+    assert alerts == {
+        ("evo-down", "WhatsApp sin sesión", "critical"),
+        ("ig-expired", "Instagram sin autorización", "critical"),
+        ("ig-expiring", "Autorización de Instagram por vencer", "warning"),
+        ("stalled", "Mensajes sin llegar a Botly", "critical"),
+        ("dropped", "Mensajes descartados", "warning"),
+    }

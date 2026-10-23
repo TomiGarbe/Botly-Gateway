@@ -172,17 +172,20 @@ class AlertService:
         store: AlertStore | None = None,
         events_reader: Callable[..., list[dict[str, Any]]] | None = None,
         now: Callable[[], datetime] | None = None,
+        signals: Any | None = None,
     ) -> None:
         self._connections = connections or get_connection_service()
         self._operations = operations or get_connection_operations_service()
         self._store = store or AlertStore()
         self._events_reader = events_reader or list_events
         self._now = now or _now
+        self._signals = signals
 
     async def list_alerts(self) -> list[Alert]:
         connections = await self._connections.list_connections()
         runtime_names = {self._connections.connection_runtime_name(connection.id): connection for connection in connections}
         candidates = self._candidates(connections, runtime_names)
+        candidates += await self._signal_candidates(connections)
         records = self._store.sync(candidates)
         alerts = [self._to_alert(item) for item in records]
         return sorted(alerts, key=lambda item: (item.status == "resolved", item.created_at), reverse=False)
@@ -220,7 +223,8 @@ class AlertService:
             candidates.append(self._candidate("connection_disconnected", "critical", "Conexión desconectada", "La conexión dejó de estar disponible. Abrí el Workspace para reconectarla.", connection))
         if "auth" in lifecycle or "token" in lifecycle:
             candidates.append(self._candidate("authentication_error", "critical", "Error de autenticación", "La autorización de esta conexión necesita renovarse.", connection))
-        if connection.status.state in {"pending", "connecting"}:
+        if connection.status.state in {"pending", "connecting"} and connection.provider.id != "evolution":
+            # Evolution sessions are judged from the live provider state instead.
             candidates.append(self._candidate("embedded_signup_pending", "warning", "Embedded Signup pendiente", "La conexión todavía necesita completar su configuración.", connection))
         if connection.status.health == "degraded" or connection.status.health == "unhealthy":
             candidates.append(self._candidate("provider_degraded", "critical" if connection.status.health == "unhealthy" else "warning", "Proveedor degradado", "El proveedor de esta conexión reporta un estado degradado.", connection))
@@ -236,6 +240,41 @@ class AlertService:
             candidates.append(self._candidate("webhook_errors", "warning", "Webhook con errores", "La última entrega del webhook no pudo completarse.", connection))
         if reconnect_count >= _RECONNECT_THRESHOLD:
             candidates.append(self._candidate("repeated_reconnects", "warning", "Reconexiones repetidas", "La conexión requirió varias reconexiones recientemente.", connection))
+        return candidates
+
+    async def _signal_candidates(self, connections: list[Connection]) -> list[dict[str, Any]]:
+        if self._signals is None:
+            return []
+        candidates: list[dict[str, Any]] = []
+        evolution = [c for c in connections if c.provider.id == "evolution"]
+        states = await self._signals.evolution_states() if evolution else {}
+        for connection in connections:
+            if connection.provider.id == "evolution":
+                state = states.get(self._connections.connection_runtime_name(connection.id))
+                if state is not None and state != "open":
+                    candidates.append(self._candidate(
+                        "whatsapp_session_down", "critical", "WhatsApp sin sesión",
+                        "WhatsApp cerró o no completó la vinculación de este número: no recibe ni envía mensajes. "
+                        "Usá «Desconectar y volver a vincular» y escaneá el QR.", connection))
+            if (connection.provider.id, connection.channel.id) == ("meta", "instagram"):
+                token = self._signals.instagram_token_state(connection.id)
+                if token in {"expired", "missing"}:
+                    candidates.append(self._candidate(
+                        "instagram_token_expired", "critical", "Instagram sin autorización",
+                        "El acceso a la cuenta de Instagram venció: no se reciben ni envían mensajes. Tocá «Reautorizar».", connection))
+                elif token == "expiring":
+                    candidates.append(self._candidate(
+                        "instagram_token_expiring", "warning", "Autorización de Instagram por vencer",
+                        "El acceso vence en menos de 7 días y no se pudo renovar solo. Reautorizá la cuenta.", connection))
+            stats = self._signals.core_delivery_stats(connection.id)
+            if stats.get("pending_age_seconds", 0) > 600:
+                candidates.append(self._candidate(
+                    "core_delivery_stalled", "critical", "Mensajes sin llegar a Botly",
+                    "Hay mensajes esperando hace más de 10 minutos para entrar a Botly.", connection))
+            elif stats.get("failed_24h", 0):
+                candidates.append(self._candidate(
+                    "core_delivery_failed", "warning", "Mensajes descartados",
+                    f"{stats['failed_24h']} mensajes no pudieron entregarse a Botly en las últimas 24 h. Revisalos en la pestaña Grupos.", connection))
         return candidates
 
     @staticmethod
@@ -299,7 +338,9 @@ class AlertService:
 
 
 def get_alert_service() -> AlertService:
-    return AlertService()
+    from app.services.alert_signals import LiveAlertSignals
+
+    return AlertService(signals=LiveAlertSignals())
 
 
 # Transitional internal helpers for legacy automations. They are deliberately
