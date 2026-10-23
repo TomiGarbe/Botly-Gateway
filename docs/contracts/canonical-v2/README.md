@@ -43,6 +43,11 @@ Gateway arrival time is not substituted. `botAccount` is supplied by authenticat
 Core policy from a verified account identity; when unavailable use null identity
 and name. Gateway never derives it from an instance label or guesses JID/LID aliases.
 
+Optional `message.attachments` lists live media served by this Gateway at
+`/instances/{instance}/media/{id}`, readable with the channel credential. It is
+omitted (never `null`) when there is no media and for history exports, so text
+events are unchanged for consumers that predate it.
+
 Core must preserve authors and own history, suppress AI for `fromMe: true` (and
 handle unknown direction conservatively), resolve identity aliases explicitly,
 and invoke only on a real current mention of the bot or a direct quote of its

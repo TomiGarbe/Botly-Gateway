@@ -712,3 +712,21 @@ def test_prometheus_metrics_expose_pipeline_counters_and_core_outbox_lag():
     assert 'botly_gateway_core_outbox_deliveries{status="dead_letter"} 1' in text
     assert 'botly_gateway_core_outbox_deliveries{status="failed"} 0' in text
     assert 'botly_gateway_core_outbox_oldest_pending_seconds 90.000' in text
+
+
+def test_live_group_media_is_indexed_and_attached_but_history_is_not(harness, monkeypatch):
+    from app.services import normalization
+    registry, record, policy, store, dispatcher = harness
+    payload = provider_payload()
+    payload['data']['message'] = {'audioMessage': {'url': 'https://mmg.whatsapp.net/v/audio', 'mimetype': 'audio/ogg; codecs=opus',
+                                                   'fileLength': '4096', 'ptt': True, 'mediaKey': 'k', 'directPath': '/v/audio'}}
+    payload['data']['messageType'] = 'audioMessage'
+    indexed = []
+    monkeypatch.setattr(normalization, 'index_media', lambda normalized: indexed.append(normalized['media']['id']))
+    assert groups.ingest_group(payload, normalize_webhook(payload)) == 'group_queued'
+    [delivery] = store.list()
+    [attachment] = delivery['canonicalEvent']['message']['attachments']
+    assert attachment['url'].endswith(f"/instances/synthetic-instance/media/{indexed[0]}")
+    assert attachment['mimeType'].startswith('audio/ogg') and attachment['size'] == 4096
+    history = groups.projection(payload, normalize_webhook(payload), record, policy)
+    assert 'attachments' not in history['message']

@@ -953,6 +953,53 @@ def normalize_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def index_media(normalized: dict[str, Any]) -> None:
+    """Remember where a message's media lives so /instances/{instance}/media/{id} can serve it."""
+    media = normalized.get("media")
+    message = normalized.get("message") or {}
+    if isinstance(media, dict):
+        raw_payload = normalized.get("raw") if isinstance(normalized.get("raw"), dict) else {}
+        raw_data = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else {}
+        key_obj = raw_data.get("key") if isinstance(raw_data.get("key"), dict) else {}
+        message_obj = raw_data.get("message") if isinstance(raw_data.get("message"), dict) else {}
+        _media_index[str(media.get("id"))] = {
+            **media,
+            "instance": normalized.get("instance"),
+            "messageId": message.get("id"),
+            "savedAt": int(time.time()),
+            "remoteJid": key_obj.get("remoteJid"),
+            "fromMe": key_obj.get("fromMe"),
+            "participant": key_obj.get("participant"),
+            "messageKey": key_obj,
+            "messageObject": message_obj,
+        }
+        _persist_media_index_item(str(media.get("id") or ""), _media_index[str(media.get("id"))])
+        logger.info(
+            "media_index_store",
+            instance=normalized.get("instance"),
+            message_id=message.get("id"),
+            media_id=media.get("id"),
+            stored_key=str(media.get("id") or ""),
+            media_key=media.get("mediaKey"),
+            file_sha256=((message_obj.get("imageMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
+            or ((message_obj.get("audioMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
+            or ((message_obj.get("videoMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
+            or ((message_obj.get("documentMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None),
+            direct_path=media.get("directPath"),
+        )
+        logger.info(
+            "media_indexed_probe",
+            instance=normalized.get("instance"),
+            message_id=message.get("id"),
+            media_id=media.get("id"),
+            kind=media.get("kind"),
+            mime_type=media.get("mimeType"),
+            source_url=media.get("url"),
+            direct_path=media.get("directPath"),
+            has_media_key=bool(media.get("mediaKey")),
+        )
+
+
 def save_business_event(event: dict[str, Any]) -> bool:
     if event.get("layer") != "business":
         return True
@@ -1006,49 +1053,7 @@ def save_event(normalized: dict[str, Any]) -> bool:
                     metadata["statusCorrelation"] = {"outcome": "invalid", "reason": "local_store_unavailable", "attempt_id": None, "delivery_state": None}
     _business_events.appendleft(SecretRedactor.redact_json(normalized))
     persisted = _persist_business_events()
-    media = normalized.get("media")
-    message = normalized.get("message") or {}
-    if isinstance(media, dict):
-        raw_payload = normalized.get("raw") if isinstance(normalized.get("raw"), dict) else {}
-        raw_data = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else {}
-        key_obj = raw_data.get("key") if isinstance(raw_data.get("key"), dict) else {}
-        message_obj = raw_data.get("message") if isinstance(raw_data.get("message"), dict) else {}
-        _media_index[str(media.get("id"))] = {
-            **media,
-            "instance": normalized.get("instance"),
-            "messageId": message.get("id"),
-            "savedAt": int(time.time()),
-            "remoteJid": key_obj.get("remoteJid"),
-            "fromMe": key_obj.get("fromMe"),
-            "participant": key_obj.get("participant"),
-            "messageKey": key_obj,
-            "messageObject": message_obj,
-        }
-        _persist_media_index_item(str(media.get("id") or ""), _media_index[str(media.get("id"))])
-        logger.info(
-            "media_index_store",
-            instance=normalized.get("instance"),
-            message_id=message.get("id"),
-            media_id=media.get("id"),
-            stored_key=str(media.get("id") or ""),
-            media_key=media.get("mediaKey"),
-            file_sha256=((message_obj.get("imageMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
-            or ((message_obj.get("audioMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
-            or ((message_obj.get("videoMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None)
-            or ((message_obj.get("documentMessage") or {}).get("fileSha256") if isinstance(message_obj, dict) else None),
-            direct_path=media.get("directPath"),
-        )
-        logger.info(
-            "media_indexed_probe",
-            instance=normalized.get("instance"),
-            message_id=message.get("id"),
-            media_id=media.get("id"),
-            kind=media.get("kind"),
-            mime_type=media.get("mimeType"),
-            source_url=media.get("url"),
-            direct_path=media.get("directPath"),
-            has_media_key=bool(media.get("mediaKey")),
-        )
+    index_media(normalized)
     return persisted
 
 

@@ -40,6 +40,15 @@ class Transport(_CanonicalModel):
     bindingId: StrictStr
 
 
+class Attachment(_CanonicalModel):
+    """Media served by this Gateway; Core downloads it with the channel credential."""
+    kind: StrictStr
+    url: StrictStr = Field(min_length=1, max_length=2048)
+    mimeType: StrictStr | None = None
+    fileName: StrictStr | None = Field(default=None, max_length=255)
+    size: StrictInt | None = None
+
+
 class InboundMessage(_CanonicalModel):
     providerMessageId: StrictStr = Field(min_length=1)
     kind: StrictStr
@@ -47,6 +56,7 @@ class InboundMessage(_CanonicalModel):
     fromMe: StrictBool | None
     mentions: list[Identity] | None
     quoted: Quote | None
+    attachments: list[Attachment] | None = Field(default=None, max_length=10)
 
 
 class CanonicalInboundV2(_CanonicalModel):

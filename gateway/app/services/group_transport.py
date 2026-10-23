@@ -32,7 +32,7 @@ def require_policy(record, *, group_id=None, policy=None):
     return parsed
 
 
-def projection(payload, normalized, record, policy):
+def projection(payload, normalized, record, policy, *, with_media=False):
     data = payload.get('data') or {}
     key = data.get('key') or {}
     context = normalized.get('context') or {}
@@ -67,7 +67,19 @@ def projection(payload, normalized, record, policy):
                                'author': {'externalId': info.get('participant'), 'displayName': None},
                                'chatExternalId': info.get('remoteJid')} if quote else None},
     }
-    return CanonicalInboundV2.model_validate(event).model_dump()
+    media = normalized.get('media') if with_media else None
+    if isinstance(media, dict) and media.get('id'):
+        from app.routers.webhooks import _resolve_public_gateway_base_url
+        event['message']['attachments'] = [{
+            'kind': str(media.get('kind') or normalized.get('subtype') or 'unknown'),
+            'url': f"{_resolve_public_gateway_base_url()}/instances/{record['legacy_name']}/media/{media['id']}",
+            'mimeType': media.get('mimeType'), 'fileName': media.get('fileName'), 'size': media.get('fileSize'),
+        }]
+    projected = CanonicalInboundV2.model_validate(event).model_dump()
+    if projected['message']['attachments'] is None:
+        # Omitted rather than null: text events stay byte-identical for Cores without media support.
+        del projected['message']['attachments']
+    return projected
 
 
 def ingest_group(payload, normalized):
@@ -87,9 +99,12 @@ def ingest_group(payload, normalized):
     if normalized.get('type') != 'message' or provider_event != 'MESSAGES_UPSERT':
         return 'group_unsupported_event'
     try:
-        event = projection(payload, normalized, record, policy)
+        event = projection(payload, normalized, record, policy, with_media=True)
     except (ValueError, TypeError):
         return 'group_invalid_event'
+    if event['message'].get('attachments'):
+        from app.services.normalization import index_media
+        index_media(normalized)  # lets Core download it through /instances/{instance}/media/{id}
     dispatcher = get_core_inbound_dispatcher()
     delivery, created = dispatcher.persist(event)  # durable before provider acknowledgment
     logger.info("group_transport_event_persisted", delivery_id=delivery["id"],
