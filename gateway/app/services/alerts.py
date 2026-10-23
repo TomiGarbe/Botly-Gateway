@@ -230,7 +230,10 @@ class AlertService:
             candidates.append(self._candidate("provider_degraded", "critical" if connection.status.health == "unhealthy" else "warning", "Proveedor degradado", "El proveedor de esta conexión reporta un estado degradado.", connection))
 
         heartbeat_at = self._heartbeat_at(connection.id)
-        if heartbeat_at and self._now() - heartbeat_at > _HEARTBEAT_MAX_AGE:
+        # The heartbeat only moves when someone opens the panel; with live signals the
+        # Evolution session itself is checked, so a stale heartbeat says nothing there.
+        live_session = self._signals is not None and connection.provider.id == "evolution"
+        if heartbeat_at and not live_session and self._now() - heartbeat_at > _HEARTBEAT_MAX_AGE:
             candidates.append(self._candidate("heartbeat_expired", "warning", "Heartbeat vencido", "No se confirmó actividad reciente de esta conexión.", connection))
         try:
             webhook = self._operations.webhook(connection.id)

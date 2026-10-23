@@ -148,7 +148,10 @@ def test_live_signals_raise_session_token_and_delivery_alerts(tmp_path) -> None:
                          ig("ig-expired"), ig("ig-expiring"), _connection("stalled"), _connection("dropped")]
     service = AlertService(connections=connections, operations=_Operations(), store=AlertStore(tmp_path / "alerts.json"),  # type: ignore[arg-type]
                            events_reader=lambda **_: [], now=lambda: NOW, signals=_Signals())
+    connections.connection_last_heartbeat_at = lambda cid: (NOW - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
     alerts = {(alert.connection.id, alert.title, alert.severity) for alert in asyncio.run(service.list_alerts())}
+    assert ("evo-ok", "Heartbeat vencido", "warning") not in alerts  # live session supersedes the panel heartbeat
+    alerts = {item for item in alerts if item[1] != "Heartbeat vencido"}
     assert alerts == {
         ("evo-down", "WhatsApp sin sesión", "critical"),
         ("ig-expired", "Instagram sin autorización", "critical"),
