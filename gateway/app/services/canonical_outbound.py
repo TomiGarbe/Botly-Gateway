@@ -1,10 +1,13 @@
 """Provider-neutral canonical outbound delivery owned by Botly Gateway."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
+
+import httpx
 
 from app.connections import get_connection_manager
 from app.core.logging import get_logger
@@ -31,6 +34,15 @@ logger = get_logger(__name__)
 
 _EVOLUTION_WHATSAPP = ("evolution", "whatsapp")
 _META_INSTAGRAM = ("meta", "instagram")
+_META_WHATSAPP = ("meta", "whatsapp")
+_MAX_OUTBOUND_MEDIA_BYTES = 16 * 1024 * 1024
+
+
+def _provider_matches(*, connection_provider: str, channel_type: str, core_provider: str) -> bool:
+    """Core models WhatsApp Cloud with the Evolution-shaped contract the Gateway emits for it."""
+    if connection_provider == core_provider:
+        return True
+    return (connection_provider, channel_type) == _META_WHATSAPP and core_provider == "evolution"
 
 
 class CanonicalOutboundError(Exception):
@@ -88,7 +100,11 @@ class CanonicalOutboundService:
         channel_type = str(record.get("channel_id") or "").strip().lower()
         runtime_name = str(record.get("legacy_name") or "").strip()
         connection_id = str(record.get("id") or "").strip()
-        if not runtime_name or provider != message.channel.provider or channel_type != message.channel.channel_type:
+        if (
+            not runtime_name
+            or channel_type != message.channel.channel_type
+            or not _provider_matches(connection_provider=provider, channel_type=channel_type, core_provider=message.channel.provider)
+        ):
             raise CanonicalOutboundError("Canonical transport does not match the resolved Gateway connection.", status_code=409, code="transport_mismatch")
         return ResolvedOutboundConnection(
             connection_id=connection_id,
@@ -231,6 +247,7 @@ class CanonicalOutboundService:
         senders: dict[tuple[str, str], Callable[[], Awaitable[dict[str, Any]]]] = {
             _EVOLUTION_WHATSAPP: lambda: self._send_evolution(connection=connection, message=message),
             _META_INSTAGRAM: lambda: self._send_instagram(connection=connection, message=message),
+            _META_WHATSAPP: lambda: self._send_meta_whatsapp(connection=connection, message=message),
         }
         sender = senders.get(transport)
         if sender is None:
@@ -261,6 +278,27 @@ class CanonicalOutboundService:
             attachment.mime_type or "application/octet-stream",
             attachment.filename or "file.bin",
             message.message.content or "",
+        )
+
+    async def _send_meta_whatsapp(self, *, connection: ResolvedOutboundConnection, message: CanonicalOutboundMessage) -> dict[str, Any]:
+        from app.providers.whatsapp_official import get_official_whatsapp_provider
+
+        provider = get_official_whatsapp_provider()
+        number = _recipient_for_transport(_META_WHATSAPP, message.recipient.external_id)
+        attachment = _validate_message_for_transport(_META_WHATSAPP, message)
+        if message.message.kind == "text":
+            return await provider.send_text(instance_name=connection.runtime_name, number=number, text=message.message.content or "")
+        assert attachment is not None
+        # Cloud API needs the bytes uploaded to Graph; the attachment URL is a short-lived Core delivery URL.
+        payload = await _download_attachment(attachment.url or "")
+        return await provider.send_media(
+            instance_name=connection.runtime_name,
+            number=number,
+            media_base64=base64.b64encode(payload).decode("ascii"),
+            media_type=message.message.kind,
+            mime_type=attachment.mime_type or "application/octet-stream",
+            file_name=attachment.filename or "file.bin",
+            caption=message.message.content or "",
         )
 
     async def _send_instagram(self, *, connection: ResolvedOutboundConnection, message: CanonicalOutboundMessage) -> dict[str, Any]:
@@ -338,11 +376,12 @@ def _recipient_for_transport(transport: tuple[str, str], external_id: str) -> st
     mappers: dict[tuple[str, str], Callable[[str], str]] = {
         _EVOLUTION_WHATSAPP: _evolution_number,
         _META_INSTAGRAM: _opaque_external_id,
+        _META_WHATSAPP: _evolution_number,
     }
     recipient = mappers[transport](external_id)
     if recipient:
         return recipient
-    if transport == _EVOLUTION_WHATSAPP:
+    if transport in {_EVOLUTION_WHATSAPP, _META_WHATSAPP}:
         raise CanonicalOutboundError("WhatsApp recipient externalId is invalid.", status_code=422, code="recipient_invalid")
     raise CanonicalOutboundError("Instagram recipient externalId is invalid.", status_code=422, code="recipient_invalid")
 
@@ -351,8 +390,23 @@ def _validate_message_for_transport(transport: tuple[str, str], message: Canonic
     validators: dict[tuple[str, str], Callable[[CanonicalOutboundMessage], Any | None]] = {
         _EVOLUTION_WHATSAPP: _validate_whatsapp_message,
         _META_INSTAGRAM: _validate_instagram_text_message,
+        _META_WHATSAPP: _validate_whatsapp_message,
     }
     return validators[transport](message)
+
+
+async def _download_attachment(url: str) -> bytes:
+    if not url.strip():
+        raise CanonicalOutboundError("Canonical media delivery requires an attachment URL.", status_code=422, code="message_kind_unsupported")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=8.0), follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise CanonicalOutboundError("The attachment could not be downloaded from Core.", status_code=502, code="attachment_unavailable") from exc
+    if not response.content or len(response.content) > _MAX_OUTBOUND_MEDIA_BYTES:
+        raise CanonicalOutboundError("The attachment is empty or too large.", status_code=422, code="attachment_invalid")
+    return response.content
 
 
 def _validate_whatsapp_message(message: CanonicalOutboundMessage) -> Any | None:

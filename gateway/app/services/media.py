@@ -168,6 +168,45 @@ def _validate_magic(payload: bytes, mime_type: str) -> tuple[bool, str]:
     return True, magic
 
 
+def _cloud_media_id(metadata: dict[str, Any]) -> str | None:
+    """WhatsApp Cloud keeps the Graph media id inside the original message object."""
+    message_object = metadata.get("messageObject") if isinstance(metadata.get("messageObject"), dict) else {}
+    for value in message_object.values():
+        if isinstance(value, dict) and value.get("id") and not value.get("mediaKey"):
+            return str(value["id"]).strip() or None
+    return None
+
+
+def _official_credentials(instance: str) -> tuple[Any, str] | None:
+    from app.services.credential_manager import get_credential_manager
+
+    credentials = get_credential_manager()
+    info = credentials.get_official_credentials_info(instance)
+    token = credentials.get_official_access_token(instance) if info is not None else None
+    return (info, token) if info is not None and token else None
+
+
+async def _download_cloud_media(instance: str, cloud_media_id: str) -> tuple[bytes, str | None]:
+    from app.platforms.meta import MetaPlatform
+
+    resolved = _official_credentials(instance)
+    if resolved is None:
+        raise ValueError("No hay credenciales de WhatsApp Oficial para descargar la media")
+    _info, token = resolved
+    headers = {"Authorization": f"Bearer {token}"}
+    described = await MetaPlatform().request("GET", f"/{cloud_media_id}", headers=headers)
+    url = str(described.get("url") or "") if isinstance(described, dict) else ""
+    if not url:
+        raise ValueError("Meta no devolvio la URL de la media")
+    settings = get_settings()
+    timeout = httpx.Timeout(connect=8.0, read=settings.media_download_timeout, write=15.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+    logger.info("media_cloud_download_success", instance=instance, size=len(response.content))
+    return response.content, (str(described.get("mime_type") or "").split(";", 1)[0].strip().lower() or None)
+
+
 async def get_decrypted_media_bytes(metadata: dict[str, Any]) -> tuple[bytes, dict[str, str]]:
     from app.services.normalization import update_media_download_state
 
@@ -197,6 +236,22 @@ async def get_decrypted_media_bytes(metadata: dict[str, Any]) -> tuple[bytes, di
             raise ValueError(f"magic bytes invalidos desde cache ({magic})")
         update_media_download_state(media_id, source="cache", decrypted_size=len(payload))
         return payload, {"source": "cache", "magic": magic}
+
+    cloud_media_id = _cloud_media_id(metadata)
+    if cloud_media_id and _official_credentials(instance):
+        payload, graph_mime = await _download_cloud_media(instance, cloud_media_id)
+        if mime_type == "application/octet-stream" and graph_mime:
+            mime_type = graph_mime
+        valid, magic = _validate_magic(payload, mime_type)
+        logger.info(
+            "media_magic_bytes", instance=instance, media_id=media_id, mime=mime_type, magic=magic,
+            valid=valid, source="meta_graph", size=len(payload),
+        )
+        tmp_path = cache_path.with_suffix(".tmp")
+        tmp_path.write_bytes(payload)
+        os.replace(tmp_path, cache_path)
+        update_media_download_state(media_id, source="meta_graph", decrypted_size=len(payload))
+        return payload, {"source": "meta_graph", "magic": magic, "mime": mime_type}
 
     logger.info(
         "media_download_start",

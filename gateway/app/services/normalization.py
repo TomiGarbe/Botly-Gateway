@@ -437,8 +437,9 @@ def _extract_media(message: dict[str, Any], kind: str) -> dict[str, Any] | None:
     return {
         "id": media_id,
         "kind": kind,
-        "mimeType": raw.get("mimetype"),
-        "fileName": raw.get("fileName"),
+        # Evolution uses camelCase; WhatsApp Cloud objects use snake_case.
+        "mimeType": raw.get("mimetype") or raw.get("mime_type"),
+        "fileName": raw.get("fileName") or raw.get("filename"),
         "fileSize": _to_int64(raw.get("fileLength")),
         "mediaKey": raw.get("mediaKey"),
         "fileSha256": raw.get("fileSha256"),
@@ -449,7 +450,7 @@ def _extract_media(message: dict[str, Any], kind: str) -> dict[str, Any] | None:
         "directPath": direct_path,
         "thumbnail": raw.get("jpegThumbnail"),
         "dimensions": dimensions,
-        "isVoiceNote": bool(raw.get("ptt")),
+        "isVoiceNote": bool(raw.get("ptt") or raw.get("voice")),
         "downloadSource": "provider-url",
     }
 

@@ -336,26 +336,6 @@ def test_canonical_instagram_binding_mismatch_is_rejected(tmp_path) -> None:
     assert connection_service.calls == []
 
 
-def test_canonical_unsupported_provider_channel_remains_501(tmp_path) -> None:
-    channel_id = str(uuid4())
-    message = CanonicalOutboundMessage.model_validate({
-        **_message(channel_id).model_dump(by_alias=True),
-        "channel": {"id": channel_id, "type": "whatsapp", "provider": "meta"},
-    })
-    service = _service(
-        tmp_path,
-        channel_id,
-        _InstagramConnectionService(),
-        registry=_Registry(channel_id, provider="meta", channel_type="whatsapp"),
-    )
-
-    with pytest.raises(CanonicalOutboundError) as raised:
-        asyncio.run(service.deliver(message=message, authenticated_instance=None))
-
-    assert raised.value.status_code == 501
-    assert raised.value.code == "provider_not_implemented"
-
-
 def test_canonical_endpoint_returns_202_for_instagram_success(tmp_path, monkeypatch) -> None:
     channel_id = str(uuid4())
     service = _service(tmp_path, channel_id, _InstagramConnectionService())

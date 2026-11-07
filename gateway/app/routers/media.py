@@ -116,7 +116,7 @@ async def proxy_media(instance_name: str, media_id: str):
         "X-Media-Magic": str(info.get("magic") or "unknown"),
         "Content-Length": str(len(payload)),
     }
-    media_type = str(metadata.get("mimeType") or "application/octet-stream")
+    media_type = str(info.get("mime") or metadata.get("mimeType") or "application/octet-stream")
     return StreamingResponse(iter([payload]), media_type=media_type, headers=response_headers)
 
 
