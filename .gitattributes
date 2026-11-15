@@ -1,0 +1,8 @@
+# Los scripts se ejecutan en Linux (F1): siempre con LF.
+*.sh text eol=lf
+
+# Controles de Claude Code: LF exacto en todo checkout (vendor.mjs verifica el SHA-256 de las
+# dependencias vendorizadas; con core.autocrlf=true un CRLF rompería el hash y el guard bloquearía todo).
+# Limitado a .claude/hooks/; los .wasm son binarios.
+.claude/hooks/** text eol=lf
+.claude/hooks/**/*.wasm binary
