@@ -25,7 +25,6 @@ node_modules/
 # IDE
 .vscode/
 .idea/
-.claude/
 *.swp
 *.swo
 
@@ -38,3 +37,14 @@ tmp/
 docs/*
 # Versioned transport contracts shared with Core
 !docs/contracts/
+# Sistema de agentes (BA-01)
+!docs/agents/
+
+# Claude Code: se versiona la configuracion compartida del CTO (CLAUDE.md, settings.json, hooks/,
+# agents/, skills/; BA-01). Lo demas de .claude/ es local: settings.local.json, launch.json,
+# worktrees/. `**/` cubre tambien las .claude/ anidadas; las excepciones son solo de la raiz.
+**/.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/agents/
+!.claude/skills/
