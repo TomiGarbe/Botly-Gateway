@@ -13,10 +13,11 @@ from app.services.meta.evolution import MetaEvolutionProvisioner
 from app.services.meta.exceptions import MetaOnboardingError
 from app.services.meta.orchestrator import MetaOnboardingOrchestrator
 
+_COEXISTENCE_SESSION = {"event": "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"}
 
-def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch, tmp_path) -> None:
-    calls: list[tuple[str, str]] = []
-    subscription = {"configured": False}
+
+def _graph_handler(calls: list[tuple[str, str]], subscription: dict):
+    """Fake Graph API. ``subscription`` holds the WABA's app subscription state."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
@@ -34,6 +35,11 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
             if request.method == "GET":
                 data = [{"id": "app_123", "override_callback_uri": "https://gateway.example.test/webhooks/meta"}] if subscription["configured"] else []
                 return httpx.Response(200, json={"data": data})
+            subscription.setdefault("posts", []).append(
+                {"authorization": request.headers.get("Authorization"), "body": json.loads(request.content)}
+            )
+            if subscription.get("reject_post"):
+                return httpx.Response(400, json={"error": {"message": "Permissions error", "type": "OAuthException", "code": 200}})
             subscription["configured"] = True
             return httpx.Response(200, json={"success": True})
         if path.endswith("/waba_456"):
@@ -50,14 +56,19 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
             return httpx.Response(200, json={"data": []})
         return httpx.Response(404, json={"error": {"message": "not found"}})
 
-    class Manager:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
+    return handler
 
-        async def create(self, **kwargs):
-            self.calls.append(kwargs)
-            return {"instanceName": kwargs["instance_name"], "integration": "WHATSAPP-BUSINESS", "status": "open"}
 
+class _Manager:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"instanceName": kwargs["instance_name"], "integration": "WHATSAPP-BUSINESS", "status": "open"}
+
+
+def _patch_settings(monkeypatch, tmp_path) -> SimpleNamespace:
     settings = SimpleNamespace(
         meta_app_id="app_123",
         meta_app_secret="app-secret",
@@ -83,10 +94,17 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         "app.domain.channel_store.get_settings",
     ):
         monkeypatch.setattr(target, lambda: settings)
+    return settings
+
+
+def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[str, str]] = []
+    subscription = {"configured": False}
+    settings = _patch_settings(monkeypatch, tmp_path)
 
     async def run() -> None:
-        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://graph.facebook.com/v23.0")
-        manager = Manager()
+        client = httpx.AsyncClient(transport=httpx.MockTransport(_graph_handler(calls, subscription)), base_url="https://graph.facebook.com/v23.0")
+        manager = _Manager()
         orchestrator = MetaOnboardingOrchestrator(
             platform=MetaPlatform(client=client, settings_factory=lambda: settings),
             evolution=MetaEvolutionProvisioner(manager),
@@ -98,6 +116,11 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
             business_account_id="waba_456",
             session_info={"event": "FINISH"},
         )
+        # The WABA loses its app subscription in Meta after the first
+        # onboarding (another app, coexistence re-onboarding, manual change).
+        # Reconnecting must repair it even though the stored record already
+        # marks the subscription step as completed.
+        subscription["configured"] = False
         second = await orchestrator.run(
             instance_name="standard_instance",
             code="new-oauth-code",
@@ -114,7 +137,18 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
             "oauth": True, "token": True, "discovery": True, "subscription": True,
             "phone": True, "webhook": True, "evolution": True, "credentials": True,
         }
-        assert calls.count(("POST", "/v23.0/waba_456/subscribed_apps")) == 1
+        # Every run reconfirms the subscription, so the reconnect restores it.
+        assert calls.count(("POST", "/v23.0/waba_456/subscribed_apps")) == 2
+        assert subscription["configured"] is True
+        # The reconnect subscribes with the token from its own OAuth code and
+        # points the WABA at this Gateway's webhook.
+        assert subscription["posts"][-1] == {
+            "authorization": "Bearer rotated-token",
+            "body": {"override_callback_uri": "https://gateway.example.test/webhooks/meta", "verify_token": "verify-token"},
+        }
+        stored_onboarding = (tmp_path / "onboarding.json").read_text(encoding="utf-8")
+        for secret in ("verify-token", "secret-token", "rotated-token"):
+            assert secret not in stored_onboarding
         assert calls.count(("POST", "/v23.0/phone_123/register")) == 1
         # Meta Cloud es independiente del motor Evolution: no se crea instancia.
         assert len(manager.calls) == 0
@@ -122,6 +156,86 @@ def test_standard_onboarding_registers_once_and_exposes_ready_state(monkeypatch,
         assert "secret-token" not in stored_credentials
         assert '"registrationPinCiphertext"' in stored_credentials
         assert '"pin"' not in stored_credentials
+
+    asyncio.run(run())
+
+
+def test_coexistence_reconnect_restores_lost_waba_subscription(monkeypatch, tmp_path) -> None:
+    """Production case: a READY coexistence connection whose WABA lost the app subscription."""
+    calls: list[tuple[str, str]] = []
+    subscription = {"configured": False}
+    settings = _patch_settings(monkeypatch, tmp_path)
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(_graph_handler(calls, subscription)), base_url="https://graph.facebook.com/v23.0")
+        orchestrator = MetaOnboardingOrchestrator(
+            platform=MetaPlatform(client=client, settings_factory=lambda: settings),
+            evolution=MetaEvolutionProvisioner(_Manager()),
+        )
+        first = await orchestrator.run(
+            instance_name="coexistence_instance",
+            code="oauth-code",
+            phone_number_id="phone_123",
+            business_account_id="waba_456",
+            session_info=_COEXISTENCE_SESSION,
+        )
+        assert first.record.public_dict()["status"] == "READY"
+        subscription["configured"] = False
+        second = await orchestrator.run(
+            instance_name="coexistence_instance",
+            code="new-oauth-code",
+            phone_number_id="phone_123",
+            business_account_id="waba_456",
+            session_info=_COEXISTENCE_SESSION,
+        )
+        await client.aclose()
+
+        assert second.record.public_dict()["status"] == "READY"
+        assert calls.count(("POST", "/v23.0/waba_456/subscribed_apps")) == 2
+        assert subscription["configured"] is True
+        # Coexistence numbers are already registered by the Business app.
+        assert calls.count(("POST", "/v23.0/phone_123/register")) == 0
+        assert orchestrator._credentials_store.get_official_access_token("coexistence_instance") == "rotated-token"
+
+    asyncio.run(run())
+
+
+def test_reconnect_fails_visibly_when_meta_rejects_the_subscription(monkeypatch, tmp_path) -> None:
+    """A reconnect must not report READY while the WABA stays unsubscribed."""
+    calls: list[tuple[str, str]] = []
+    subscription = {"configured": False}
+    settings = _patch_settings(monkeypatch, tmp_path)
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(_graph_handler(calls, subscription)), base_url="https://graph.facebook.com/v23.0")
+        orchestrator = MetaOnboardingOrchestrator(
+            platform=MetaPlatform(client=client, settings_factory=lambda: settings),
+            evolution=MetaEvolutionProvisioner(_Manager()),
+        )
+        await orchestrator.run(
+            instance_name="standard_instance",
+            code="oauth-code",
+            phone_number_id="phone_123",
+            business_account_id="waba_456",
+            session_info={"event": "FINISH"},
+        )
+        subscription["configured"] = False
+        subscription["reject_post"] = True
+        with pytest.raises(MetaOnboardingError) as error:
+            await orchestrator.run(
+                instance_name="standard_instance",
+                code="new-oauth-code",
+                phone_number_id="phone_123",
+                business_account_id="waba_456",
+                session_info={"event": "FINISH"},
+            )
+        await client.aclose()
+
+        assert error.value.code == "subscription_failed"
+        assert orchestrator.status("standard_instance")["status"] != "READY"
+        assert subscription["configured"] is False
+        # The failed reconnect stops before persisting the new token.
+        assert orchestrator._credentials_store.get_official_access_token("standard_instance") == "secret-token"
 
     asyncio.run(run())
 

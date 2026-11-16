@@ -121,14 +121,15 @@ class MetaOnboardingOrchestrator:
 
             self._verify_webhook_configuration(record)
 
-            # Reconfirm the override when recovering an interrupted run: an
-            # earlier subscription checkpoint alone does not prove the callback
-            # was successfully applied.
-            if not record.completed(MetaOnboardingState.APP_SUBSCRIBED) or not record.completed(MetaOnboardingState.WEBHOOK_VERIFIED):
-                subscription = await self._subscriptions.ensure_subscribed(discovery.waba_id, credentials.access_token)
-                self._store.advance(record, MetaOnboardingState.APP_SUBSCRIBED, details={"subscription": subscription})
-                logger.info("subscription_completed", instance=instance_name, already_subscribed=subscription.get("alreadySubscribed", False))
-                save_pipeline_event(stage="subscription", status="completed", instance=instance_name, event="SUBSCRIPTION_COMPLETED", component="Meta", details={"alreadySubscribed": subscription.get("alreadySubscribed", False)})
+            # Always reconfirm the WABA subscription and callback override on
+            # every run. A stored checkpoint only says it worked once: the
+            # subscription can be removed in Meta afterwards (another app,
+            # coexistence re-onboarding, manual change), and reconnecting is
+            # how an operator repairs it. ensure_subscribed is idempotent.
+            subscription = await self._subscriptions.ensure_subscribed(discovery.waba_id, credentials.access_token)
+            self._store.advance(record, MetaOnboardingState.APP_SUBSCRIBED, details={"subscription": subscription})
+            logger.info("subscription_completed", instance=instance_name, already_subscribed=subscription.get("alreadySubscribed", False))
+            save_pipeline_event(stage="subscription", status="completed", instance=instance_name, event="SUBSCRIPTION_COMPLETED", component="Meta", details={"alreadySubscribed": subscription.get("alreadySubscribed", False)})
 
             self._store.advance(
                 record,
