@@ -42,7 +42,7 @@ def history_item(record, runtime, value):
     return None  # newsletters, status broadcasts
 
 
-async def history_page(body, request, *, registry=None, adapter=None, instagram_page=None, cloud_store=None):
+async def history_page(body, request, *, registry=None, adapter=None, instagram_page=None, cloud_store=None, contact_store=None):
     registry = registry or get_connection_registry()
     method = getattr(request.state, "auth_method", None)
     if method not in {"gateway_api_key", "instance_api_key"}:
@@ -57,7 +57,7 @@ async def history_page(body, request, *, registry=None, adapter=None, instagram_
     if kind == ("meta", "instagram"):
         return await _instagram_page(body, record, instagram_page=instagram_page)
     if kind == ("meta", "whatsapp"):
-        return _cloud_page(body, record, runtime, store=cloud_store)
+        return _cloud_page(body, record, runtime, store=cloud_store, contact_store=contact_store)
     binding = record.get("core_channel") or {}
     if binding and binding.get("channelId") != body.coreChannelId:
         raise HTTPException(409, "Connection is bound to another Core channel")
@@ -106,12 +106,23 @@ async def _instagram_page(body, record, *, instagram_page=None):
         raise HTTPException(503, "Instagram history is unavailable") from None
 
 
-def _cloud_page(body, record, runtime, *, store=None):
-    """Coexistence history received from Meta, served like Evolution's stored messages."""
-    from app.services.cloud_coexistence import get_cloud_history_store
+def _cloud_page(body, record, runtime, *, store=None, contact_store=None):
+    """Coexistence history received from Meta, served like Evolution's stored messages.
+
+    The first page also carries the contacts saved in the business app (additive field).
+    """
+    from app.services.cloud_coexistence import get_cloud_contact_store, get_cloud_history_store
 
     records, total = (store or get_cloud_history_store()).page(runtime, body.page, body.pageSize)
     items = [item for item in (history_item(record, runtime, value) for value in records) if item]
     timestamps = [int(value.get("messageTimestamp") or 0) for value in records]
-    return {"page": body.page, "pages": -(-total // body.pageSize) if total else 0, "total": total,
+    page = {"page": body.page, "pages": -(-total // body.pageSize) if total else 0, "total": total,
             "records": len(records), "oldestTimestamp": min(timestamps) if timestamps else None, "items": items}
+    if body.page == 1:
+        try:
+            page["contacts"] = (contact_store or get_cloud_contact_store()).active(runtime)
+        except Exception:
+            # Contacts are a bonus: the history import must not fail because of them.
+            logger.warning("cloud_contacts_unavailable", runtime=runtime)
+            page["contacts"] = []
+    return page

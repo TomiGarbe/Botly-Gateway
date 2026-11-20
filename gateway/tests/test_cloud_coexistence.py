@@ -8,7 +8,8 @@ import pytest
 from app.models.canonical_v2 import HistoryPageRequest
 from app.services import history_export
 from app.services.cloud_coexistence import (
-    CloudHistoryStore, cloud_message_data, history_records, record_history_chunk, request_coexistence_sync,
+    CloudContactStore, CloudHistoryStore, cloud_message_data, contact_sync_records, history_records, record_contacts_sync,
+    record_history_chunk, request_coexistence_sync,
 )
 from app.services.connection_registry import ConnectionRegistry
 
@@ -82,8 +83,10 @@ def test_cloud_history_is_served_like_evolution_history(tmp_path, registry):
     record_history_chunk("cloud-runtime", chunk(), BUSINESS, store=store, registry=registry)
     request = SimpleNamespace(state=SimpleNamespace(auth_method="instance_api_key", auth_instance="cloud-runtime"))
     body = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=1, pageSize=50)
-    page = asyncio.run(history_export.history_page(body, request, registry=registry, cloud_store=store))
+    contacts = CloudContactStore("", path=tmp_path / "cloud_contacts.json")
+    page = asyncio.run(history_export.history_page(body, request, registry=registry, cloud_store=store, contact_store=contacts))
     assert (page["pages"], page["records"], page["oldestTimestamp"]) == (1, 2, 1790000000)
+    assert page["contacts"] == []
     assert [item["type"] for item in page["items"]] == ["direct", "direct"]
     assert [item["payload"]["direction"] for item in page["items"]] == ["outbound", "inbound"]
     assert page["items"][0]["payload"]["messageTimestamp"] == "1790000100"
@@ -106,3 +109,66 @@ def test_sync_request_asks_meta_for_contacts_and_history(registry, monkeypatch):
     assert result == {"smb_app_state_sync": {"requestId": "req-contacts"}, "history": {"error": "Sync window expired"}}
     state = registry.connection_record_by_id("cloud-conn")["coexistence"]
     assert state["history"] == "failed" and state["contacts"] == {"requestId": "req-contacts"}
+
+
+def state_sync(*entries):
+    return [{"type": "contact", "contact": {"full_name": name, "phone_number": phone}, "action": action,
+             "metadata": {"timestamp": str(ts)}} for phone, name, action, ts in entries]
+
+
+def test_contact_sync_keeps_the_latest_state_per_phone(tmp_path, registry):
+    store = CloudContactStore("", path=tmp_path / "cloud_contacts.json")
+    assert record_contacts_sync("cloud-runtime", state_sync(
+        ("+54 9 11 2222-3333", "Ana", "add", 10), ("5491144445555", "Beto", "add", 10)), store=store, registry=registry) == 2
+    record_contacts_sync("cloud-runtime", state_sync(("5491144445555", "Beto", "remove", 20)), store=store, registry=registry)
+    record_contacts_sync("cloud-runtime", state_sync(("5491122223333", "Ana vieja", "add", 5)), store=store, registry=registry)
+    assert store.active("cloud-runtime") == [{"phone": "5491122223333", "name": "Ana"}]
+    assert store.active("other-runtime") == []
+    assert registry.connection_record_by_id("cloud-conn")["coexistence"]["contactsReceived"] == 4
+
+
+def test_contact_sync_ignores_entries_that_are_not_valid_contacts():
+    assert contact_sync_records([
+        {"type": "contact", "contact": {"phone_number": "123"}},
+        {"type": "other", "contact": {"phone_number": "5491122223333"}},
+        "garbage",
+        {"type": "contact", "contact": {"phone_number": "5491122223333"}, "metadata": {"timestamp": "x"}},
+    ]) == [("5491122223333", None, False, 0)]
+
+
+def test_first_history_page_carries_the_business_app_contacts(tmp_path, registry):
+    store = CloudHistoryStore("", path=tmp_path / "cloud_history.json")
+    contacts = CloudContactStore("", path=tmp_path / "cloud_contacts.json")
+    record_contacts_sync("cloud-runtime", state_sync(("5491122223333", "Ana", "add", 1)), store=contacts, registry=registry)
+    request = SimpleNamespace(state=SimpleNamespace(auth_method="instance_api_key", auth_instance="cloud-runtime"))
+    first = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=1, pageSize=50)
+    second = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=2, pageSize=50)
+    page = asyncio.run(history_export.history_page(first, request, registry=registry, cloud_store=store, contact_store=contacts))
+    assert page["contacts"] == [{"phone": "5491122223333", "name": "Ana"}]
+    later = asyncio.run(history_export.history_page(second, request, registry=registry, cloud_store=store, contact_store=contacts))
+    assert "contacts" not in later
+
+
+@pytest.mark.skipif(not os.environ.get("GATEWAY_TEST_DATABASE_URL"), reason="GATEWAY_TEST_DATABASE_URL not set")
+def test_postgres_contact_store_keeps_the_latest_state():
+    import psycopg
+    url = os.environ["GATEWAY_TEST_DATABASE_URL"]
+    with psycopg.connect(url) as connection:
+        connection.execute("DROP TABLE IF EXISTS botly_gateway_cloud_contacts")
+    store = CloudContactStore(url)
+    store.apply("cloud-runtime", contact_sync_records(state_sync(("5491122223333", "Ana", "add", 10))))
+    store.apply("cloud-runtime", contact_sync_records(state_sync(("5491122223333", None, "add", 5))))
+    store.apply("cloud-runtime", contact_sync_records(state_sync(("5491144445555", "Beto", "remove", 10))))
+    assert store.active("cloud-runtime") == [{"phone": "5491122223333", "name": "Ana"}]
+
+
+def test_history_is_served_even_if_contacts_are_unavailable(tmp_path, registry):
+    class Broken:
+        def active(self, instance):
+            raise RuntimeError("db down")
+
+    store = CloudHistoryStore("", path=tmp_path / "cloud_history.json")
+    request = SimpleNamespace(state=SimpleNamespace(auth_method="instance_api_key", auth_instance="cloud-runtime"))
+    body = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=1, pageSize=50)
+    page = asyncio.run(history_export.history_page(body, request, registry=registry, cloud_store=store, contact_store=Broken()))
+    assert page["contacts"] == [] and page["total"] == 0

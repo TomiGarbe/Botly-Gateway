@@ -662,9 +662,11 @@ async def receive_meta_webhook(request: Request) -> dict[str, Any]:
                 business_number = "".join(ch for ch in str((value.get("metadata") or {}).get("display_phone_number") or "") if ch.isdigit())
                 received["history"] += record_history_chunk(instance, chunk, business_number)
             if change.get("field") == "smb_app_state_sync":
-                # Contact names only; the history import already carries the conversations.
+                # Contacts saved in the business app; Core imports them with the history.
+                from app.services.cloud_coexistence import record_contacts_sync
+                stored = record_contacts_sync(instance, value.get("state_sync"))
                 save_pipeline_event(stage="meta_contacts_sync", status="received", instance=instance,
-                                    details={"contacts": len(value.get("state_sync") or [])})
+                                    details={"contacts": len(value.get("state_sync") or []), "stored": stored})
             for item in value.get("statuses") or []:
                 if not isinstance(item, dict):
                     continue

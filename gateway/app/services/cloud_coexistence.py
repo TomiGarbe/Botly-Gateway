@@ -149,6 +149,116 @@ def record_history_chunk(instance: str, item: dict[str, Any], business_number: s
     return stored
 
 
+def contact_sync_records(state_sync: list[Any] | None) -> list[tuple[str, str | None, bool, int]]:
+    """``(phone, name, removed, timestamp)`` per ``smb_app_state_sync`` contact entry of the business app."""
+    rows = []
+    for entry in state_sync or []:
+        if not isinstance(entry, dict) or entry.get("type") != "contact" or not isinstance(entry.get("contact"), dict):
+            continue
+        contact = entry["contact"]
+        phone = "".join(ch for ch in str(contact.get("phone_number") or "") if ch.isdigit())
+        if not 8 <= len(phone) <= 15:
+            continue
+        name = str(contact.get("full_name") or contact.get("first_name") or "").strip()[:255] or None
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        try:
+            timestamp = int(metadata.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            timestamp = 0
+        rows.append((phone, name, entry.get("action") == "remove", timestamp))
+    return rows
+
+
+class CloudContactStore:
+    """Contacts saved in the WhatsApp Business app, latest state per phone and runtime instance."""
+
+    def __init__(self, database_url: str | None = None, *, path: str | Path | None = None) -> None:
+        settings = get_settings()
+        url = database_url if database_url is not None else str(getattr(settings, "gateway_users_database_url", "") or "")
+        self._url = url if url.startswith("postgresql") else ""
+        self._path = Path(path) if path is not None else Path(settings.core_inbound_deliveries_path).with_name("cloud_contacts.json")
+        self._lock = threading.Lock()
+        self._ready = False
+
+    def _connect(self):
+        import psycopg
+
+        connection = psycopg.connect(self._url)
+        if not self._ready:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS botly_gateway_cloud_contacts (instance TEXT NOT NULL, phone TEXT NOT NULL, "
+                "name TEXT, removed BOOLEAN NOT NULL DEFAULT FALSE, ts BIGINT NOT NULL DEFAULT 0, PRIMARY KEY (instance, phone))"
+            )
+            connection.commit()
+            self._ready = True
+        return connection
+
+    def _read(self) -> dict[str, dict[str, dict[str, Any]]]:
+        try:
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+
+    def apply(self, instance: str, rows: list[tuple[str, str | None, bool, int]]) -> int:
+        """Upsert each contact; an older event never overwrites a newer one."""
+        if not rows:
+            return 0
+        if self._url:
+            with self._connect() as connection:
+                connection.cursor().executemany(
+                    "INSERT INTO botly_gateway_cloud_contacts (instance, phone, name, removed, ts) VALUES (%s,%s,%s,%s,%s) "
+                    "ON CONFLICT (instance, phone) DO UPDATE SET name=COALESCE(EXCLUDED.name, botly_gateway_cloud_contacts.name), "
+                    "removed=EXCLUDED.removed, ts=EXCLUDED.ts WHERE EXCLUDED.ts >= botly_gateway_cloud_contacts.ts",
+                    [(instance, phone, name, removed, ts) for phone, name, removed, ts in rows],
+                )
+            return len(rows)
+        with self._lock:
+            data = self._read()
+            bucket = data.setdefault(instance, {})
+            for phone, name, removed, ts in rows:
+                current = bucket.get(phone)
+                if current and int(current.get("ts") or 0) > ts:
+                    continue
+                bucket[phone] = {"name": name or (current or {}).get("name"), "removed": removed, "ts": ts}
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(data), encoding="utf-8")
+        return len(rows)
+
+    def active(self, instance: str) -> list[dict[str, Any]]:
+        if self._url:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT phone, name FROM botly_gateway_cloud_contacts WHERE instance=%s AND NOT removed ORDER BY phone",
+                    (instance,),
+                ).fetchall()
+            return [{"phone": phone, "name": name} for phone, name in rows]
+        with self._lock:
+            bucket = self._read().get(instance, {})
+        return [{"phone": phone, "name": value.get("name")} for phone, value in sorted(bucket.items()) if not value.get("removed")]
+
+
+_contact_store: CloudContactStore | None = None
+
+
+def get_cloud_contact_store() -> CloudContactStore:
+    global _contact_store
+    if _contact_store is None:
+        _contact_store = CloudContactStore()
+    return _contact_store
+
+
+def record_contacts_sync(instance: str, state_sync: list[Any] | None, *, store=None, registry=None) -> int:
+    stored = (store or get_cloud_contact_store()).apply(instance, contact_sync_records(state_sync))
+    registry = registry or get_connection_registry()
+    record = registry.connection_record(instance)
+    if record and stored:
+        state = dict(record.get("coexistence") or {})
+        state.update(contactsReceived=int(state.get("contactsReceived") or 0) + stored,
+                     updatedAt=datetime.now(timezone.utc).isoformat())
+        registry.update_connection_record(record["id"], {"coexistence": state})
+    return stored
+
+
 async def request_coexistence_sync(instance: str, *, client_factory=httpx.AsyncClient, registry=None) -> dict[str, Any]:
     """Ask Meta for contacts and history. Each type works once, within 24h of onboarding."""
     credentials = get_credential_manager()
