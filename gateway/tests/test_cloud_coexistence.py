@@ -172,3 +172,15 @@ def test_history_is_served_even_if_contacts_are_unavailable(tmp_path, registry):
     body = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=1, pageSize=50)
     page = asyncio.run(history_export.history_page(body, request, registry=registry, cloud_store=store, contact_store=Broken()))
     assert page["contacts"] == [] and page["total"] == 0
+
+
+def test_cloud_history_refuses_a_connection_bound_to_another_core_channel(tmp_path, registry):
+    record = registry.connection_record_by_id("cloud-conn")
+    registry.save_connection_record("cloud-runtime", {**record, "core_channel": {"channelId": "core-other"}})
+    request = SimpleNamespace(state=SimpleNamespace(auth_method="instance_api_key", auth_instance="cloud-runtime"))
+    body = HistoryPageRequest(coreChannelId="core-1", connectionRef="cloud-conn", page=1, pageSize=50)
+    with pytest.raises(history_export.HTTPException) as error:
+        asyncio.run(history_export.history_page(body, request, registry=registry,
+                                                cloud_store=CloudHistoryStore("", path=tmp_path / "h.json"),
+                                                contact_store=CloudContactStore("", path=tmp_path / "c.json")))
+    assert error.value.status_code == 409

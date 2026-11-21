@@ -56,11 +56,11 @@ async def history_page(body, request, *, registry=None, adapter=None, instagram_
         raise HTTPException(403, "Connection credential mismatch")
     if kind == ("meta", "instagram"):
         return await _instagram_page(body, record, instagram_page=instagram_page)
-    if kind == ("meta", "whatsapp"):
-        return _cloud_page(body, record, runtime, store=cloud_store, contact_store=contact_store)
     binding = record.get("core_channel") or {}
     if binding and binding.get("channelId") != body.coreChannelId:
         raise HTTPException(409, "Connection is bound to another Core channel")
+    if kind == ("meta", "whatsapp"):
+        return _cloud_page(body, record, runtime, store=cloud_store, contact_store=contact_store)
     adapter = adapter or get_evolution_adapter()
     try:
         result = await adapter.find_messages(runtime, page=body.page, page_size=body.pageSize)
