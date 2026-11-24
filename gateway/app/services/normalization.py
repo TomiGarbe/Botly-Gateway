@@ -493,10 +493,14 @@ def _extract_contacts(message: dict[str, Any]) -> list[dict[str, Any]]:
         if vcard:
             for raw_line in vcard.splitlines():
                 line = raw_line.strip()
-                up = line.upper()
-                if phone is None and "TEL" in up and ":" in line:
+                if ":" not in line:
+                    continue
+                # Field name only ("item1.TEL;waid=..."): a value that merely
+                # mentions TEL must not be read as the phone.
+                field = line.split(":", 1)[0].split(";", 1)[0].upper().rsplit(".", 1)[-1]
+                if phone is None and field == "TEL":
                     phone = line.split(":", 1)[1].strip() or None
-                if org is None and up.startswith("ORG:"):
+                if org is None and field == "ORG":
                     org = line.split(":", 1)[1].strip() or None
         parsed.append(
             {

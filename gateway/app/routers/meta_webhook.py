@@ -172,6 +172,26 @@ def _phone_number_id(value: dict[str, Any]) -> str:
     return str(metadata.get("phone_number_id") or "").strip()
 
 
+def _vcard_value(value: Any) -> str:
+    # One vCard line per field: a value must not be able to start a new one.
+    return " ".join(str(value or "").split()).replace(";", ",")
+
+
+def _cloud_contact_card(card: dict[str, Any]) -> dict[str, Any]:
+    name = card.get("name") if isinstance(card.get("name"), dict) else {}
+    display = _vcard_value(name.get("formatted_name") or " ".join(str(name.get(part) or "") for part in ("first_name", "last_name")))
+    org = card.get("org") if isinstance(card.get("org"), dict) else {}
+    lines = ["BEGIN:VCARD", "VERSION:3.0", f"FN:{display}"]
+    if org.get("company"):
+        lines.append(f"ORG:{_vcard_value(org.get('company'))}")
+    for phone in card.get("phones") or []:
+        if isinstance(phone, dict) and phone.get("phone"):
+            wa_id = "".join(ch for ch in str(phone.get("wa_id") or "") if ch.isdigit())
+            lines.append(f"TEL{';waid=' + wa_id if wa_id else ''}:{_vcard_value(phone.get('phone'))}")
+    lines.append("END:VCARD")
+    return {"displayName": display or None, "vcard": "\n".join(lines)}
+
+
 def _message_data(message: dict[str, Any], contacts: list[dict[str, Any]]) -> dict[str, Any]:
     sender = str(message.get("from") or "").strip()
     message_type = str(message.get("type") or "unknown").strip()
@@ -187,6 +207,16 @@ def _message_data(message: dict[str, Any], contacts: list[dict[str, Any]]) -> di
         reply = content.get("button_reply") or content.get("list_reply") or {}
         message_object = {"interactiveResponseMessage": {"body": {"text": str(reply.get("title") or reply.get("id") or "")}, "nativeFlowResponseMessage": {"paramsJson": json.dumps(reply)}}}
         normalized_type = "interactiveResponseMessage"
+    elif message_type == "contacts":
+        # Cloud sends a list of structured cards; Evolution sends vCards.
+        cards = [item for item in message.get("contacts") or [] if isinstance(item, dict)]
+        message_object = {"contactsArrayMessage": {"contacts": [_cloud_contact_card(card) for card in cards]}}
+        normalized_type = "contactsArrayMessage"
+    elif message_type == "reaction":
+        # Cloud: {"message_id", "emoji"}; an absent emoji removes the reaction.
+        target_id = str(content.get("message_id") or "").strip()
+        message_object = {"reactionMessage": {"key": {"id": target_id or None, "remoteJid": key["remoteJid"]}, "text": str(content.get("emoji") or "")}}
+        normalized_type = "reactionMessage"
     else:
         key_name = {"image": "imageMessage", "audio": "audioMessage", "video": "videoMessage", "document": "documentMessage", "sticker": "stickerMessage", "location": "locationMessage", "contacts": "contactsArrayMessage", "reaction": "reactionMessage"}.get(message_type, message_type)
         message_object = {key_name: content}

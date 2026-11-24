@@ -232,3 +232,52 @@ def test_meta_webhook_forwards_app_echoes_and_stores_coexistence_history(monkeyp
     event = processed.await_args.kwargs["event"]
     assert event["data"]["key"] == {"id": "wamid.echo", "remoteJid": "5491122223333@s.whatsapp.net", "fromMe": True}
     assert chunks == [("cloud_test", "5491100000000")]
+
+
+def _cloud_normalized(message: dict) -> dict:
+    from app.services.normalization import normalize_webhook
+
+    data = meta_webhook._message_data({"from": "5493511111111", "timestamp": "1", **message}, [])
+    return normalize_webhook({"event": "MESSAGES_UPSERT", "instance": "cloud_test", "data": data})
+
+
+def test_cloud_contact_cards_keep_name_phone_and_company() -> None:
+    normalized = _cloud_normalized({"id": "wamid.C", "type": "contacts", "contacts": [
+        {"name": {"formatted_name": "Ana Perez"}, "phones": [{"phone": "+54 9 351 222 3333", "wa_id": "5493512223333"}], "org": {"company": "Acme"}},
+        {"name": {"first_name": "Luis", "last_name": "Gomez"}, "phones": [{"phone": "+54 11 4444 5555"}]},
+    ]})
+
+    assert normalized["subtype"] == "contact"
+    cards = [{k: card[k] for k in ("name", "phone", "organization")} for card in normalized["content"]["contacts"]]
+    assert cards == [
+        {"name": "Ana Perez", "phone": "+54 9 351 222 3333", "organization": "Acme"},
+        {"name": "Luis Gomez", "phone": "+54 11 4444 5555", "organization": None},
+    ]
+
+
+def test_cloud_contact_values_cannot_inject_vcard_lines() -> None:
+    normalized = _cloud_normalized({"id": "wamid.C", "type": "contacts", "contacts": [
+        {"name": {"formatted_name": "Ana\nTEL:+1 999"}, "phones": [{"phone": "+54 9 351\r\nORG:Evil"}]},
+    ]})
+
+    card = normalized["content"]["contacts"][0]
+    assert card["phone"] == "+54 9 351 ORG:Evil" and card["organization"] is None
+    fields = [line.split(":", 1)[0] for line in card["vcard"].splitlines()]
+    assert fields == ["BEGIN", "VERSION", "FN", "TEL", "END"]
+    assert card["name"] == "Ana TEL:+1 999"
+
+
+def test_cloud_reaction_keeps_emoji_and_target_message() -> None:
+    normalized = _cloud_normalized({"id": "wamid.R", "type": "reaction", "reaction": {"message_id": "wamid.TARGET", "emoji": "\u2764\ufe0f"}})
+
+    assert normalized["subtype"] == "reaction"
+    assert normalized["content"] == {"emoji": "\u2764\ufe0f"}
+    assert normalized["context"]["targetMessage"]["messageId"] == "wamid.TARGET"
+    assert normalized["metadata"]["removeReaction"] is False
+
+
+def test_cloud_reaction_without_emoji_removes_it() -> None:
+    normalized = _cloud_normalized({"id": "wamid.R2", "type": "reaction", "reaction": {"message_id": "wamid.TARGET"}})
+
+    assert normalized["content"] == {"emoji": None}
+    assert normalized["metadata"]["removeReaction"] is True
