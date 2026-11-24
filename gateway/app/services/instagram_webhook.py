@@ -111,7 +111,8 @@ def _canonical_event(
             recipient=recipient,
             provider_message_id=_opaque_id(reaction.get("mid") or reaction.get("message_id")),
             kind="reaction",
-            content=_optional_text(reaction.get("emoji") or reaction.get("reaction")),
+            # "unreact" removes it: no emoji, so Core clears the reaction.
+            content=None if str(reaction.get("action") or "").lower() == "unreact" else _optional_text(reaction.get("emoji")),
             attachments=[],
             source_timestamp=messaging.get("timestamp"),
             request_id=request_id,

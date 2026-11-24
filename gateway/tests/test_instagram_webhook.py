@@ -153,6 +153,23 @@ def test_instagram_canonical_attachment_reaction_echo_and_unsupported(monkeypatc
     assert unsupported == ()
 
 
+def test_instagram_unreact_clears_the_reaction(monkeypatch, tmp_path) -> None:
+    service, _ = _bound_service(monkeypatch, tmp_path)
+    unreact = process_instagram_webhook(
+        _payload({"sender": {"id": "user"}, "recipient": {"id": "178400012345678"}, "reaction": {"mid": "mid-media", "action": "unreact", "reaction": "love", "emoji": "❤️"}}),
+        request_id="request", connections=service,
+    )[0]
+    named_only = process_instagram_webhook(
+        _payload({"sender": {"id": "user"}, "recipient": {"id": "178400012345678"}, "reaction": {"mid": "mid-media", "action": "react", "reaction": "love"}}),
+        request_id="request", connections=service,
+    )[0]
+
+    assert unreact["message"]["kind"] == "reaction" and not unreact["message"].get("content")
+    assert unreact["metadata"]["targetProviderMessageId"] == "mid-media"
+    # The reaction name ("love") is not an emoji and must not show as one.
+    assert not named_only["message"].get("content")
+
+
 def test_instagram_resolution_rejects_unknown_or_disconnected_connection(monkeypatch, tmp_path) -> None:
     service, connection = _bound_service(monkeypatch, tmp_path)
     unknown = _payload({"sender": {"id": "user"}, "message": {"mid": "m", "text": "hello"}})
