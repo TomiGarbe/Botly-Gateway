@@ -16,6 +16,9 @@ import { environment } from '@/app/config/environment'
 import { Field, Input } from '@/shared/components/FormControls'
 import { loadFacebookSdk, loginWithFacebook, qrSource, waitForSession } from '../lib/metaEmbeddedSignup'
 
+const EVOLUTION_QR_REFRESH_MS = 20000
+const EVOLUTION_STATUS_POLL_MS = 3000
+
 type ProviderId = 'meta' | 'evolution'
 type ProvisioningStep = 'connecting' | 'authorizing' | 'creating' | 'webhook' | 'testing' | 'ready'
 
@@ -148,12 +151,42 @@ export function NewConnectionPage() {
     return () => { active = false }
   }, [setup?.id, setup?.provider, setup?.state])
 
-  async function loadQr(setupId: string) {
-    const payload = await getConnectionSetupQr(setupId)
+  const finishEvolutionLink = useCallback((connectionId: string) => {
+    isIntentionalNavigation.current = true
+    sessionStorage.removeItem(storageKey)
+    setStep('ready')
+    window.setTimeout(() => navigate(`/connections/${connectionId}`, { replace: true }), 750)
+  }, [navigate, storageKey])
+
+  const loadQr = useCallback(async (target: ConnectionSetup) => {
+    const payload = await getConnectionSetupQr(target.id)
+    if (payload.connected && target.connectionId) { finishEvolutionLink(target.connectionId); return }
     const nextQr = qrSource(payload)
     if (!nextQr) throw new Error('Evolution no devolvió un código QR. Actualizalo e intentá nuevamente.')
     setQr(nextQr)
-  }
+    setError(null)
+  }, [finishEvolutionLink])
+
+  const isEvolutionQrActive = setup?.provider === 'evolution' && Boolean(setup.connectionId) && !['cancelled', 'expired', 'cleanup_pending'].includes(setup.state) && step !== 'ready'
+
+  // WhatsApp invalida el QR a los ~20s: lo renovamos solos para que nunca se escanee uno vencido.
+  useEffect(() => {
+    if (!isEvolutionQrActive || !setup) return undefined
+    const refresh = () => { void loadQr(setup).catch((reason) => setError(friendlyError(reason))) }
+    refresh()
+    const interval = window.setInterval(refresh, EVOLUTION_QR_REFRESH_MS)
+    return () => window.clearInterval(interval)
+  }, [isEvolutionQrActive, loadQr, setup])
+
+  // Cuando el teléfono confirma la vinculación, pasamos a la conexión sin que el usuario tenga que adivinarlo.
+  useEffect(() => {
+    const connectionId = setup?.connectionId
+    if (!isEvolutionQrActive || !connectionId) return undefined
+    const interval = window.setInterval(() => {
+      void getConnectionStatusSummary(connectionId).then((status) => { if (status.connected) finishEvolutionLink(connectionId) }).catch(() => undefined)
+    }, EVOLUTION_STATUS_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [finishEvolutionLink, isEvolutionQrActive, setup?.connectionId])
 
   async function selectProvider(provider: ProviderId) {
     if (!clientId) return
@@ -168,7 +201,6 @@ export function NewConnectionPage() {
       const created = await createConnectionSetup({ clientId, channel, name, provider })
       setSetup(created)
       sessionStorage.setItem(storageKey, created.id)
-      if (provider === 'evolution') await loadQr(created.id)
     } catch (reason) {
       setError(friendlyError(reason))
     } finally {
@@ -282,7 +314,7 @@ export function NewConnectionPage() {
     </> : setup.provider === 'evolution' ? <div className="connection-provisioning evolution-qr-panel">
       <h3>Escaneá el código QR</h3><p>Abrí WhatsApp en el teléfono y vinculá un dispositivo para terminar la conexión.</p>
       {qr ? <img src={qr} alt="Código QR para conectar WhatsApp con Evolution" /> : <LoaderCircle size={28} className="animate-spin" aria-label="Cargando código QR" />}
-      <div className="evolution-qr-actions"><button type="button" className="client-button-secondary" onClick={() => void loadQr(setup.id).catch((reason) => setError(friendlyError(reason)))} disabled={isStarting}>Actualizar código QR</button><button type="button" className="client-button-primary" onClick={() => setup.connectionId && navigate(`/connections/${setup.connectionId}`)} disabled={!setup.connectionId}>Abrir conexión</button></div>
+      <div className="evolution-qr-actions"><button type="button" className="client-button-secondary" onClick={() => void loadQr(setup).catch((reason) => setError(friendlyError(reason)))} disabled={isStarting}>Actualizar código QR</button><button type="button" className="client-button-primary" onClick={() => setup.connectionId && navigate(`/connections/${setup.connectionId}`)} disabled={!setup.connectionId}>Abrir conexión</button></div>
       {setup.state !== 'ready' ? <button type="button" className="client-button-danger" onClick={() => setIsCancelDialogOpen(true)} disabled={isStarting || isCompletingSignup}>Cancelar configuración</button> : null}
       {error ? <div className="provisioning-error" role="alert"><p>{error}</p></div> : null}
     </div> : <div className="connection-provisioning">

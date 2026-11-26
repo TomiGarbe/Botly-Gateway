@@ -27,8 +27,8 @@ export async function createConnectionSetup(input: { clientId: string; channel: 
   return toSetup(item)
 }
 
-export async function getConnectionSetupQr(setupId: string): Promise<{ qrcode?: { base64?: string; code?: string } }> {
-  return gatewayRequest<{ qrcode?: { base64?: string; code?: string } }>(`/connection-setups/${encodeURIComponent(setupId)}/qr`)
+export async function getConnectionSetupQr(setupId: string): Promise<{ connected?: boolean; base64?: string; qrcode?: { base64?: string; code?: string } }> {
+  return gatewayRequest<{ connected?: boolean; base64?: string; qrcode?: { base64?: string; code?: string } }>(`/connection-setups/${encodeURIComponent(setupId)}/qr`)
 }
 
 export async function getConnectionSetup(setupId: string): Promise<ConnectionSetup> {
